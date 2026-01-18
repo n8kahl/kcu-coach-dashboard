@@ -48,16 +48,19 @@ export async function GET(request: NextRequest) {
         .insert({
           id: userId,
           discord_id: discordUser.id,
-          username: discordUser.username,  // Required field
+          username: discordUser.username,  // Required NOT NULL field
           discord_username: discordUser.username,
+          email: discordUser.email || null,
           avatar_url: discordUser.avatar
             ? `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`
             : null,
           experience_level: 'beginner',
+          subscription_tier: 'free',
           is_admin: false,
           streak_days: 0,
           total_quizzes: 0,
-          current_module: 1,
+          total_questions: 0,
+          current_module: 'fundamentals',  // TEXT field, not number
         })
         .select()
         .single();
