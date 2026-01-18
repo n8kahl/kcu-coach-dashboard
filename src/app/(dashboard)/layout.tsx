@@ -5,6 +5,7 @@ import { MarketStatusBar } from '@/components/layout/header';
 import { AICoach } from '@/components/chat/ai-coach';
 import { PageTransition } from '@/components/layout/page-transition';
 import { CommandPalette } from '@/components/navigation/command-palette';
+import { ToastProvider } from '@/components/ui/toast';
 
 // Mock market data (would be fetched from API in production)
 const mockMarketData = {
@@ -30,31 +31,33 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)] bg-hex-pattern">
-      {/* Sidebar - Desktop */}
-      <div className="hidden lg:block">
-        <Sidebar user={user} />
+    <ToastProvider>
+      <div className="min-h-screen bg-[var(--bg-primary)] bg-hex-pattern">
+        {/* Sidebar - Desktop */}
+        <div className="hidden lg:block">
+          <Sidebar user={user} />
+        </div>
+
+        {/* Mobile Sidebar */}
+        <MobileSidebar user={user} />
+
+        {/* Main Content */}
+        <div className="lg:ml-64">
+          {/* Market Status Bar */}
+          <MarketStatusBar {...mockMarketData} />
+
+          {/* Page Content with Premium Transitions */}
+          <PageTransition className="p-6">
+            {children}
+          </PageTransition>
+        </div>
+
+        {/* AI Coach Floating Chat */}
+        <AICoach />
+
+        {/* Command Palette - Press Cmd+K to open */}
+        <CommandPalette />
       </div>
-
-      {/* Mobile Sidebar */}
-      <MobileSidebar user={user} />
-
-      {/* Main Content */}
-      <div className="lg:ml-64">
-        {/* Market Status Bar */}
-        <MarketStatusBar {...mockMarketData} />
-
-        {/* Page Content with Premium Transitions */}
-        <PageTransition className="p-6">
-          {children}
-        </PageTransition>
-      </div>
-
-      {/* AI Coach Floating Chat */}
-      <AICoach />
-
-      {/* Command Palette - Press Cmd+K to open */}
-      <CommandPalette />
-    </div>
+    </ToastProvider>
   );
 }

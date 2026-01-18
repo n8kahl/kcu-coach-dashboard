@@ -9,6 +9,7 @@ import { StatsOverview } from '@/components/dashboard/stats-overview';
 import { TradeJournalTable } from '@/components/dashboard/trade-journal-table';
 import { TradeWinCard } from '@/components/cards/win-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { useToast } from '@/components/ui/toast';
 import { Plus, Download, Loader2 } from 'lucide-react';
 import type { TradeEntry, TradeStats } from '@/types';
 
@@ -30,6 +31,7 @@ const emptyStats: TradeStats = {
 };
 
 export default function JournalPage() {
+  const { showToast } = useToast();
   const [selectedTrade, setSelectedTrade] = useState<TradeEntry | null>(null);
   const [showWinCard, setShowWinCard] = useState(false);
   const [showTradeForm, setShowTradeForm] = useState(false);
@@ -230,9 +232,18 @@ export default function JournalPage() {
                 const { trade: newTrade } = await res.json();
                 setTrades(prev => [newTrade, ...prev]);
                 setShowTradeForm(false);
+                showToast({
+                  type: 'success',
+                  title: 'Trade Logged',
+                  message: `${trade.symbol} trade has been saved`,
+                });
               } catch (err) {
                 console.error('Error saving trade:', err);
-                alert('Failed to save trade. Please try again.');
+                showToast({
+                  type: 'error',
+                  title: 'Save Failed',
+                  message: 'Failed to save trade. Please try again.',
+                });
               }
             }}
           />

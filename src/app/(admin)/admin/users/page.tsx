@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Avatar } from '@/components/ui/avatar';
 import { Stat, StatGrid } from '@/components/ui/stat';
+import { useToast } from '@/components/ui/toast';
 import {
   Table,
   TableHeader,
@@ -90,6 +91,7 @@ const mockUsers = [
 ];
 
 export default function UsersPage() {
+  const { showToast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>(mockUsers);
@@ -149,14 +151,27 @@ export default function UsersPage() {
         setUsers(prev => prev.map(u =>
           u.id === user.id ? { ...u, is_admin: newAdminStatus } : u
         ));
+        showToast({
+          type: 'success',
+          title: 'Permissions Updated',
+          message: `${newAdminStatus ? 'Granted' : 'Revoked'} admin privileges for ${user.username}`,
+        });
       } else {
-        alert('Failed to update user permissions');
+        showToast({
+          type: 'error',
+          title: 'Update Failed',
+          message: 'Failed to update user permissions',
+        });
       }
     } catch (error) {
       console.error('Error updating user:', error);
-      alert('Failed to update user permissions');
+      showToast({
+        type: 'error',
+        title: 'Update Failed',
+        message: 'Failed to update user permissions',
+      });
     }
-  }, []);
+  }, [showToast]);
 
   // Delete user
   const handleDeleteUser = useCallback(async (user: User) => {
@@ -171,14 +186,27 @@ export default function UsersPage() {
 
       if (res.ok) {
         setUsers(prev => prev.filter(u => u.id !== user.id));
+        showToast({
+          type: 'success',
+          title: 'User Deleted',
+          message: `${user.username} has been removed`,
+        });
       } else {
-        alert('Failed to delete user');
+        showToast({
+          type: 'error',
+          title: 'Delete Failed',
+          message: 'Failed to delete user',
+        });
       }
     } catch (error) {
       console.error('Error deleting user:', error);
-      alert('Failed to delete user');
+      showToast({
+        type: 'error',
+        title: 'Delete Failed',
+        message: 'Failed to delete user',
+      });
     }
-  }, []);
+  }, [showToast]);
 
   return (
     <>

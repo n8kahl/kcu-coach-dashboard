@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { useCompanionStream, type CompanionEvent } from '@/hooks/useCompanionStream';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { CompanionSessionReport } from '@/components/companion/session-report';
 import {
   Plus,
@@ -936,6 +937,7 @@ function CompanionMessageCard({ message }: { message: CompanionMessage }) {
 // SETUP CARD
 // ============================================================================
 function SetupCard({ setup, variant, onPractice }: { setup: DetectedSetup; variant: 'ready' | 'forming'; onPractice?: () => void }) {
+  const { showToast } = useToast();
   const isReady = variant === 'ready';
   const isBullish = setup.direction === 'bullish';
 
@@ -1033,9 +1035,13 @@ function SetupCard({ setup, variant, onPractice }: { setup: DetectedSetup; varia
             if ('Notification' in window && Notification.permission === 'default') {
               Notification.requestPermission();
             }
-            alert(`Alert set for ${setup.symbol}.\n\nYou'll be notified when ${
-              isReady ? `price breaks $${setup.suggested_entry?.toFixed(2)}` : 'setup becomes ready'
-            }`);
+            showToast({
+              type: 'success',
+              title: `Alert Set: ${setup.symbol}`,
+              message: isReady
+                ? `You'll be notified when price breaks $${setup.suggested_entry?.toFixed(2)}`
+                : `You'll be notified when setup becomes ready`,
+            });
           }}
           className={cn(
             'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium transition-colors',
