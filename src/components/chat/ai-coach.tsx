@@ -6,6 +6,8 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Avatar } from '@/components/ui/avatar';
+import { RichContentRenderer } from './rich-content';
+import type { RichContent } from '@/types';
 import {
   Bot,
   Send,
@@ -20,6 +22,7 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  richContent?: RichContent[];
 }
 
 const SUGGESTED_PROMPTS = [
@@ -87,6 +90,7 @@ export function AICoach() {
         role: 'assistant',
         content: data.message,
         timestamp: new Date(),
+        richContent: data.richContent,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -216,13 +220,24 @@ export function AICoach() {
                         )}
                         <div
                           className={cn(
-                            'max-w-[80%] p-3 text-sm',
-                            message.role === 'user'
-                              ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]'
-                              : 'bg-[var(--bg-secondary)] text-[var(--text-primary)] border border-[var(--border-primary)]'
+                            'max-w-[85%]',
+                            message.role === 'user' ? '' : ''
                           )}
                         >
-                          <p className="whitespace-pre-wrap">{message.content}</p>
+                          <div
+                            className={cn(
+                              'p-3 text-sm',
+                              message.role === 'user'
+                                ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]'
+                                : 'bg-[var(--bg-secondary)] text-[var(--text-primary)] border border-[var(--border-primary)]'
+                            )}
+                          >
+                            <p className="whitespace-pre-wrap">{message.content}</p>
+                          </div>
+                          {/* Rich Content (only for assistant messages) */}
+                          {message.role === 'assistant' && message.richContent && message.richContent.length > 0 && (
+                            <RichContentRenderer content={message.richContent} className="mt-2" />
+                          )}
                         </div>
                       </motion.div>
                     ))}

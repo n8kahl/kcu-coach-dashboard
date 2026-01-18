@@ -363,11 +363,68 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  richContent?: RichContent[];
   context?: {
     symbol?: string;
     setup?: DetectedSetup;
     trade?: TradeEntry;
   };
+}
+
+// Rich Content Types for AI Chat
+export type RichContent =
+  | LessonLinkContent
+  | ChartWidgetContent
+  | SetupVisualizationContent
+  | QuizPromptContent;
+
+export interface LessonLinkContent {
+  type: 'lesson_link';
+  moduleId: string;
+  lessonId: string;
+  title: string;
+  duration: string;
+  description?: string;
+  moduleTitle?: string;
+}
+
+export interface ChartWidgetContent {
+  type: 'chart';
+  symbol: string;
+  interval: '1' | '5' | '15' | '60' | 'D';
+  indicators?: string[];
+  annotations?: ChartAnnotation[];
+}
+
+export interface ChartAnnotation {
+  type: 'horizontal_line' | 'arrow' | 'zone';
+  price?: number;
+  label: string;
+  color: string;
+}
+
+export interface SetupVisualizationContent {
+  type: 'setup';
+  symbol: string;
+  direction: 'long' | 'short';
+  entry: number;
+  stop: number;
+  target: number;
+  ltpScore: {
+    level: number;
+    trend: number;
+    patience: number;
+    total: number;
+    grade: string;
+  };
+}
+
+export interface QuizPromptContent {
+  type: 'quiz';
+  quizId: string;
+  moduleId: string;
+  title: string;
+  description: string;
 }
 
 export interface CoachingSession {
