@@ -1,6 +1,8 @@
 -- ============================================
 -- KCU Coach - Learning System Database Schema
 -- ============================================
+-- Run this after the base schema is created
+-- This migration creates tables for the learning management system
 
 -- Enable UUID extension if not already enabled
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -47,10 +49,11 @@ CREATE TABLE IF NOT EXISTS lessons (
 
 -- ============================================
 -- User Lesson Progress Table
+-- Uses auth.users for user reference (Supabase Auth)
 -- ============================================
 CREATE TABLE IF NOT EXISTS user_lesson_progress (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL, -- References auth.users(id)
     lesson_id UUID REFERENCES lessons(id) ON DELETE CASCADE,
     completed BOOLEAN DEFAULT false,
     watch_time INTEGER DEFAULT 0, -- seconds watched
@@ -84,7 +87,7 @@ CREATE TABLE IF NOT EXISTS quizzes (
 -- ============================================
 CREATE TABLE IF NOT EXISTS quiz_attempts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL, -- References auth.users(id)
     quiz_id UUID REFERENCES quizzes(id) ON DELETE CASCADE,
     score INTEGER NOT NULL, -- number correct
     total_questions INTEGER NOT NULL,
@@ -104,7 +107,8 @@ CREATE TABLE IF NOT EXISTS knowledge_chunks (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     lesson_id UUID REFERENCES lessons(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
-    embedding vector(1536), -- OpenAI embeddings dimension
+    -- Note: For vector embeddings, you may need to enable pgvector extension
+    -- embedding vector(1536), -- OpenAI embeddings dimension
     metadata JSONB DEFAULT '{}'::jsonb,
     chunk_index INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -115,7 +119,7 @@ CREATE TABLE IF NOT EXISTS knowledge_chunks (
 -- ============================================
 CREATE TABLE IF NOT EXISTS user_module_progress (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL, -- References auth.users(id)
     module_id UUID REFERENCES learning_modules(id) ON DELETE CASCADE,
     lessons_completed INTEGER DEFAULT 0,
     total_lessons INTEGER DEFAULT 0,
@@ -151,24 +155,28 @@ ALTER TABLE knowledge_chunks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_module_progress ENABLE ROW LEVEL SECURITY;
 
 -- ============================================
--- RLS Policies - Modules & Lessons (Public Read)
+-- RLS Policies - Modules & Lessons (Public Read for Authenticated)
 -- ============================================
-CREATE POLICY "Modules are viewable by everyone"
+DROP POLICY IF EXISTS "Modules are viewable by authenticated users" ON learning_modules;
+CREATE POLICY "Modules are viewable by authenticated users"
 ON learning_modules FOR SELECT
 TO authenticated
 USING (is_published = true);
 
-CREATE POLICY "Lessons are viewable by everyone"
+DROP POLICY IF EXISTS "Lessons are viewable by authenticated users" ON lessons;
+CREATE POLICY "Lessons are viewable by authenticated users"
 ON lessons FOR SELECT
 TO authenticated
 USING (is_published = true);
 
-CREATE POLICY "Quizzes are viewable by everyone"
+DROP POLICY IF EXISTS "Quizzes are viewable by authenticated users" ON quizzes;
+CREATE POLICY "Quizzes are viewable by authenticated users"
 ON quizzes FOR SELECT
 TO authenticated
 USING (is_published = true);
 
-CREATE POLICY "Knowledge chunks are viewable by everyone"
+DROP POLICY IF EXISTS "Knowledge chunks are viewable by authenticated users" ON knowledge_chunks;
+CREATE POLICY "Knowledge chunks are viewable by authenticated users"
 ON knowledge_chunks FOR SELECT
 TO authenticated
 USING (true);
@@ -176,76 +184,86 @@ USING (true);
 -- ============================================
 -- RLS Policies - User Progress (Own Data Only)
 -- ============================================
+DROP POLICY IF EXISTS "Users can view own lesson progress" ON user_lesson_progress;
 CREATE POLICY "Users can view own lesson progress"
 ON user_lesson_progress FOR SELECT
 TO authenticated
 USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own lesson progress" ON user_lesson_progress;
 CREATE POLICY "Users can insert own lesson progress"
 ON user_lesson_progress FOR INSERT
 TO authenticated
 WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update own lesson progress" ON user_lesson_progress;
 CREATE POLICY "Users can update own lesson progress"
 ON user_lesson_progress FOR UPDATE
 TO authenticated
 USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can view own quiz attempts" ON quiz_attempts;
 CREATE POLICY "Users can view own quiz attempts"
 ON quiz_attempts FOR SELECT
 TO authenticated
 USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own quiz attempts" ON quiz_attempts;
 CREATE POLICY "Users can insert own quiz attempts"
 ON quiz_attempts FOR INSERT
 TO authenticated
 WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can view own module progress" ON user_module_progress;
 CREATE POLICY "Users can view own module progress"
 ON user_module_progress FOR SELECT
 TO authenticated
 USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can manage own module progress" ON user_module_progress;
 CREATE POLICY "Users can manage own module progress"
 ON user_module_progress FOR ALL
 TO authenticated
 USING (auth.uid() = user_id);
 
 -- ============================================
--- Admin Policies
+-- Service Role Policies (for API routes)
 -- ============================================
-CREATE POLICY "Admins can manage modules"
+DROP POLICY IF EXISTS "Service role can manage all learning modules" ON learning_modules;
+CREATE POLICY "Service role can manage all learning modules"
 ON learning_modules FOR ALL
-TO authenticated
-USING (
-    EXISTS (
-        SELECT 1 FROM users
-        WHERE users.id = auth.uid()
-        AND users.is_admin = true
-    )
-);
+TO service_role
+USING (true);
 
-CREATE POLICY "Admins can manage lessons"
+DROP POLICY IF EXISTS "Service role can manage all lessons" ON lessons;
+CREATE POLICY "Service role can manage all lessons"
 ON lessons FOR ALL
-TO authenticated
-USING (
-    EXISTS (
-        SELECT 1 FROM users
-        WHERE users.id = auth.uid()
-        AND users.is_admin = true
-    )
-);
+TO service_role
+USING (true);
 
-CREATE POLICY "Admins can manage quizzes"
+DROP POLICY IF EXISTS "Service role can manage all quizzes" ON quizzes;
+CREATE POLICY "Service role can manage all quizzes"
 ON quizzes FOR ALL
-TO authenticated
-USING (
-    EXISTS (
-        SELECT 1 FROM users
-        WHERE users.id = auth.uid()
-        AND users.is_admin = true
-    )
-);
+TO service_role
+USING (true);
+
+DROP POLICY IF EXISTS "Service role can manage all progress" ON user_lesson_progress;
+CREATE POLICY "Service role can manage all progress"
+ON user_lesson_progress FOR ALL
+TO service_role
+USING (true);
+
+DROP POLICY IF EXISTS "Service role can manage all quiz attempts" ON quiz_attempts;
+CREATE POLICY "Service role can manage all quiz attempts"
+ON quiz_attempts FOR ALL
+TO service_role
+USING (true);
+
+DROP POLICY IF EXISTS "Service role can manage all module progress" ON user_module_progress;
+CREATE POLICY "Service role can manage all module progress"
+ON user_module_progress FOR ALL
+TO service_role
+USING (true);
 
 -- ============================================
 -- Functions for Progress Updates
@@ -264,6 +282,10 @@ BEGIN
     SELECT module_id INTO v_module_id
     FROM lessons
     WHERE id = NEW.lesson_id;
+
+    IF v_module_id IS NULL THEN
+        RETURN NEW;
+    END IF;
 
     -- Count total and completed lessons
     SELECT COUNT(*) INTO v_total_lessons
@@ -297,7 +319,7 @@ BEGIN
 
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Trigger to update module progress
 DROP TRIGGER IF EXISTS update_module_progress_trigger ON user_lesson_progress;
@@ -330,7 +352,7 @@ BEGIN
 
     RETURN COALESCE(NEW, OLD);
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Trigger for lessons count
 DROP TRIGGER IF EXISTS update_lessons_count_trigger ON lessons;
@@ -364,3 +386,19 @@ DROP TRIGGER IF EXISTS user_lesson_progress_updated_at ON user_lesson_progress;
 CREATE TRIGGER user_lesson_progress_updated_at
 BEFORE UPDATE ON user_lesson_progress
 FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ============================================
+-- Seed initial learning modules (optional)
+-- ============================================
+INSERT INTO learning_modules (slug, title, description, icon, color, order_index, difficulty, is_published)
+VALUES
+    ('fundamentals', 'Trading Fundamentals', 'Account setup, broker configuration, and chart basics. Start here if you''re new to trading.', 'BookOpen', '#3B82F6', 1, 'beginner', true),
+    ('price-action', 'Price Action Mastery', 'Understanding candlesticks, market structure, and reading price movement.', 'TrendingUp', '#10B981', 2, 'beginner', true),
+    ('indicators', 'Technical Indicators', 'Master EMAs, VWAP, and other essential trading indicators.', 'Activity', '#8B5CF6', 3, 'intermediate', true),
+    ('ltp-framework', 'LTP Framework', 'Levels, Trends, and Patience - the core trading methodology that brings it all together.', 'Target', '#F59E0B', 4, 'intermediate', true),
+    ('strategies', 'Trading Strategies', 'Specific trading strategies including ORB, gap trading, and more.', 'Crosshair', '#EF4444', 5, 'intermediate', true),
+    ('entries-exits', 'Entries & Exits', 'Master the art of entering at the right time and taking profits properly.', 'ArrowRightLeft', '#06B6D4', 6, 'intermediate', true),
+    ('psychology', 'Trading Psychology', 'Master your mind - the most important edge in trading.', 'Brain', '#EC4899', 7, 'advanced', true),
+    ('trading-rules', 'Trading Rules & Principles', 'The rules and principles that separate consistent traders from gamblers.', 'ClipboardList', '#F97316', 8, 'advanced', true),
+    ('watchlist-setup', 'Watchlist & Pre-Market', 'Building your watchlist and preparing for each trading day.', 'ListChecks', '#84CC16', 9, 'beginner', true)
+ON CONFLICT (slug) DO NOTHING;
