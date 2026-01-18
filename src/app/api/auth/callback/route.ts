@@ -52,27 +52,40 @@ export async function GET(request: NextRequest) {
     }
 
     if (!user) {
-      // Create new user - need to insert into both 'users' table (parent) and 'user_profiles' table
-      // The user_profiles table has a foreign key constraint referencing users table
-      const userId = randomUUID();
-      console.log('Creating new user with id:', userId);
-
-      // First, insert into the parent 'users' table (minimal fields only)
-      const { error: usersInsertError } = await supabaseAdmin
+      // No user_profile found - check if user exists in 'users' table (might be orphaned)
+      const { data: existingUser } = await supabaseAdmin
         .from('users')
-        .insert({
-          id: userId,
-          discord_id: discordUser.id,
-          username: discordUser.username,
-          email: discordUser.email || null,
-        });
+        .select('id')
+        .eq('discord_id', discordUser.id)
+        .single();
 
-      if (usersInsertError) {
-        console.error('Error creating user in users table:', usersInsertError);
-        return NextResponse.redirect(`${baseUrl}/login?error=create_failed`);
+      let userId: string;
+
+      if (existingUser) {
+        // User exists in users table but not in user_profiles - use existing ID
+        userId = existingUser.id;
+        console.log('Found existing user in users table, creating profile with id:', userId);
+      } else {
+        // Create new user in users table
+        userId = randomUUID();
+        console.log('Creating new user with id:', userId);
+
+        const { error: usersInsertError } = await supabaseAdmin
+          .from('users')
+          .insert({
+            id: userId,
+            discord_id: discordUser.id,
+            username: discordUser.username,
+            email: discordUser.email || null,
+          });
+
+        if (usersInsertError) {
+          console.error('Error creating user in users table:', usersInsertError);
+          return NextResponse.redirect(`${baseUrl}/login?error=create_failed`);
+        }
       }
 
-      // Then, insert into user_profiles table (child)
+      // Create user_profiles entry
       const { data: newUser, error: createError } = await supabaseAdmin
         .from('user_profiles')
         .insert({
@@ -97,8 +110,10 @@ export async function GET(request: NextRequest) {
 
       if (createError) {
         console.error('Error creating user profile:', createError);
-        // Clean up the users table entry if profile creation failed
-        await supabaseAdmin.from('users').delete().eq('id', userId);
+        // Only clean up users table if we created it in this request
+        if (!existingUser) {
+          await supabaseAdmin.from('users').delete().eq('id', userId);
+        }
         return NextResponse.redirect(`${baseUrl}/login?error=create_failed`);
       }
 
