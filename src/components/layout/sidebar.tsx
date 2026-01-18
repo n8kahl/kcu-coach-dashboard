@@ -66,7 +66,8 @@ const userNavItems: NavItem[] = [
 const adminNavItems: NavItem[] = [
   { label: 'Users', href: '/admin/users', icon: Users },
   { label: 'Card Builder', href: '/admin/card-builder', icon: Palette },
-  { label: 'Knowledge Base', href: '/admin/knowledge', icon: Database },
+  { label: 'Knowledge CMS', href: '/admin/knowledge', icon: Database },
+  { label: 'Social Builder', href: '/admin/social-builder', icon: Share2 },
   { label: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
   { label: 'Settings', href: '/admin/settings', icon: Settings },
 ];
