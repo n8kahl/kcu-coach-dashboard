@@ -21,13 +21,32 @@ CREATE OR REPLACE FUNCTION add_column_if_not_exists(
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
-    WHERE table_name = p_table AND column_name = p_column
+    WHERE table_schema = 'public' AND table_name = p_table AND column_name = p_column
   ) THEN
     IF p_default IS NOT NULL THEN
       EXECUTE format('ALTER TABLE %I ADD COLUMN %I %s DEFAULT %s', p_table, p_column, p_type, p_default);
     ELSE
       EXECUTE format('ALTER TABLE %I ADD COLUMN %I %s', p_table, p_column, p_type);
     END IF;
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================
+-- HELPER: Create index if column exists
+-- ============================================
+CREATE OR REPLACE FUNCTION create_index_if_column_exists(
+  p_index_name TEXT,
+  p_table TEXT,
+  p_column TEXT,
+  p_extra TEXT DEFAULT ''
+) RETURNS VOID AS $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = p_table AND column_name = p_column
+  ) THEN
+    EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I(%I) %s', p_index_name, p_table, p_column, p_extra);
   END IF;
 END;
 $$ LANGUAGE plpgsql;
@@ -58,14 +77,26 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 );
 
 -- Add any missing columns to user_profiles
+SELECT add_column_if_not_exists('user_profiles', 'discord_id', 'TEXT');
 SELECT add_column_if_not_exists('user_profiles', 'email', 'TEXT');
 SELECT add_column_if_not_exists('user_profiles', 'username', 'TEXT');
 SELECT add_column_if_not_exists('user_profiles', 'avatar_url', 'TEXT');
+SELECT add_column_if_not_exists('user_profiles', 'discord_username', 'TEXT');
 SELECT add_column_if_not_exists('user_profiles', 'subscription_tier', 'TEXT', '''free''');
 SELECT add_column_if_not_exists('user_profiles', 'is_admin', 'BOOLEAN', 'false');
+SELECT add_column_if_not_exists('user_profiles', 'current_module', 'TEXT', '''fundamentals''');
+SELECT add_column_if_not_exists('user_profiles', 'experience_level', 'TEXT', '''beginner''');
+SELECT add_column_if_not_exists('user_profiles', 'preferred_symbols', 'TEXT[]', 'ARRAY[''SPY'']');
+SELECT add_column_if_not_exists('user_profiles', 'notification_preferences', 'JSONB', '''{"daily_briefing": true, "quiz_reminders": false}''');
+SELECT add_column_if_not_exists('user_profiles', 'total_questions', 'INTEGER', '0');
+SELECT add_column_if_not_exists('user_profiles', 'total_quizzes', 'INTEGER', '0');
+SELECT add_column_if_not_exists('user_profiles', 'streak_days', 'INTEGER', '0');
+SELECT add_column_if_not_exists('user_profiles', 'last_active', 'TIMESTAMP WITH TIME ZONE');
+SELECT add_column_if_not_exists('user_profiles', 'created_at', 'TIMESTAMP WITH TIME ZONE', 'NOW()');
+SELECT add_column_if_not_exists('user_profiles', 'updated_at', 'TIMESTAMP WITH TIME ZONE', 'NOW()');
 
-CREATE INDEX IF NOT EXISTS idx_user_discord ON user_profiles(discord_id);
-CREATE INDEX IF NOT EXISTS idx_user_email ON user_profiles(email);
+SELECT create_index_if_column_exists('idx_user_discord', 'user_profiles', 'discord_id');
+SELECT create_index_if_column_exists('idx_user_email', 'user_profiles', 'email');
 
 -- ============================================
 -- 2. KNOWLEDGE BASE
@@ -87,8 +118,21 @@ CREATE TABLE IF NOT EXISTS knowledge_chunks (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_knowledge_topic ON knowledge_chunks(topic);
-CREATE INDEX IF NOT EXISTS idx_knowledge_difficulty ON knowledge_chunks(difficulty);
+-- Add missing columns
+SELECT add_column_if_not_exists('knowledge_chunks', 'content', 'TEXT');
+SELECT add_column_if_not_exists('knowledge_chunks', 'source_type', 'TEXT', '''transcript''');
+SELECT add_column_if_not_exists('knowledge_chunks', 'source_id', 'TEXT');
+SELECT add_column_if_not_exists('knowledge_chunks', 'source_title', 'TEXT');
+SELECT add_column_if_not_exists('knowledge_chunks', 'topic', 'TEXT');
+SELECT add_column_if_not_exists('knowledge_chunks', 'subtopic', 'TEXT');
+SELECT add_column_if_not_exists('knowledge_chunks', 'difficulty', 'TEXT', '''beginner''');
+SELECT add_column_if_not_exists('knowledge_chunks', 'ltp_relevance', 'FLOAT', '0.5');
+SELECT add_column_if_not_exists('knowledge_chunks', 'chunk_index', 'INTEGER');
+SELECT add_column_if_not_exists('knowledge_chunks', 'created_at', 'TIMESTAMP WITH TIME ZONE', 'NOW()');
+SELECT add_column_if_not_exists('knowledge_chunks', 'updated_at', 'TIMESTAMP WITH TIME ZONE', 'NOW()');
+
+SELECT create_index_if_column_exists('idx_knowledge_topic', 'knowledge_chunks', 'topic');
+SELECT create_index_if_column_exists('idx_knowledge_difficulty', 'knowledge_chunks', 'difficulty');
 
 -- ============================================
 -- 3. LEARNING PROGRESS
@@ -111,7 +155,16 @@ CREATE TABLE IF NOT EXISTS learning_progress (
   UNIQUE(user_id, module, topic)
 );
 
-CREATE INDEX IF NOT EXISTS idx_progress_user ON learning_progress(user_id);
+SELECT add_column_if_not_exists('learning_progress', 'module', 'TEXT');
+SELECT add_column_if_not_exists('learning_progress', 'topic', 'TEXT');
+SELECT add_column_if_not_exists('learning_progress', 'status', 'TEXT', '''not_started''');
+SELECT add_column_if_not_exists('learning_progress', 'completion_percentage', 'INTEGER', '0');
+SELECT add_column_if_not_exists('learning_progress', 'quiz_attempts', 'INTEGER', '0');
+SELECT add_column_if_not_exists('learning_progress', 'quiz_best_score', 'INTEGER');
+SELECT add_column_if_not_exists('learning_progress', 'quiz_average_score', 'FLOAT');
+SELECT add_column_if_not_exists('learning_progress', 'time_spent_seconds', 'INTEGER', '0');
+
+SELECT create_index_if_column_exists('idx_progress_user', 'learning_progress', 'user_id');
 
 -- ============================================
 -- 4. QUIZ ATTEMPTS
@@ -120,18 +173,26 @@ CREATE INDEX IF NOT EXISTS idx_progress_user ON learning_progress(user_id);
 CREATE TABLE IF NOT EXISTS quiz_attempts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES user_profiles(id) ON DELETE CASCADE,
-  topic TEXT NOT NULL,
+  topic TEXT,
   difficulty TEXT DEFAULT 'mixed',
-  questions JSONB NOT NULL DEFAULT '[]',
-  user_answers JSONB NOT NULL DEFAULT '[]',
-  score INTEGER NOT NULL DEFAULT 0,
-  total_questions INTEGER NOT NULL DEFAULT 0,
+  questions JSONB DEFAULT '[]',
+  user_answers JSONB DEFAULT '[]',
+  score INTEGER DEFAULT 0,
+  total_questions INTEGER DEFAULT 0,
   time_taken_seconds INTEGER,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_quiz_user ON quiz_attempts(user_id);
-CREATE INDEX IF NOT EXISTS idx_quiz_topic ON quiz_attempts(topic);
+SELECT add_column_if_not_exists('quiz_attempts', 'topic', 'TEXT');
+SELECT add_column_if_not_exists('quiz_attempts', 'difficulty', 'TEXT', '''mixed''');
+SELECT add_column_if_not_exists('quiz_attempts', 'questions', 'JSONB', '''[]''');
+SELECT add_column_if_not_exists('quiz_attempts', 'user_answers', 'JSONB', '''[]''');
+SELECT add_column_if_not_exists('quiz_attempts', 'score', 'INTEGER', '0');
+SELECT add_column_if_not_exists('quiz_attempts', 'total_questions', 'INTEGER', '0');
+SELECT add_column_if_not_exists('quiz_attempts', 'time_taken_seconds', 'INTEGER');
+
+SELECT create_index_if_column_exists('idx_quiz_user', 'quiz_attempts', 'user_id');
+SELECT create_index_if_column_exists('idx_quiz_topic', 'quiz_attempts', 'topic');
 
 -- ============================================
 -- 5. CONVERSATIONS
@@ -140,7 +201,7 @@ CREATE INDEX IF NOT EXISTS idx_quiz_topic ON quiz_attempts(topic);
 CREATE TABLE IF NOT EXISTS conversations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES user_profiles(id) ON DELETE CASCADE,
-  channel_id TEXT NOT NULL,
+  channel_id TEXT,
   thread_id TEXT,
   messages JSONB[] DEFAULT ARRAY[]::JSONB[],
   context JSONB DEFAULT '{}',
@@ -151,8 +212,14 @@ CREATE TABLE IF NOT EXISTS conversations (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(user_id);
-CREATE INDEX IF NOT EXISTS idx_conv_channel ON conversations(channel_id);
+SELECT add_column_if_not_exists('conversations', 'channel_id', 'TEXT');
+SELECT add_column_if_not_exists('conversations', 'thread_id', 'TEXT');
+SELECT add_column_if_not_exists('conversations', 'context', 'JSONB', '''{}''');
+SELECT add_column_if_not_exists('conversations', 'quiz_state', 'JSONB');
+SELECT add_column_if_not_exists('conversations', 'message_count', 'INTEGER', '0');
+
+SELECT create_index_if_column_exists('idx_conv_user', 'conversations', 'user_id');
+SELECT create_index_if_column_exists('idx_conv_channel', 'conversations', 'channel_id');
 
 -- ============================================
 -- 6. TRADE JOURNAL
@@ -161,8 +228,8 @@ CREATE INDEX IF NOT EXISTS idx_conv_channel ON conversations(channel_id);
 CREATE TABLE IF NOT EXISTS trade_journal (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES user_profiles(id) ON DELETE CASCADE,
-  symbol TEXT NOT NULL DEFAULT 'SPY',
-  direction TEXT NOT NULL DEFAULT 'long',
+  symbol TEXT DEFAULT 'SPY',
+  direction TEXT DEFAULT 'long',
   entry_price DECIMAL(10, 2),
   exit_price DECIMAL(10, 2),
   shares INTEGER DEFAULT 1,
@@ -187,9 +254,18 @@ CREATE TABLE IF NOT EXISTS trade_journal (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_journal_user ON trade_journal(user_id);
-CREATE INDEX IF NOT EXISTS idx_journal_symbol ON trade_journal(symbol);
-CREATE INDEX IF NOT EXISTS idx_journal_entry_time ON trade_journal(entry_time);
+SELECT add_column_if_not_exists('trade_journal', 'symbol', 'TEXT', '''SPY''');
+SELECT add_column_if_not_exists('trade_journal', 'direction', 'TEXT', '''long''');
+SELECT add_column_if_not_exists('trade_journal', 'setup_type', 'TEXT');
+SELECT add_column_if_not_exists('trade_journal', 'had_level', 'BOOLEAN');
+SELECT add_column_if_not_exists('trade_journal', 'had_trend', 'BOOLEAN');
+SELECT add_column_if_not_exists('trade_journal', 'had_patience_candle', 'BOOLEAN');
+SELECT add_column_if_not_exists('trade_journal', 'followed_rules', 'BOOLEAN');
+SELECT add_column_if_not_exists('trade_journal', 'ltp_grade', 'JSONB');
+
+SELECT create_index_if_column_exists('idx_journal_user', 'trade_journal', 'user_id');
+SELECT create_index_if_column_exists('idx_journal_symbol', 'trade_journal', 'symbol');
+SELECT create_index_if_column_exists('idx_journal_entry_time', 'trade_journal', 'entry_time');
 
 -- ============================================
 -- 7. LEADERBOARDS
@@ -220,7 +296,7 @@ CREATE TABLE IF NOT EXISTS achievements (
   UNIQUE(user_id, achievement_type)
 );
 
-CREATE INDEX IF NOT EXISTS idx_achievements_user ON achievements(user_id);
+SELECT create_index_if_column_exists('idx_achievements_user', 'achievements', 'user_id');
 
 -- ============================================
 -- 9. STUDY GROUPS
@@ -253,8 +329,8 @@ CREATE TABLE IF NOT EXISTS accountability_checkins (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_checkins_user ON accountability_checkins(user_id);
-CREATE INDEX IF NOT EXISTS idx_checkins_group ON accountability_checkins(group_id);
+SELECT create_index_if_column_exists('idx_checkins_user', 'accountability_checkins', 'user_id');
+SELECT create_index_if_column_exists('idx_checkins_group', 'accountability_checkins', 'group_id');
 
 -- ============================================
 -- 10. USER ROLES
@@ -286,13 +362,12 @@ CREATE TABLE IF NOT EXISTS user_role_assignments (
   UNIQUE(user_id, role_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_role_assignments_user ON user_role_assignments(user_id);
+SELECT create_index_if_column_exists('idx_role_assignments_user', 'user_role_assignments', 'user_id');
 
 -- ============================================
 -- 11. WATCHLISTS (Handle existing table)
 -- ============================================
 
--- Create if not exists
 CREATE TABLE IF NOT EXISTS watchlists (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID,
@@ -305,14 +380,14 @@ CREATE TABLE IF NOT EXISTS watchlists (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Add missing columns to existing watchlists table
+SELECT add_column_if_not_exists('watchlists', 'user_id', 'UUID');
 SELECT add_column_if_not_exists('watchlists', 'name', 'TEXT', '''My Watchlist''');
 SELECT add_column_if_not_exists('watchlists', 'description', 'TEXT');
 SELECT add_column_if_not_exists('watchlists', 'is_shared', 'BOOLEAN', 'FALSE');
 SELECT add_column_if_not_exists('watchlists', 'is_admin_watchlist', 'BOOLEAN', 'FALSE');
 SELECT add_column_if_not_exists('watchlists', 'symbols', 'TEXT[]', '''{}''');
 
-CREATE INDEX IF NOT EXISTS idx_watchlists_user ON watchlists(user_id);
+SELECT create_index_if_column_exists('idx_watchlists_user', 'watchlists', 'user_id');
 
 -- ============================================
 -- 12. KEY LEVELS
@@ -330,9 +405,16 @@ CREATE TABLE IF NOT EXISTS key_levels (
   metadata JSONB DEFAULT '{}'
 );
 
-CREATE INDEX IF NOT EXISTS idx_key_levels_symbol ON key_levels(symbol);
-CREATE INDEX IF NOT EXISTS idx_key_levels_type ON key_levels(level_type);
-CREATE INDEX IF NOT EXISTS idx_key_levels_expires ON key_levels(expires_at);
+SELECT add_column_if_not_exists('key_levels', 'symbol', 'TEXT');
+SELECT add_column_if_not_exists('key_levels', 'level_type', 'TEXT');
+SELECT add_column_if_not_exists('key_levels', 'timeframe', 'TEXT');
+SELECT add_column_if_not_exists('key_levels', 'price', 'DECIMAL(12, 4)');
+SELECT add_column_if_not_exists('key_levels', 'strength', 'INTEGER', '50');
+SELECT add_column_if_not_exists('key_levels', 'metadata', 'JSONB', '''{}''');
+
+SELECT create_index_if_column_exists('idx_key_levels_symbol', 'key_levels', 'symbol');
+SELECT create_index_if_column_exists('idx_key_levels_type', 'key_levels', 'level_type');
+SELECT create_index_if_column_exists('idx_key_levels_expires', 'key_levels', 'expires_at');
 
 -- ============================================
 -- 13. DETECTED SETUPS (Handle existing table)
@@ -342,7 +424,7 @@ CREATE TABLE IF NOT EXISTS detected_setups (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   symbol TEXT NOT NULL,
   direction TEXT NOT NULL,
-  setup_stage TEXT NOT NULL DEFAULT 'forming',
+  setup_stage TEXT DEFAULT 'forming',
   confluence_score INTEGER DEFAULT 0,
   level_score INTEGER DEFAULT 0,
   trend_score INTEGER DEFAULT 0,
@@ -364,7 +446,8 @@ CREATE TABLE IF NOT EXISTS detected_setups (
   detected_by TEXT DEFAULT 'system'
 );
 
--- Add missing columns to existing detected_setups table
+SELECT add_column_if_not_exists('detected_setups', 'symbol', 'TEXT');
+SELECT add_column_if_not_exists('detected_setups', 'direction', 'TEXT');
 SELECT add_column_if_not_exists('detected_setups', 'setup_stage', 'TEXT', '''forming''');
 SELECT add_column_if_not_exists('detected_setups', 'confluence_score', 'INTEGER', '0');
 SELECT add_column_if_not_exists('detected_setups', 'level_score', 'INTEGER', '0');
@@ -386,9 +469,9 @@ SELECT add_column_if_not_exists('detected_setups', 'triggered_at', 'TIMESTAMP WI
 SELECT add_column_if_not_exists('detected_setups', 'expired_at', 'TIMESTAMP WITH TIME ZONE');
 SELECT add_column_if_not_exists('detected_setups', 'detected_by', 'TEXT', '''system''');
 
-CREATE INDEX IF NOT EXISTS idx_detected_setups_symbol ON detected_setups(symbol);
-CREATE INDEX IF NOT EXISTS idx_detected_setups_stage ON detected_setups(setup_stage);
-CREATE INDEX IF NOT EXISTS idx_detected_setups_score ON detected_setups(confluence_score DESC);
+SELECT create_index_if_column_exists('idx_detected_setups_symbol', 'detected_setups', 'symbol');
+SELECT create_index_if_column_exists('idx_detected_setups_stage', 'detected_setups', 'setup_stage');
+SELECT create_index_if_column_exists('idx_detected_setups_score', 'detected_setups', 'confluence_score');
 
 -- ============================================
 -- 14. SETUP SUBSCRIPTIONS
@@ -404,8 +487,8 @@ CREATE TABLE IF NOT EXISTS setup_subscriptions (
   UNIQUE(user_id, setup_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_setup_subscriptions_user ON setup_subscriptions(user_id);
-CREATE INDEX IF NOT EXISTS idx_setup_subscriptions_setup ON setup_subscriptions(setup_id);
+SELECT create_index_if_column_exists('idx_setup_subscriptions_user', 'setup_subscriptions', 'user_id');
+SELECT create_index_if_column_exists('idx_setup_subscriptions_setup', 'setup_subscriptions', 'setup_id');
 
 -- ============================================
 -- 15. MTF ANALYSIS
@@ -426,8 +509,8 @@ CREATE TABLE IF NOT EXISTS mtf_analysis (
   metadata JSONB DEFAULT '{}'
 );
 
-CREATE INDEX IF NOT EXISTS idx_mtf_analysis_symbol ON mtf_analysis(symbol);
-CREATE INDEX IF NOT EXISTS idx_mtf_analysis_timeframe ON mtf_analysis(timeframe);
+SELECT create_index_if_column_exists('idx_mtf_analysis_symbol', 'mtf_analysis', 'symbol');
+SELECT create_index_if_column_exists('idx_mtf_analysis_timeframe', 'mtf_analysis', 'timeframe');
 
 -- ============================================
 -- 16. MARKET CONTEXT
@@ -464,9 +547,9 @@ CREATE TABLE IF NOT EXISTS economic_events (
   fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_economic_events_date ON economic_events(event_date);
-CREATE INDEX IF NOT EXISTS idx_economic_events_symbol ON economic_events(symbol);
-CREATE INDEX IF NOT EXISTS idx_economic_events_type ON economic_events(event_type);
+SELECT create_index_if_column_exists('idx_economic_events_date', 'economic_events', 'event_date');
+SELECT create_index_if_column_exists('idx_economic_events_symbol', 'economic_events', 'symbol');
+SELECT create_index_if_column_exists('idx_economic_events_type', 'economic_events', 'event_type');
 
 -- ============================================
 -- 18. EVENT ALERTS
@@ -501,8 +584,8 @@ CREATE TABLE IF NOT EXISTS admin_alerts (
   is_active BOOLEAN DEFAULT TRUE
 );
 
-CREATE INDEX IF NOT EXISTS idx_admin_alerts_symbol ON admin_alerts(symbol);
-CREATE INDEX IF NOT EXISTS idx_admin_alerts_created ON admin_alerts(created_at DESC);
+SELECT create_index_if_column_exists('idx_admin_alerts_symbol', 'admin_alerts', 'symbol');
+SELECT create_index_if_column_exists('idx_admin_alerts_created', 'admin_alerts', 'created_at');
 
 -- ============================================
 -- 20. STRATEGY CONFIGURATION
@@ -581,7 +664,7 @@ CREATE TABLE IF NOT EXISTS youtube_videos (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_youtube_videos_status ON youtube_videos(transcript_status);
+SELECT create_index_if_column_exists('idx_youtube_videos_status', 'youtube_videos', 'transcript_status');
 
 -- ============================================
 -- ENABLE RLS ON ALL TABLES
@@ -718,10 +801,11 @@ DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE market_context; EXCEPT
 DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE admin_alerts; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ============================================
--- CLEANUP HELPER FUNCTION
+-- CLEANUP HELPER FUNCTIONS
 -- ============================================
 
 DROP FUNCTION IF EXISTS add_column_if_not_exists(TEXT, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS create_index_if_column_exists(TEXT, TEXT, TEXT, TEXT);
 
 -- Done!
 SELECT 'Schema migration completed successfully!' AS status;
