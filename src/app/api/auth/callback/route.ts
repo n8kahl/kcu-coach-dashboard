@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
         .insert({
           id: userId,
           discord_id: discordUser.id,
+          username: discordUser.username,  // Required field
           discord_username: discordUser.username,
           avatar_url: discordUser.avatar
             ? `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`
