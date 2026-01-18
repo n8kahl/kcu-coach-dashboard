@@ -1,7 +1,7 @@
 -- ============================================
 -- KCU Coach - Companion Mode Schema (Safe Version)
 -- ============================================
--- Uses IF NOT EXISTS to skip already-created tables
+-- Uses IF NOT EXISTS and handles existing tables
 -- Run this after 001_base_schema.sql
 
 -- ============================================
@@ -53,9 +53,9 @@ ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS user_role_assignments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES user_profiles(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL,
   role_id UUID REFERENCES user_roles(id) ON DELETE CASCADE,
-  assigned_by UUID REFERENCES user_profiles(id),
+  assigned_by UUID,
   assigned_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   expires_at TIMESTAMP WITH TIME ZONE,
   UNIQUE(user_id, role_id)
@@ -64,23 +64,40 @@ CREATE TABLE IF NOT EXISTS user_role_assignments (
 CREATE INDEX IF NOT EXISTS idx_role_assignments_user ON user_role_assignments(user_id);
 
 -- ============================================
--- WATCHLIST SYSTEM
+-- WATCHLIST SYSTEM (handle existing table)
+-- The existing watchlists table uses user_id (not owner_id)
+-- We'll add missing columns if they don't exist
 -- ============================================
 
-CREATE TABLE IF NOT EXISTS watchlists (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  description TEXT,
-  owner_id UUID REFERENCES user_profiles(id) ON DELETE CASCADE,
-  is_shared BOOLEAN DEFAULT FALSE,
-  is_admin_watchlist BOOLEAN DEFAULT FALSE,
-  symbols TEXT[] DEFAULT '{}',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+DO $$
+BEGIN
+  -- Add name column if not exists
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'watchlists' AND column_name = 'name') THEN
+    ALTER TABLE watchlists ADD COLUMN name TEXT DEFAULT 'My Watchlist';
+  END IF;
 
-CREATE INDEX IF NOT EXISTS idx_watchlists_owner ON watchlists(owner_id);
-CREATE INDEX IF NOT EXISTS idx_watchlists_shared ON watchlists(is_shared) WHERE is_shared = TRUE;
+  -- Add description column if not exists
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'watchlists' AND column_name = 'description') THEN
+    ALTER TABLE watchlists ADD COLUMN description TEXT;
+  END IF;
+
+  -- Add is_shared column if not exists
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'watchlists' AND column_name = 'is_shared') THEN
+    ALTER TABLE watchlists ADD COLUMN is_shared BOOLEAN DEFAULT FALSE;
+  END IF;
+
+  -- Add is_admin_watchlist column if not exists
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'watchlists' AND column_name = 'is_admin_watchlist') THEN
+    ALTER TABLE watchlists ADD COLUMN is_admin_watchlist BOOLEAN DEFAULT FALSE;
+  END IF;
+
+  -- Add symbols column if not exists
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'watchlists' AND column_name = 'symbols') THEN
+    ALTER TABLE watchlists ADD COLUMN symbols TEXT[] DEFAULT '{}';
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_watchlists_user ON watchlists(user_id);
 
 -- ============================================
 -- KEY LEVELS
@@ -142,7 +159,7 @@ CREATE INDEX IF NOT EXISTS idx_detected_setups_score ON detected_setups(confluen
 
 CREATE TABLE IF NOT EXISTS setup_subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES user_profiles(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL,
   setup_id UUID REFERENCES detected_setups(id) ON DELETE CASCADE,
   notify_on_ready BOOLEAN DEFAULT TRUE,
   notify_on_trigger BOOLEAN DEFAULT TRUE,
@@ -174,7 +191,6 @@ CREATE TABLE IF NOT EXISTS mtf_analysis (
 
 CREATE INDEX IF NOT EXISTS idx_mtf_analysis_symbol ON mtf_analysis(symbol);
 CREATE INDEX IF NOT EXISTS idx_mtf_analysis_timeframe ON mtf_analysis(timeframe);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mtf_analysis_unique ON mtf_analysis(symbol, timeframe);
 
 -- ============================================
 -- MARKET CONTEXT
@@ -221,7 +237,7 @@ CREATE INDEX IF NOT EXISTS idx_economic_events_type ON economic_events(event_typ
 
 CREATE TABLE IF NOT EXISTS event_alerts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES user_profiles(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL,
   event_id UUID REFERENCES economic_events(id) ON DELETE CASCADE,
   alert_before INTERVAL DEFAULT '1 hour',
   notified BOOLEAN DEFAULT FALSE,
@@ -234,7 +250,7 @@ CREATE TABLE IF NOT EXISTS event_alerts (
 
 CREATE TABLE IF NOT EXISTS admin_alerts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  admin_id UUID REFERENCES user_profiles(id),
+  admin_id UUID,
   symbol TEXT NOT NULL,
   direction TEXT NOT NULL,
   alert_type TEXT NOT NULL,
@@ -261,7 +277,7 @@ CREATE TABLE IF NOT EXISTS strategy_configs (
   category TEXT NOT NULL,
   config JSONB NOT NULL,
   is_active BOOLEAN DEFAULT TRUE,
-  created_by UUID REFERENCES user_profiles(id),
+  created_by UUID,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -308,31 +324,24 @@ ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS alert_templates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
+  name TEXT NOT NULL UNIQUE,
   alert_type TEXT NOT NULL,
   title_template TEXT NOT NULL,
   body_template TEXT NOT NULL,
   channels TEXT[] DEFAULT ARRAY['web', 'discord'],
   is_active BOOLEAN DEFAULT TRUE,
-  created_by UUID REFERENCES user_profiles(id),
+  created_by UUID,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Insert default templates
-INSERT INTO alert_templates (name, alert_type, title_template, body_template)
-SELECT 'setup_ready', 'setup_ready', '{{symbol}} Setup Ready!',
-   'LTP Confluence: {{confluence_score}}%\nDirection: {{direction}}\nEntry: ${{entry}}\nStop: ${{stop}}\nTarget: ${{target}}'
-WHERE NOT EXISTS (SELECT 1 FROM alert_templates WHERE name = 'setup_ready');
-
-INSERT INTO alert_templates (name, alert_type, title_template, body_template)
-SELECT 'admin_entering', 'entering', 'ENTERING {{symbol}} {{direction}}',
-   '{{admin_name}} is entering {{symbol}}\nEntry: ${{entry}}\nStop: ${{stop}}\nTargets: {{targets}}'
-WHERE NOT EXISTS (SELECT 1 FROM alert_templates WHERE name = 'admin_entering');
-
-INSERT INTO alert_templates (name, alert_type, title_template, body_template)
-SELECT 'earnings_reminder', 'earnings', '{{symbol}} Earnings {{time}}',
-   '{{symbol}} reports earnings {{when}}\nExpected EPS: {{expected_eps}}\nConsider adjusting positions.'
-WHERE NOT EXISTS (SELECT 1 FROM alert_templates WHERE name = 'earnings_reminder');
+INSERT INTO alert_templates (name, alert_type, title_template, body_template) VALUES
+  ('setup_ready', 'setup_ready', '{{symbol}} Setup Ready!',
+   'LTP Confluence: {{confluence_score}}%\nDirection: {{direction}}\nEntry: ${{entry}}\nStop: ${{stop}}\nTarget: ${{target}}'),
+  ('admin_entering', 'entering', 'ENTERING {{symbol}} {{direction}}',
+   '{{admin_name}} is entering {{symbol}}\nEntry: ${{entry}}\nStop: ${{stop}}\nTargets: {{targets}}'),
+  ('earnings_reminder', 'earnings', '{{symbol}} Earnings {{time}}',
+   '{{symbol}} reports earnings {{when}}\nExpected EPS: {{expected_eps}}\nConsider adjusting positions.')
+ON CONFLICT (name) DO NOTHING;
 
 -- ============================================
 -- MARKET DATA CACHE
@@ -368,131 +377,120 @@ CREATE TABLE IF NOT EXISTS youtube_videos (
 );
 
 CREATE INDEX IF NOT EXISTS idx_youtube_videos_status ON youtube_videos(transcript_status);
-CREATE INDEX IF NOT EXISTS idx_youtube_videos_topics ON youtube_videos USING GIN(topics);
 
 -- ============================================
--- RLS POLICIES (Safe - drop if exists first)
+-- RLS POLICIES
 -- ============================================
 
-ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_role_assignments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE watchlists ENABLE ROW LEVEL SECURITY;
-ALTER TABLE key_levels ENABLE ROW LEVEL SECURITY;
-ALTER TABLE detected_setups ENABLE ROW LEVEL SECURITY;
-ALTER TABLE setup_subscriptions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE mtf_analysis ENABLE ROW LEVEL SECURITY;
-ALTER TABLE market_context ENABLE ROW LEVEL SECURITY;
-ALTER TABLE economic_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE event_alerts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE admin_alerts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE strategy_configs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alert_templates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE market_data_cache ENABLE ROW LEVEL SECURITY;
-ALTER TABLE youtube_videos ENABLE ROW LEVEL SECURITY;
+-- Enable RLS
+ALTER TABLE IF EXISTS user_roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS user_role_assignments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS watchlists ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS key_levels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS detected_setups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS setup_subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS mtf_analysis ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS market_context ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS economic_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS event_alerts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS admin_alerts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS strategy_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS alert_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS market_data_cache ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS youtube_videos ENABLE ROW LEVEL SECURITY;
 
--- Service role full access policies
-DO $$
-BEGIN
-  -- Drop and recreate policies for each table
-  DROP POLICY IF EXISTS "Service role full access" ON user_roles;
-  CREATE POLICY "Service role full access" ON user_roles FOR ALL TO service_role USING (true);
+-- Service role policies
+DROP POLICY IF EXISTS "Service role full access" ON user_roles;
+CREATE POLICY "Service role full access" ON user_roles FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON user_role_assignments;
-  CREATE POLICY "Service role full access" ON user_role_assignments FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON user_role_assignments;
+CREATE POLICY "Service role full access" ON user_role_assignments FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON watchlists;
-  CREATE POLICY "Service role full access" ON watchlists FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON watchlists;
+CREATE POLICY "Service role full access" ON watchlists FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON key_levels;
-  CREATE POLICY "Service role full access" ON key_levels FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON key_levels;
+CREATE POLICY "Service role full access" ON key_levels FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON detected_setups;
-  CREATE POLICY "Service role full access" ON detected_setups FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON detected_setups;
+CREATE POLICY "Service role full access" ON detected_setups FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON setup_subscriptions;
-  CREATE POLICY "Service role full access" ON setup_subscriptions FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON setup_subscriptions;
+CREATE POLICY "Service role full access" ON setup_subscriptions FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON mtf_analysis;
-  CREATE POLICY "Service role full access" ON mtf_analysis FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON mtf_analysis;
+CREATE POLICY "Service role full access" ON mtf_analysis FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON market_context;
-  CREATE POLICY "Service role full access" ON market_context FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON market_context;
+CREATE POLICY "Service role full access" ON market_context FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON economic_events;
-  CREATE POLICY "Service role full access" ON economic_events FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON economic_events;
+CREATE POLICY "Service role full access" ON economic_events FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON event_alerts;
-  CREATE POLICY "Service role full access" ON event_alerts FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON event_alerts;
+CREATE POLICY "Service role full access" ON event_alerts FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON admin_alerts;
-  CREATE POLICY "Service role full access" ON admin_alerts FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON admin_alerts;
+CREATE POLICY "Service role full access" ON admin_alerts FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON strategy_configs;
-  CREATE POLICY "Service role full access" ON strategy_configs FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON strategy_configs;
+CREATE POLICY "Service role full access" ON strategy_configs FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON alert_templates;
-  CREATE POLICY "Service role full access" ON alert_templates FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON alert_templates;
+CREATE POLICY "Service role full access" ON alert_templates FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON market_data_cache;
-  CREATE POLICY "Service role full access" ON market_data_cache FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "Service role full access" ON market_data_cache;
+CREATE POLICY "Service role full access" ON market_data_cache FOR ALL TO service_role USING (true);
 
-  DROP POLICY IF EXISTS "Service role full access" ON youtube_videos;
-  CREATE POLICY "Service role full access" ON youtube_videos FOR ALL TO service_role USING (true);
-END $$;
+DROP POLICY IF EXISTS "Service role full access" ON youtube_videos;
+CREATE POLICY "Service role full access" ON youtube_videos FOR ALL TO service_role USING (true);
 
--- Authenticated users read access
-DO $$
-BEGIN
-  DROP POLICY IF EXISTS "Authenticated read access" ON user_roles;
-  CREATE POLICY "Authenticated read access" ON user_roles FOR SELECT TO authenticated USING (true);
+-- Authenticated read policies
+DROP POLICY IF EXISTS "Authenticated read" ON user_roles;
+CREATE POLICY "Authenticated read" ON user_roles FOR SELECT TO authenticated USING (true);
 
-  DROP POLICY IF EXISTS "Authenticated read access" ON key_levels;
-  CREATE POLICY "Authenticated read access" ON key_levels FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Authenticated read" ON key_levels;
+CREATE POLICY "Authenticated read" ON key_levels FOR SELECT TO authenticated USING (true);
 
-  DROP POLICY IF EXISTS "Authenticated read access" ON detected_setups;
-  CREATE POLICY "Authenticated read access" ON detected_setups FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Authenticated read" ON detected_setups;
+CREATE POLICY "Authenticated read" ON detected_setups FOR SELECT TO authenticated USING (true);
 
-  DROP POLICY IF EXISTS "Authenticated read access" ON market_context;
-  CREATE POLICY "Authenticated read access" ON market_context FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Authenticated read" ON market_context;
+CREATE POLICY "Authenticated read" ON market_context FOR SELECT TO authenticated USING (true);
 
-  DROP POLICY IF EXISTS "Authenticated read access" ON economic_events;
-  CREATE POLICY "Authenticated read access" ON economic_events FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Authenticated read" ON economic_events;
+CREATE POLICY "Authenticated read" ON economic_events FOR SELECT TO authenticated USING (true);
 
-  DROP POLICY IF EXISTS "Authenticated read access" ON admin_alerts;
-  CREATE POLICY "Authenticated read access" ON admin_alerts FOR SELECT TO authenticated USING (is_active = true);
+DROP POLICY IF EXISTS "Authenticated read" ON market_data_cache;
+CREATE POLICY "Authenticated read" ON market_data_cache FOR SELECT TO authenticated USING (true);
 
-  DROP POLICY IF EXISTS "Authenticated read access" ON market_data_cache;
-  CREATE POLICY "Authenticated read access" ON market_data_cache FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Authenticated read" ON youtube_videos;
+CREATE POLICY "Authenticated read" ON youtube_videos FOR SELECT TO authenticated USING (true);
 
-  DROP POLICY IF EXISTS "Authenticated read access" ON youtube_videos;
-  CREATE POLICY "Authenticated read access" ON youtube_videos FOR SELECT TO authenticated USING (true);
-END $$;
+DROP POLICY IF EXISTS "Authenticated read active" ON admin_alerts;
+CREATE POLICY "Authenticated read active" ON admin_alerts FOR SELECT TO authenticated USING (is_active = true);
 
 -- User's own data policies
-DO $$
-BEGIN
-  DROP POLICY IF EXISTS "Users own watchlists" ON watchlists;
-  CREATE POLICY "Users own watchlists" ON watchlists FOR ALL TO authenticated
-    USING (owner_id = auth.uid() OR is_shared = true);
+DROP POLICY IF EXISTS "Users own watchlists" ON watchlists;
+CREATE POLICY "Users own watchlists" ON watchlists FOR ALL TO authenticated
+  USING (user_id = auth.uid() OR is_shared = true);
 
-  DROP POLICY IF EXISTS "Users own subscriptions" ON setup_subscriptions;
-  CREATE POLICY "Users own subscriptions" ON setup_subscriptions FOR ALL TO authenticated
-    USING (user_id = auth.uid());
+DROP POLICY IF EXISTS "Users own subscriptions" ON setup_subscriptions;
+CREATE POLICY "Users own subscriptions" ON setup_subscriptions FOR ALL TO authenticated
+  USING (user_id = auth.uid());
 
-  DROP POLICY IF EXISTS "Users own event alerts" ON event_alerts;
-  CREATE POLICY "Users own event alerts" ON event_alerts FOR ALL TO authenticated
-    USING (user_id = auth.uid());
+DROP POLICY IF EXISTS "Users own event alerts" ON event_alerts;
+CREATE POLICY "Users own event alerts" ON event_alerts FOR ALL TO authenticated
+  USING (user_id = auth.uid());
 
-  DROP POLICY IF EXISTS "Users own role assignments" ON user_role_assignments;
-  CREATE POLICY "Users own role assignments" ON user_role_assignments FOR SELECT TO authenticated
-    USING (user_id = auth.uid());
-END $$;
+DROP POLICY IF EXISTS "Users view own roles" ON user_role_assignments;
+CREATE POLICY "Users view own roles" ON user_role_assignments FOR SELECT TO authenticated
+  USING (user_id = auth.uid());
 
 -- ============================================
 -- HELPER FUNCTIONS
 -- ============================================
 
--- Get user's effective permissions
 CREATE OR REPLACE FUNCTION get_user_permissions(p_user_id UUID)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -519,88 +517,18 @@ BEGIN
 END;
 $$;
 
--- Check if user has specific permission
 CREATE OR REPLACE FUNCTION user_has_permission(p_user_id UUID, p_permission TEXT)
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
-DECLARE
-  v_has_permission BOOLEAN := FALSE;
 BEGIN
-  SELECT COALESCE((get_user_permissions(p_user_id) ->> p_permission)::boolean, false)
-  INTO v_has_permission;
-
-  RETURN v_has_permission;
+  RETURN COALESCE((get_user_permissions(p_user_id) ->> p_permission)::boolean, false);
 END;
 $$;
 
--- Calculate MTF alignment score
-CREATE OR REPLACE FUNCTION calculate_mtf_alignment(p_symbol TEXT)
-RETURNS INTEGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-  v_score INTEGER := 0;
-  v_weights JSONB;
-  v_primary_trend TEXT;
-  rec RECORD;
-BEGIN
-  SELECT config -> 'weights' INTO v_weights
-  FROM strategy_configs
-  WHERE name = 'mtf_timeframes' AND is_active = TRUE;
-
-  IF v_weights IS NULL THEN
-    v_weights := '{"weekly": 0.15, "daily": 0.20, "4h": 0.15, "1h": 0.20, "15m": 0.15, "5m": 0.10, "2m": 0.05}';
-  END IF;
-
-  SELECT trend INTO v_primary_trend
-  FROM mtf_analysis
-  WHERE symbol = p_symbol AND timeframe = 'daily'
-  ORDER BY calculated_at DESC
-  LIMIT 1;
-
-  IF v_primary_trend IS NULL THEN
-    RETURN 0;
-  END IF;
-
-  FOR rec IN
-    SELECT timeframe, trend
-    FROM mtf_analysis
-    WHERE symbol = p_symbol
-      AND calculated_at > NOW() - INTERVAL '1 hour'
-  LOOP
-    IF rec.trend = v_primary_trend THEN
-      v_score := v_score + COALESCE((v_weights ->> rec.timeframe)::decimal * 100, 0)::INTEGER;
-    END IF;
-  END LOOP;
-
-  RETURN v_score;
-END;
-$$;
-
--- Enable realtime (safe - ignore errors if already added)
-DO $$
-BEGIN
-  ALTER PUBLICATION supabase_realtime ADD TABLE detected_setups;
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER PUBLICATION supabase_realtime ADD TABLE key_levels;
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER PUBLICATION supabase_realtime ADD TABLE market_context;
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  ALTER PUBLICATION supabase_realtime ADD TABLE admin_alerts;
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
+-- Enable realtime (safe - ignore if already added)
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE detected_setups; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE key_levels; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE market_context; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE admin_alerts; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
