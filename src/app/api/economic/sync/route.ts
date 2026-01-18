@@ -50,8 +50,7 @@ export async function GET(request: Request) {
     }
 
     if (filter === 'all') {
-      // Debug: return all events
-      const { getUpcomingEarnings } = await import('@/lib/economic-calendar');
+      // Return all events with extended range
       const events = await getUpcomingHighImpactEvents(30);
       const todayEvents = await getTodayEvents();
       return NextResponse.json({
