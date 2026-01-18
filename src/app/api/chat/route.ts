@@ -124,6 +124,34 @@ ${
     });
   } catch (error) {
     console.error('Error in chat:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+
+    // Provide more specific error messages for debugging
+    if (error instanceof Error) {
+      // Check for common API errors
+      if (error.message.includes('API key')) {
+        console.error('Anthropic API key issue - check ANTHROPIC_API_KEY environment variable');
+        return NextResponse.json({
+          error: 'AI service configuration error. Please contact support.',
+          code: 'API_KEY_ERROR'
+        }, { status: 500 });
+      }
+      if (error.message.includes('rate limit') || error.message.includes('429')) {
+        return NextResponse.json({
+          error: 'AI service is temporarily busy. Please try again in a moment.',
+          code: 'RATE_LIMIT'
+        }, { status: 429 });
+      }
+      if (error.message.includes('network') || error.message.includes('ECONNREFUSED')) {
+        return NextResponse.json({
+          error: 'Unable to connect to AI service. Please check your internet connection.',
+          code: 'NETWORK_ERROR'
+        }, { status: 503 });
+      }
+    }
+
+    return NextResponse.json({
+      error: 'Internal server error',
+      code: 'UNKNOWN_ERROR'
+    }, { status: 500 });
   }
 }

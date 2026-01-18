@@ -13,10 +13,11 @@ export async function GET() {
     const userId = session.userId;
 
     // Get or create user's personal watchlist
+    // Note: Database schema uses 'owner_id' column (see supabase-schema-v3.sql)
     let { data: watchlist, error: watchlistError } = await supabaseAdmin
       .from('watchlists')
       .select('id, name, is_shared, is_admin_watchlist, symbols')
-      .eq('user_id', userId)
+      .eq('owner_id', userId)
       .eq('is_shared', false)
       .single();
 
@@ -25,7 +26,7 @@ export async function GET() {
       const { data: newWatchlist, error: createError } = await supabaseAdmin
         .from('watchlists')
         .insert({
-          user_id: userId,
+          owner_id: userId,  // Database schema uses 'owner_id'
           name: 'My Watchlist',
           is_shared: false,
           is_admin_watchlist: false,
@@ -117,11 +118,11 @@ export async function POST(request: Request) {
 
     const normalizedSymbol = symbol.trim().toUpperCase();
 
-    // Get user's watchlist
+    // Get user's watchlist (database schema uses 'owner_id')
     const { data: watchlist, error: watchlistError } = await supabaseAdmin
       .from('watchlists')
       .select('id, symbols')
-      .eq('user_id', userId)
+      .eq('owner_id', userId)
       .eq('is_shared', false)
       .single();
 
@@ -130,7 +131,7 @@ export async function POST(request: Request) {
       const { error: createError } = await supabaseAdmin
         .from('watchlists')
         .insert({
-          user_id: userId,
+          owner_id: userId,  // Database schema uses 'owner_id'
           name: 'My Watchlist',
           is_shared: false,
           is_admin_watchlist: false,
@@ -185,11 +186,11 @@ export async function DELETE(request: Request) {
 
     const normalizedSymbol = symbol.trim().toUpperCase();
 
-    // Get user's watchlist
+    // Get user's watchlist (database schema uses 'owner_id')
     const { data: watchlist, error: watchlistError } = await supabaseAdmin
       .from('watchlists')
       .select('id, symbols')
-      .eq('user_id', userId)
+      .eq('owner_id', userId)
       .eq('is_shared', false)
       .single();
 
