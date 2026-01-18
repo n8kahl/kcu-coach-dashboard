@@ -190,7 +190,7 @@ export default function AlertsPage() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-lg font-bold text-white">{alert.symbol}</span>
-                        <Badge variant={alert.direction === 'long' ? 'long' : 'short'}>
+                        <Badge variant={alert.direction === 'long' ? 'success' : 'error'}>
                           {alert.direction.toUpperCase()}
                         </Badge>
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${config.color}`}>
