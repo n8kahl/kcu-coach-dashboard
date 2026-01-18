@@ -327,7 +327,7 @@ export async function compareWithCompetitor(
     const competitorBestHashtags = new Set(competitorAnalytics.best_hashtags.map((h) => h.hashtag));
     const ourHashtags = new Set(ourAnalytics.best_hashtags.map((h) => h.hashtag));
 
-    const missingHashtags = [...competitorBestHashtags].filter((h) => !ourHashtags.has(h));
+    const missingHashtags = Array.from(competitorBestHashtags).filter((h) => !ourHashtags.has(h));
     if (missingHashtags.length > 0) {
       opportunities.push(`Try competitor's top hashtags: ${missingHashtags.slice(0, 5).join(', ')}`);
     }

@@ -50,20 +50,24 @@ export async function GET(request: Request) {
           .eq('module_id', module.id)
           .eq('is_published', true);
 
+        // Get module's lesson IDs first
+        const { data: moduleLessons } = await supabaseAdmin
+          .from('course_lessons')
+          .select('id')
+          .eq('module_id', module.id)
+          .eq('is_published', true);
+
+        const lessonIds = moduleLessons?.map(l => l.id) || [];
+
         // Get completed lessons count
-        const { count: completedLessons } = await supabaseAdmin
-          .from('course_lesson_progress')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .eq('completed', true)
-          .in(
-            'lesson_id',
-            supabaseAdmin
-              .from('course_lessons')
-              .select('id')
-              .eq('module_id', module.id)
-              .eq('is_published', true)
-          );
+        const { count: completedLessons } = lessonIds.length > 0
+          ? await supabaseAdmin
+              .from('course_lesson_progress')
+              .select('*', { count: 'exact', head: true })
+              .eq('user_id', user.id)
+              .eq('completed', true)
+              .in('lesson_id', lessonIds)
+          : { count: 0 };
 
         // Get best quiz score for this module
         const { data: quizAttempt } = await supabaseAdmin

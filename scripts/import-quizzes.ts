@@ -41,6 +41,13 @@ interface QuizFile {
   questions: QuizQuestion[];
 }
 
+interface CsvRow {
+  QuestionType?: string;
+  QuestionText?: string;
+  Explanation?: string;
+  [key: string]: string | undefined;
+}
+
 // Parse command line arguments
 const args = process.argv.slice(2);
 const getArg = (name: string): string | undefined => {
@@ -89,7 +96,7 @@ function parseQuizCSV(filePath: string): QuizQuestion[] {
       columns: true,
       skip_empty_lines: true,
       relaxColumnCount: true,
-    });
+    }) as CsvRow[];
 
     for (const row of records) {
       // Get question type

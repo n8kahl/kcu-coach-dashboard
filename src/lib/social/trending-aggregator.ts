@@ -616,7 +616,7 @@ export async function aggregateAllTrending(): Promise<TrendingTopic[]> {
   // Convert to full TrendingTopic objects and save to database
   const finalTopics: TrendingTopic[] = [];
 
-  for (const [, topic] of uniqueTopics) {
+  for (const [, topic] of Array.from(uniqueTopics.entries())) {
     const fullTopic: TrendingTopic = {
       id: crypto.randomUUID(),
       topic: topic.topic || 'Unknown Topic',
@@ -762,5 +762,5 @@ function generateHashtagsFromText(text: string): string[] {
   // Add common hashtags
   hashtags.push('#trading', '#stockmarket');
 
-  return [...new Set(hashtags)].slice(0, 8);
+  return Array.from(new Set(hashtags)).slice(0, 8);
 }
