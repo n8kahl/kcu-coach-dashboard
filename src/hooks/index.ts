@@ -4,7 +4,7 @@
  * Central export point for all custom hooks.
  */
 
-// Learning Progress Hooks
+// Learning Progress Hooks (Legacy)
 export {
   useLearningProgress,
   useLearningStats,
@@ -14,6 +14,11 @@ export {
   useThinkificSSO,
   useOpenThinkific,
 } from './use-learning-progress';
+
+// New Video Learning System Hooks
+export { useDebounce, useDebouncedValue } from './useDebounce';
+export { useVideoProgress } from './useVideoProgress';
+export { useLearnProgress, useComplianceReport } from './useLearnProgress';
 
 // Re-export types
 export type {
