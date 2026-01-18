@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { exchangeDiscordCode, setSessionCookie } from '@/lib/auth';
+import { randomUUID } from 'crypto';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -38,9 +39,14 @@ export async function GET(request: NextRequest) {
 
     if (!user) {
       // Create new user in user_profiles table
+      // Generate UUID for the id field since the table doesn't have a default
+      const userId = randomUUID();
+      console.log('Creating new user with id:', userId);
+
       const { data: newUser, error: createError } = await supabaseAdmin
         .from('user_profiles')
         .insert({
+          id: userId,
           discord_id: discordUser.id,
           discord_username: discordUser.username,
           avatar_url: discordUser.avatar
