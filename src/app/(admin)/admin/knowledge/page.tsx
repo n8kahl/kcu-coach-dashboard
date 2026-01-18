@@ -97,10 +97,24 @@ interface YouTubeAPIStats {
 }
 
 interface ThinkificStats {
-  totalUsers: number;
-  totalEnrollments: number;
-  courseCompletions: number;
-  webhooksActive: boolean;
+  configured: boolean;
+  last_sync: string | null;
+  courses_count: number;
+  chapters_count: number;
+  contents_count: number;
+  is_syncing: boolean;
+  sync_logs?: Array<{
+    id: string;
+    sync_type: string;
+    status: string;
+    courses_synced: number;
+    chapters_synced: number;
+    contents_synced: number;
+    errors: string[];
+    started_at: string;
+    completed_at: string | null;
+  }>;
+  error?: string;
 }
 
 // ============================================
@@ -194,13 +208,12 @@ export default function KnowledgeCMSPage() {
         });
       }
 
-      // Set Thinkific stats (webhooks are always active)
-      setThinkificStats({
-        totalUsers: 0,
-        totalEnrollments: 0,
-        courseCompletions: 0,
-        webhooksActive: true,
-      });
+      // Fetch Thinkific sync status
+      const thinkificRes = await fetch('/api/admin/thinkific/sync');
+      if (thinkificRes.ok) {
+        const thinkificData = await thinkificRes.json();
+        setThinkificStats(thinkificData);
+      }
 
     } catch (err) {
       console.error('Error fetching data:', err);
@@ -262,9 +275,23 @@ export default function KnowledgeCMSPage() {
   const handleThinkificSync = async () => {
     setThinkificSyncing(true);
     try {
-      // Thinkific syncs via webhooks, this is a placeholder for manual sync
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      fetchData();
+      const response = await fetch('/api/admin/thinkific/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'full' }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(result.message || `Sync completed: ${result.courses_synced} courses, ${result.chapters_synced} chapters, ${result.contents_synced} contents`);
+        fetchData();
+      } else {
+        const err = await response.json();
+        alert(`Sync failed: ${err.error || err.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Error syncing Thinkific:', err);
+      alert('Failed to sync Thinkific content');
     } finally {
       setThinkificSyncing(false);
     }
@@ -631,6 +658,24 @@ export default function KnowledgeCMSPage() {
             {/* Thinkific Tab */}
             <TabsContent value="thinkific">
               <div className="space-y-6">
+                {/* API Configuration Status */}
+                {thinkificStats && !thinkificStats.configured && (
+                  <Card className="border-[var(--warning)] bg-[var(--warning)]/10">
+                    <CardContent className="py-4">
+                      <div className="flex items-center gap-3 text-[var(--warning)]">
+                        <AlertCircle className="w-5 h-5" />
+                        <div>
+                          <p className="font-medium">Thinkific API Not Configured</p>
+                          <p className="text-sm opacity-75">
+                            {thinkificStats.error || 'Set THINKIFIC_API_KEY and THINKIFIC_SUBDOMAIN environment variables.'}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Sync Panel */}
                 <Card variant="elevated" className="overflow-hidden">
                   <CardHeader className="border-b border-[var(--border-secondary)] bg-gradient-to-r from-indigo-500/10 to-transparent">
                     <div className="flex items-center justify-between">
@@ -639,66 +684,130 @@ export default function KnowledgeCMSPage() {
                           <GraduationCap className="w-5 h-5 text-indigo-500" />
                         </div>
                         <div>
-                          <CardTitle className="text-lg">Thinkific LMS</CardTitle>
-                          <p className="text-sm text-[var(--text-tertiary)]">Course Progress & Enrollments</p>
+                          <CardTitle className="text-lg">Thinkific LMS Content</CardTitle>
+                          <p className="text-sm text-[var(--text-tertiary)]">Courses, Chapters & Lessons</p>
                         </div>
                       </div>
-                      <Badge variant="success" className="flex items-center gap-1">
-                        <Webhook className="w-3 h-3" />
-                        Webhooks Active
-                      </Badge>
+                      {thinkificStats?.configured ? (
+                        <Badge variant="success" className="flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          API Configured
+                        </Badge>
+                      ) : (
+                        <Badge variant="warning" className="flex items-center gap-1">
+                          <XCircle className="w-3 h-3" />
+                          Not Configured
+                        </Badge>
+                      )}
                     </div>
                   </CardHeader>
                   <CardContent className="p-4 space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-[var(--text-secondary)]">Last Sync</span>
+                      <span className="text-[var(--text-primary)]">
+                        {thinkificStats?.last_sync
+                          ? new Date(thinkificStats.last_sync).toLocaleString()
+                          : 'Never'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3">
                       <div className="p-3 rounded-lg bg-[var(--bg-secondary)]">
-                        <p className="text-xs text-[var(--text-tertiary)]">Enrollments</p>
+                        <p className="text-xs text-[var(--text-tertiary)]">Courses</p>
                         <p className="text-xl font-bold text-[var(--text-primary)]">
-                          {thinkificStats?.totalEnrollments || 0}
+                          {thinkificStats?.courses_count || 0}
                         </p>
                       </div>
                       <div className="p-3 rounded-lg bg-[var(--bg-secondary)]">
-                        <p className="text-xs text-[var(--text-tertiary)]">Completions</p>
+                        <p className="text-xs text-[var(--text-tertiary)]">Chapters</p>
                         <p className="text-xl font-bold text-[var(--text-primary)]">
-                          {thinkificStats?.courseCompletions || 0}
+                          {thinkificStats?.chapters_count || 0}
+                        </p>
+                      </div>
+                      <div className="p-3 rounded-lg bg-[var(--bg-secondary)]">
+                        <p className="text-xs text-[var(--text-tertiary)]">Lessons</p>
+                        <p className="text-xl font-bold text-[var(--text-primary)]">
+                          {thinkificStats?.contents_count || 0}
                         </p>
                       </div>
                     </div>
 
+                    {/* Webhook Status */}
                     <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/30 flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-green-500" />
-                      <p className="text-sm text-green-400">Webhooks Active - Real-time sync enabled</p>
+                      <Webhook className="w-4 h-4 text-green-500" />
+                      <p className="text-sm text-green-400">Webhooks Active - Progress syncs automatically</p>
                     </div>
 
-                    <div className="text-sm text-[var(--text-tertiary)] space-y-1">
-                      <p>Configured webhook events:</p>
-                      <ul className="list-disc list-inside ml-2 space-y-0.5">
-                        <li>user.signup - Links Thinkific user to KCU</li>
-                        <li>enrollment.created - Records enrollment, awards XP</li>
-                        <li>enrollment.progress - Updates progress percentage</li>
-                        <li>lesson.completed - Awards XP based on content type</li>
-                        <li>enrollment.completed - Awards 500 XP, creates achievement</li>
-                      </ul>
-                    </div>
+                    {/* Sync Logs */}
+                    {thinkificStats?.sync_logs && thinkificStats.sync_logs.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium text-[var(--text-secondary)]">Recent Syncs</p>
+                        <div className="space-y-1">
+                          {thinkificStats.sync_logs.slice(0, 3).map((log) => (
+                            <div
+                              key={log.id}
+                              className="flex items-center justify-between text-xs p-2 rounded bg-[var(--bg-secondary)]"
+                            >
+                              <div className="flex items-center gap-2">
+                                {log.status === 'completed' ? (
+                                  <CheckCircle2 className="w-3 h-3 text-green-500" />
+                                ) : log.status === 'running' ? (
+                                  <Loader2 className="w-3 h-3 text-[var(--warning)] animate-spin" />
+                                ) : (
+                                  <XCircle className="w-3 h-3 text-[var(--error)]" />
+                                )}
+                                <span className="text-[var(--text-tertiary)]">
+                                  {new Date(log.started_at).toLocaleDateString()}
+                                </span>
+                              </div>
+                              <span className="text-[var(--text-primary)]">
+                                {log.courses_synced}c / {log.chapters_synced}ch / {log.contents_synced}l
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <Button
                       onClick={handleThinkificSync}
-                      disabled={thinkificSyncing}
+                      disabled={thinkificSyncing || !thinkificStats?.configured}
                       className="w-full"
-                      variant="secondary"
+                      variant="primary"
                     >
                       {thinkificSyncing ? (
                         <>
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Syncing...
+                          Syncing Thinkific Content...
                         </>
                       ) : (
                         <>
                           <RefreshCw className="w-4 h-4 mr-2" />
-                          Force Full Sync
+                          Sync All Courses
                         </>
                       )}
                     </Button>
+
+                    <p className="text-xs text-[var(--text-muted)] text-center">
+                      Fetches all courses, chapters, and lessons from Thinkific API
+                    </p>
+                  </CardContent>
+                </Card>
+
+                {/* Webhook Info Card */}
+                <Card>
+                  <CardHeader title="Webhook Events" />
+                  <CardContent>
+                    <div className="text-sm text-[var(--text-tertiary)] space-y-1">
+                      <p className="text-[var(--text-secondary)] mb-2">Configured webhook events for real-time updates:</p>
+                      <ul className="list-disc list-inside ml-2 space-y-0.5">
+                        <li>user.signup - Links Thinkific user to KCU</li>
+                        <li>enrollment.created - Records enrollment, awards 50 XP</li>
+                        <li>enrollment.progress - Updates progress percentage</li>
+                        <li>lesson.completed - Awards 25-100 XP based on content type</li>
+                        <li>enrollment.completed - Awards 500 XP, creates achievement</li>
+                      </ul>
+                    </div>
                   </CardContent>
                 </Card>
               </div>

@@ -455,3 +455,249 @@ export function getXpReward(activityType: LearningActivity['type']): number {
   };
   return rewards[activityType] || 0;
 }
+
+// ============================================
+// Thinkific Content Functions (from synced data)
+// ============================================
+
+export interface ThinkificCourseDisplay {
+  id: string;
+  thinkific_id: number;
+  slug: string;
+  title: string;
+  description: string;
+  image_url: string | null;
+  lesson_count: number;
+  chapter_count: number;
+  duration: string | null;
+}
+
+export interface ThinkificChapterDisplay {
+  id: string;
+  thinkific_id: number;
+  name: string;
+  description: string | null;
+  position: number;
+  contents: ThinkificContentDisplay[];
+}
+
+export interface ThinkificContentDisplay {
+  id: string;
+  thinkific_id: number;
+  name: string;
+  content_type: string;
+  position: number;
+  video_duration: number | null;
+  video_provider: string | null;
+  free_preview: boolean;
+  description: string | null;
+}
+
+/**
+ * Get all Thinkific courses for the Learning page
+ * Uses the synced thinkific_courses table
+ */
+export async function getThinkificCourses(): Promise<ThinkificCourseDisplay[]> {
+  const { data: courses, error } = await supabaseAdmin
+    .from('thinkific_courses')
+    .select('*')
+    .order('name', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching Thinkific courses:', error);
+    return [];
+  }
+
+  return courses.map((course) => ({
+    id: course.id,
+    thinkific_id: course.thinkific_id,
+    slug: course.slug || `course-${course.thinkific_id}`,
+    title: course.name,
+    description: course.description || '',
+    image_url: course.course_card_image_url || course.banner_image_url,
+    lesson_count: course.content_count || 0,
+    chapter_count: course.chapter_count || 0,
+    duration: course.duration,
+  }));
+}
+
+/**
+ * Get a single course with its chapters and contents
+ */
+export async function getThinkificCourseWithContents(
+  courseIdOrSlug: string | number
+): Promise<{
+  course: ThinkificCourseDisplay;
+  chapters: ThinkificChapterDisplay[];
+} | null> {
+  // Try to find course by slug first, then by thinkific_id
+  let course;
+  if (typeof courseIdOrSlug === 'string' && isNaN(Number(courseIdOrSlug))) {
+    const { data } = await supabaseAdmin
+      .from('thinkific_courses')
+      .select('*')
+      .eq('slug', courseIdOrSlug)
+      .single();
+    course = data;
+  } else {
+    const { data } = await supabaseAdmin
+      .from('thinkific_courses')
+      .select('*')
+      .eq('thinkific_id', Number(courseIdOrSlug))
+      .single();
+    course = data;
+  }
+
+  if (!course) return null;
+
+  // Get chapters
+  const { data: chapters } = await supabaseAdmin
+    .from('thinkific_chapters')
+    .select('*')
+    .eq('course_id', course.thinkific_id)
+    .order('position', { ascending: true });
+
+  // Get contents
+  const { data: contents } = await supabaseAdmin
+    .from('thinkific_contents')
+    .select('*')
+    .eq('course_id', course.thinkific_id)
+    .order('position', { ascending: true });
+
+  // Group contents by chapter
+  const contentsByChapter = (contents || []).reduce(
+    (acc, content) => {
+      const chapterId = content.chapter_id;
+      if (!acc[chapterId]) acc[chapterId] = [];
+      acc[chapterId].push({
+        id: content.id,
+        thinkific_id: content.thinkific_id,
+        name: content.name,
+        content_type: content.content_type,
+        position: content.position,
+        video_duration: content.video_duration,
+        video_provider: content.video_provider,
+        free_preview: content.free_preview,
+        description: content.description,
+      });
+      return acc;
+    },
+    {} as Record<number, ThinkificContentDisplay[]>
+  );
+
+  return {
+    course: {
+      id: course.id,
+      thinkific_id: course.thinkific_id,
+      slug: course.slug || `course-${course.thinkific_id}`,
+      title: course.name,
+      description: course.description || '',
+      image_url: course.course_card_image_url || course.banner_image_url,
+      lesson_count: course.content_count || 0,
+      chapter_count: course.chapter_count || 0,
+      duration: course.duration,
+    },
+    chapters: (chapters || []).map((chapter) => ({
+      id: chapter.id,
+      thinkific_id: chapter.thinkific_id,
+      name: chapter.name,
+      description: chapter.description,
+      position: chapter.position,
+      contents: contentsByChapter[chapter.thinkific_id] || [],
+    })),
+  };
+}
+
+/**
+ * Get user's progress for a Thinkific course
+ */
+export async function getUserThinkificCourseProgress(
+  userId: string,
+  courseId: number
+): Promise<{
+  total_contents: number;
+  completed_contents: number;
+  percentage: number;
+  completed_content_ids: number[];
+}> {
+  // Count total contents in course
+  const { count: totalContents } = await supabaseAdmin
+    .from('thinkific_contents')
+    .select('*', { count: 'exact', head: true })
+    .eq('course_id', courseId);
+
+  // Count completed contents for user
+  const { data: completed } = await supabaseAdmin
+    .from('thinkific_user_progress')
+    .select('content_id')
+    .eq('user_id', userId)
+    .eq('course_id', courseId)
+    .eq('completed', true);
+
+  const completedCount = completed?.length || 0;
+  const total = totalContents || 0;
+
+  return {
+    total_contents: total,
+    completed_contents: completedCount,
+    percentage: total > 0 ? Math.round((completedCount / total) * 100) : 0,
+    completed_content_ids: completed?.map((c) => c.content_id) || [],
+  };
+}
+
+/**
+ * Mark a Thinkific content as completed
+ */
+export async function markThinkificContentCompleted(
+  userId: string,
+  contentId: number,
+  courseId: number
+): Promise<boolean> {
+  const { error } = await supabaseAdmin.from('thinkific_user_progress').upsert(
+    {
+      user_id: userId,
+      content_id: contentId,
+      course_id: courseId,
+      completed: true,
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id,content_id' }
+  );
+
+  return !error;
+}
+
+/**
+ * Check if Thinkific content has been synced
+ */
+export async function hasThinkificContent(): Promise<boolean> {
+  const { count } = await supabaseAdmin
+    .from('thinkific_courses')
+    .select('*', { count: 'exact', head: true });
+
+  return (count || 0) > 0;
+}
+
+/**
+ * Get Thinkific content count summary
+ */
+export async function getThinkificContentSummary(): Promise<{
+  courses: number;
+  chapters: number;
+  contents: number;
+  last_sync: string | null;
+}> {
+  const [coursesResult, chaptersResult, contentsResult] = await Promise.all([
+    supabaseAdmin.from('thinkific_courses').select('synced_at', { count: 'exact', head: false }).order('synced_at', { ascending: false }).limit(1),
+    supabaseAdmin.from('thinkific_chapters').select('*', { count: 'exact', head: true }),
+    supabaseAdmin.from('thinkific_contents').select('*', { count: 'exact', head: true }),
+  ]);
+
+  return {
+    courses: coursesResult.count || 0,
+    chapters: chaptersResult.count || 0,
+    contents: contentsResult.count || 0,
+    last_sync: coursesResult.data?.[0]?.synced_at || null,
+  };
+}
