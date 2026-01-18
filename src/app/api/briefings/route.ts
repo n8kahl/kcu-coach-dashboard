@@ -56,9 +56,62 @@ export async function GET(request: Request) {
         });
       }
 
+      // Fetch today's economic events for the default briefing
+      const today = new Date().toISOString().split('T')[0];
+      const { data: economicEventsData } = await supabaseAdmin
+        .from('economic_events')
+        .select('event_name, event_time, impact')
+        .eq('event_date', today)
+        .order('event_time', { ascending: true });
+
+      const economicEvents = (economicEventsData || []).map((e: { event_name: string; event_time?: string; impact: string }) => ({
+        eventName: e.event_name,
+        eventTime: e.event_time || undefined,
+        impact: e.impact,
+      }));
+
+      // Return a default briefing when none exists
+      const defaultBriefing = {
+        id: 'default',
+        briefingType: type,
+        generatedAt: new Date().toISOString(),
+        content: {
+          headline: 'Daily Trading Briefing',
+          summary: 'Review key levels and wait for high-quality setups. Focus on LTP methodology.',
+          marketBias: 'neutral' as const,
+          actionItems: [
+            'Review key support and resistance levels',
+            'Check economic calendar for high-impact events',
+            'Focus on A-grade setups only',
+            'Wait for patience candle confirmation before entry',
+          ],
+          warnings: [],
+        },
+        marketContext: {
+          spyPrice: 0,
+          spyChange: 0,
+          spyTrend: 'range',
+          qqqPrice: 0,
+          qqqChange: 0,
+          qqqTrend: 'range',
+          marketPhase: 'pre_market' as const,
+          overallSentiment: 'neutral' as const,
+        },
+        keyLevels: [],
+        setups: [],
+        economicEvents,
+        earnings: [],
+        lessonOfDay: {
+          title: 'Wait for Confirmation',
+          content: 'Never enter a trade without a patience candle confirming your setup. The market rewards patience, not FOMO.',
+          module: 'ltp-framework',
+        },
+      };
+
       return NextResponse.json({
-        briefing: null,
-        message: 'No briefing available yet',
+        briefing: defaultBriefing,
+        isDefault: true,
+        message: 'Using default briefing. Generate a real briefing from admin panel.',
       });
     }
 
