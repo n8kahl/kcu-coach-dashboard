@@ -97,15 +97,18 @@ export interface CompetitorComparison {
 
 const FEATURED_INFLUENCERS = [
   // Trading influencers on Instagram
-  { platform: 'instagram' as SocialPlatform, handle: 'tjr_trading', name: 'TJR' },
+  { platform: 'instagram' as SocialPlatform, handle: 'tjr', name: 'TJR' },
   { platform: 'instagram' as SocialPlatform, handle: 'warrior_trading', name: 'Warrior Trading' },
   { platform: 'instagram' as SocialPlatform, handle: 'humbledtrader', name: 'Humbled Trader' },
   { platform: 'instagram' as SocialPlatform, handle: 'stockmarketz', name: 'Stock Marketz' },
 
   // TikTok trading influencers
-  { platform: 'tiktok' as SocialPlatform, handle: 'tjr_trading', name: 'TJR' },
+  { platform: 'tiktok' as SocialPlatform, handle: 'tjr', name: 'TJR' },
   { platform: 'tiktok' as SocialPlatform, handle: 'humbledtrader', name: 'Humbled Trader' },
   { platform: 'tiktok' as SocialPlatform, handle: 'stockspert', name: 'Stockspert' },
+
+  // X/Twitter trading influencers
+  { platform: 'twitter' as SocialPlatform, handle: '_TJRTrades', name: 'TJR' },
 ];
 
 // KayCapitals accounts
