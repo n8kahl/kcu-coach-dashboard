@@ -13,7 +13,7 @@ export async function GET() {
     const userId = session.userId;
 
     // Get or create user's personal watchlist
-    // Note: Database schema uses 'owner_id' column (see supabase-schema-v3.sql)
+    // Try owner_id first, then user_id for schema compatibility
     let { data: watchlist, error: watchlistError } = await supabaseAdmin
       .from('watchlists')
       .select('id, name, is_shared, is_admin_watchlist, symbols')
@@ -21,12 +21,28 @@ export async function GET() {
       .eq('is_shared', false)
       .single();
 
+    // Fallback: try user_id if owner_id didn't work
+    if (!watchlist && watchlistError?.code === 'PGRST116') {
+      const { data: watchlistByUserId } = await supabaseAdmin
+        .from('watchlists')
+        .select('id, name, is_shared, is_admin_watchlist, symbols')
+        .eq('user_id', userId)
+        .eq('is_shared', false)
+        .single();
+      watchlist = watchlistByUserId;
+    }
+
     if (!watchlist) {
       // Create personal watchlist if doesn't exist
-      const { data: newWatchlist, error: createError } = await supabaseAdmin
+      // Try with owner_id first, fall back to user_id
+      let createError;
+      let newWatchlist;
+
+      // Try owner_id first
+      const result1 = await supabaseAdmin
         .from('watchlists')
         .insert({
-          owner_id: userId,  // Database schema uses 'owner_id'
+          owner_id: userId,
           name: 'My Watchlist',
           is_shared: false,
           is_admin_watchlist: false,
@@ -34,6 +50,26 @@ export async function GET() {
         })
         .select()
         .single();
+
+      if (result1.error?.message?.includes('owner_id')) {
+        // Column doesn't exist, try user_id
+        const result2 = await supabaseAdmin
+          .from('watchlists')
+          .insert({
+            user_id: userId,
+            name: 'My Watchlist',
+            is_shared: false,
+            is_admin_watchlist: false,
+            symbols: []
+          })
+          .select()
+          .single();
+        createError = result2.error;
+        newWatchlist = result2.data;
+      } else {
+        createError = result1.error;
+        newWatchlist = result1.data;
+      }
 
       if (createError || !newWatchlist) {
         console.error('Error creating watchlist:', createError);
@@ -118,8 +154,8 @@ export async function POST(request: Request) {
 
     const normalizedSymbol = symbol.trim().toUpperCase();
 
-    // Get user's watchlist (database schema uses 'owner_id')
-    const { data: watchlist, error: watchlistError } = await supabaseAdmin
+    // Get user's watchlist - try owner_id first, then user_id
+    let { data: watchlist } = await supabaseAdmin
       .from('watchlists')
       .select('id, symbols')
       .eq('owner_id', userId)
@@ -127,19 +163,46 @@ export async function POST(request: Request) {
       .single();
 
     if (!watchlist) {
-      // Create watchlist with the symbol
-      const { error: createError } = await supabaseAdmin
+      // Try user_id as fallback
+      const { data: watchlistByUserId } = await supabaseAdmin
+        .from('watchlists')
+        .select('id, symbols')
+        .eq('user_id', userId)
+        .eq('is_shared', false)
+        .single();
+      watchlist = watchlistByUserId;
+    }
+
+    if (!watchlist) {
+      // Create watchlist with the symbol - try owner_id first
+      const result1 = await supabaseAdmin
         .from('watchlists')
         .insert({
-          owner_id: userId,  // Database schema uses 'owner_id'
+          owner_id: userId,
           name: 'My Watchlist',
           is_shared: false,
           is_admin_watchlist: false,
           symbols: [normalizedSymbol]
         });
 
-      if (createError) {
-        console.error('Error creating watchlist:', createError);
+      if (result1.error?.message?.includes('owner_id')) {
+        // Try user_id instead
+        const result2 = await supabaseAdmin
+          .from('watchlists')
+          .insert({
+            user_id: userId,
+            name: 'My Watchlist',
+            is_shared: false,
+            is_admin_watchlist: false,
+            symbols: [normalizedSymbol]
+          });
+
+        if (result2.error) {
+          console.error('Error creating watchlist:', result2.error);
+          return NextResponse.json({ error: 'Failed to add symbol' }, { status: 500 });
+        }
+      } else if (result1.error) {
+        console.error('Error creating watchlist:', result1.error);
         return NextResponse.json({ error: 'Failed to add symbol' }, { status: 500 });
       }
     } else {
@@ -186,13 +249,24 @@ export async function DELETE(request: Request) {
 
     const normalizedSymbol = symbol.trim().toUpperCase();
 
-    // Get user's watchlist (database schema uses 'owner_id')
-    const { data: watchlist, error: watchlistError } = await supabaseAdmin
+    // Get user's watchlist - try owner_id first, then user_id
+    let { data: watchlist } = await supabaseAdmin
       .from('watchlists')
       .select('id, symbols')
       .eq('owner_id', userId)
       .eq('is_shared', false)
       .single();
+
+    if (!watchlist) {
+      // Try user_id as fallback
+      const { data: watchlistByUserId } = await supabaseAdmin
+        .from('watchlists')
+        .select('id, symbols')
+        .eq('user_id', userId)
+        .eq('is_shared', false)
+        .single();
+      watchlist = watchlistByUserId;
+    }
 
     if (!watchlist) {
       return NextResponse.json({ error: 'Watchlist not found' }, { status: 404 });

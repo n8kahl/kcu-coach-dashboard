@@ -17,13 +17,23 @@ export async function GET(request: Request) {
     const stage = searchParams.get('stage'); // forming, ready, triggered
     const minConfluence = parseInt(searchParams.get('minConfluence') || '0');
 
-    // Get user's watchlist symbols (database schema uses 'owner_id')
-    const { data: watchlist } = await supabaseAdmin
+    // Get user's watchlist symbols - try owner_id first, then user_id
+    let { data: watchlist } = await supabaseAdmin
       .from('watchlists')
       .select('symbols')
       .eq('owner_id', userId)
       .eq('is_shared', false)
       .single();
+
+    if (!watchlist) {
+      const { data: watchlistByUserId } = await supabaseAdmin
+        .from('watchlists')
+        .select('symbols')
+        .eq('user_id', userId)
+        .eq('is_shared', false)
+        .single();
+      watchlist = watchlistByUserId;
+    }
 
     // Get shared watchlist symbols
     const { data: sharedWatchlists } = await supabaseAdmin
