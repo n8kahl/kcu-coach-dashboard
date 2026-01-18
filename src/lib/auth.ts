@@ -1,4 +1,5 @@
-import { getServerSession } from 'next-auth';
+import { cookies } from 'next/headers';
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { supabaseAdmin } from './supabase';
 
 // Extended session user type
@@ -11,15 +12,25 @@ export interface SessionUser {
   image?: string | null;
 }
 
-// Helper to get authenticated user's Discord ID
+// Helper to get authenticated user from Supabase
 export async function getAuthenticatedUser() {
-  const session = await getServerSession();
+  const supabase = createServerComponentClient({ cookies });
 
-  if (!session?.user) {
+  const { data: { session }, error } = await supabase.auth.getSession();
+
+  if (error || !session?.user) {
     return null;
   }
 
-  const user = session.user as SessionUser;
+  const user: SessionUser = {
+    id: session.user.id,
+    email: session.user.email,
+    name: session.user.user_metadata?.full_name || session.user.user_metadata?.name,
+    image: session.user.user_metadata?.avatar_url,
+    discordId: session.user.user_metadata?.provider_id,
+    username: session.user.user_metadata?.custom_claims?.global_name || session.user.user_metadata?.name,
+  };
+
   return user;
 }
 
@@ -27,17 +38,30 @@ export async function getAuthenticatedUser() {
 export async function getAuthenticatedDbUser() {
   const sessionUser = await getAuthenticatedUser();
 
-  if (!sessionUser?.discordId) {
+  if (!sessionUser?.id) {
     return null;
   }
 
+  // Try to find by auth user id first, then by discord_id
   const { data: user, error } = await supabaseAdmin
     .from('user_profiles')
     .select('*')
-    .eq('discord_id', sessionUser.discordId)
+    .eq('id', sessionUser.id)
     .single();
 
   if (error) {
+    // Try by discord_id as fallback
+    if (sessionUser.discordId) {
+      const { data: discordUser, error: discordError } = await supabaseAdmin
+        .from('user_profiles')
+        .select('*')
+        .eq('discord_id', sessionUser.discordId)
+        .single();
+
+      if (!discordError && discordUser) {
+        return discordUser;
+      }
+    }
     console.error('Error fetching user:', error);
     return null;
   }
@@ -49,19 +73,9 @@ export async function getAuthenticatedDbUser() {
 export async function getAuthenticatedUserId() {
   const sessionUser = await getAuthenticatedUser();
 
-  if (!sessionUser?.discordId) {
+  if (!sessionUser?.id) {
     return null;
   }
 
-  const { data: user, error } = await supabaseAdmin
-    .from('user_profiles')
-    .select('id')
-    .eq('discord_id', sessionUser.discordId)
-    .single();
-
-  if (error || !user) {
-    return null;
-  }
-
-  return user.id;
+  return sessionUser.id;
 }
