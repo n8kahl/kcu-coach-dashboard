@@ -87,6 +87,113 @@ const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3';
 const KAY_CAPITALS_CHANNEL_ID = process.env.KAY_CAPITALS_CHANNEL_ID || 'UC_YOUR_CHANNEL_ID'; // Update with actual channel ID
 
+/**
+ * Check if YouTube API is configured
+ */
+export function isYouTubeConfigured(): boolean {
+  return !!(YOUTUBE_API_KEY && KAY_CAPITALS_CHANNEL_ID && KAY_CAPITALS_CHANNEL_ID !== 'UC_YOUR_CHANNEL_ID');
+}
+
+/**
+ * Get channel sync status from database
+ */
+export async function getChannelSyncStatus(channelId: string = KAY_CAPITALS_CHANNEL_ID): Promise<{
+  channel_id: string;
+  channel_name: string | null;
+  last_sync_at: string | null;
+  total_videos: number;
+  indexed_videos: number;
+  failed_videos: number;
+  sync_status: 'idle' | 'syncing' | 'completed' | 'failed';
+  error_message: string | null;
+} | null> {
+  const { data, error } = await supabaseAdmin
+    .from('youtube_channel_sync')
+    .select('*')
+    .eq('channel_id', channelId)
+    .single();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data;
+}
+
+/**
+ * Get related videos based on category and topics
+ */
+export async function getRelatedVideos(
+  videoId: string,
+  limit: number = 5
+): Promise<VideoSearchResult[]> {
+  // First get the source video's category
+  const { data: sourceVideo } = await supabaseAdmin
+    .from('youtube_videos')
+    .select('category, topics')
+    .eq('video_id', videoId)
+    .single();
+
+  if (!sourceVideo) return [];
+
+  // Find videos with same category or overlapping topics
+  let query = supabaseAdmin
+    .from('youtube_videos')
+    .select('*')
+    .neq('video_id', videoId)
+    .eq('transcript_status', 'completed');
+
+  if (sourceVideo.category) {
+    query = query.eq('category', sourceVideo.category);
+  }
+
+  const { data: videos, error } = await query.limit(limit);
+
+  if (error || !videos) return [];
+
+  return videos.map(v => ({
+    videoId: v.video_id,
+    title: v.title,
+    description: v.description || '',
+    thumbnailUrl: v.thumbnail_url,
+    startMs: 0,
+    endMs: 0,
+    matchedText: '',
+    relevanceScore: v.ltp_relevance || 0,
+    youtubeUrl: `https://www.youtube.com/watch?v=${v.video_id}`,
+  }));
+}
+
+/**
+ * Get videos by category
+ */
+export async function getVideosByCategory(
+  category: string,
+  limit: number = 10
+): Promise<VideoSearchResult[]> {
+  const { data: videos, error } = await supabaseAdmin
+    .from('youtube_videos')
+    .select('*')
+    .eq('category', category)
+    .eq('transcript_status', 'completed')
+    .order('ltp_relevance', { ascending: false })
+    .limit(limit);
+
+  if (error || !videos) return [];
+
+  return videos.map(v => ({
+    videoId: v.video_id,
+    title: v.title,
+    description: v.description || '',
+    thumbnailUrl: v.thumbnail_url,
+    startMs: 0,
+    endMs: 0,
+    matchedText: '',
+    relevanceScore: v.ltp_relevance || 0,
+    youtubeUrl: `https://www.youtube.com/watch?v=${v.video_id}`,
+  }));
+}
+
 // Video categorization keywords for automatic tagging
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   'LTP Framework': ['ltp', 'levels', 'trends', 'patience', 'patience candle', 'hourly level'],
@@ -606,9 +713,10 @@ async function createTimestampedChunks(
   let totalChunks = 0;
   for (const chunk of chunks) {
     try {
-      const chunkIds = await processAndEmbedText(chunk.content, metadata);
+      const result = await processAndEmbedText(chunk.content, metadata);
 
-      if (chunkIds.length > 0) {
+      if (result.success && result.chunkCount > 0) {
+        // Update chunks with timestamp info by matching content prefix
         await supabaseAdmin
           .from('knowledge_chunks')
           .update({
@@ -616,9 +724,11 @@ async function createTimestampedChunks(
             end_timestamp_ms: chunk.endMs,
             segment_indices: chunk.segmentIndices,
           })
-          .in('id', chunkIds);
+          .eq('source_type', 'transcript')
+          .eq('source_id', metadata.sourceId)
+          .ilike('content', chunk.content.slice(0, 50) + '%');
 
-        totalChunks += chunkIds.length;
+        totalChunks += result.chunkCount;
       }
     } catch (err) {
       logger.error('Error processing chunk', { videoId, error: err });
@@ -716,7 +826,7 @@ export async function syncAndIndexChannel(
     lastSyncAt: new Date().toISOString(),
   };
 
-  logger.info('Channel sync completed', stats);
+  logger.info('Channel sync completed', { ...stats } as Record<string, unknown>);
 
   return stats;
 }

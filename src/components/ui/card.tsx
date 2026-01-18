@@ -141,14 +141,28 @@ const Card = forwardRef<HTMLDivElement, CardProps>(
 Card.displayName = 'Card';
 
 export interface CardHeaderProps extends React.HTMLAttributes<HTMLDivElement> {
-  title: string;
+  title?: string;
   subtitle?: string;
   action?: React.ReactNode;
   icon?: React.ReactNode;
 }
 
 const CardHeader = forwardRef<HTMLDivElement, CardHeaderProps>(
-  ({ className, title, subtitle, action, icon, ...props }, ref) => {
+  ({ className, title, subtitle, action, icon, children, ...props }, ref) => {
+    // If children are provided, render them directly (flexible pattern)
+    if (children) {
+      return (
+        <div
+          ref={ref}
+          className={cn('mb-4', className)}
+          {...props}
+        >
+          {children}
+        </div>
+      );
+    }
+
+    // Otherwise use the structured pattern with title/subtitle
     return (
       <div
         ref={ref}
@@ -158,9 +172,11 @@ const CardHeader = forwardRef<HTMLDivElement, CardHeaderProps>(
         <div className="flex items-center gap-2">
           {icon && <span className="text-[var(--accent-primary)]">{icon}</span>}
           <div>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-primary)]">
-              {title}
-            </h3>
+            {title && (
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-primary)]">
+                {title}
+              </h3>
+            )}
             {subtitle && (
               <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{subtitle}</p>
             )}
@@ -206,4 +222,43 @@ const CardFooter = forwardRef<HTMLDivElement, CardFooterProps>(
 
 CardFooter.displayName = 'CardFooter';
 
-export { Card, CardHeader, CardContent, CardFooter };
+interface CardTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {}
+
+const CardTitle = forwardRef<HTMLHeadingElement, CardTitleProps>(
+  ({ className, children, ...props }, ref) => {
+    return (
+      <h3
+        ref={ref}
+        className={cn(
+          'text-sm font-semibold uppercase tracking-wide text-[var(--text-primary)]',
+          className
+        )}
+        {...props}
+      >
+        {children}
+      </h3>
+    );
+  }
+);
+
+CardTitle.displayName = 'CardTitle';
+
+interface CardDescriptionProps extends React.HTMLAttributes<HTMLParagraphElement> {}
+
+const CardDescription = forwardRef<HTMLParagraphElement, CardDescriptionProps>(
+  ({ className, children, ...props }, ref) => {
+    return (
+      <p
+        ref={ref}
+        className={cn('text-xs text-[var(--text-tertiary)] mt-0.5', className)}
+        {...props}
+      >
+        {children}
+      </p>
+    );
+  }
+);
+
+CardDescription.displayName = 'CardDescription';
+
+export { Card, CardHeader, CardContent, CardFooter, CardTitle, CardDescription };

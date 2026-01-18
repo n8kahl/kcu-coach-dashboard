@@ -144,11 +144,13 @@ export async function fetchAndStoreTranscriptSegments(
   const { fetchTranscript } = await import('./youtube');
 
   // Fetch transcript from YouTube
-  const rawSegments = await fetchTranscript(videoId);
+  const transcriptResult = await fetchTranscript(videoId);
 
-  if (!rawSegments || rawSegments.length === 0) {
-    throw new Error(`No transcript found for video ${videoId}`);
+  if (!transcriptResult.success || transcriptResult.segments.length === 0) {
+    throw new Error(transcriptResult.error || `No transcript found for video ${videoId}`);
   }
+
+  const rawSegments = transcriptResult.segments;
 
   // Transform to our format with proper typing
   const segments: TranscriptSegment[] = rawSegments.map((seg, index) => ({
@@ -223,7 +225,7 @@ export async function processTranscriptWithTimestamps(
   lessonId: string,
   segments: TranscriptSegment[],
   metadata: Partial<ChunkMetadata>
-): Promise<string[]> {
+): Promise<{ success: boolean; chunkCount: number; error?: string }> {
   const { processAndEmbedText } = await import('./embeddings');
 
   const chunks: TimestampedChunk[] = [];
@@ -286,15 +288,18 @@ export async function processTranscriptWithTimestamps(
   }
 
   // Process each chunk: generate embeddings and store
-  const allChunkIds: string[] = [];
+  let totalChunks = 0;
+  let hasError = false;
 
   for (const chunk of chunks) {
     try {
       // Generate embedding and store using existing function
-      const chunkIds = await processAndEmbedText(chunk.content, chunk.metadata);
+      const result = await processAndEmbedText(chunk.content, chunk.metadata);
 
-      // Update the chunk records with timestamp info
-      if (chunkIds.length > 0) {
+      if (result.success) {
+        totalChunks += result.chunkCount;
+
+        // Update the chunk records with timestamp info (query by source_id since we don't have chunk IDs)
         await supabaseAdmin
           .from('knowledge_chunks')
           .update({
@@ -302,17 +307,20 @@ export async function processTranscriptWithTimestamps(
             end_timestamp_ms: chunk.endMs,
             segment_indices: chunk.segmentIndices,
           })
-          .in('id', chunkIds);
-
-        allChunkIds.push(...chunkIds);
+          .eq('source_type', 'transcript')
+          .eq('source_id', videoId)
+          .contains('content', chunk.content.slice(0, 100)); // Match by content prefix
+      } else {
+        hasError = true;
       }
     } catch (err) {
       console.error(`Error processing chunk for video ${videoId}:`, err);
+      hasError = true;
     }
   }
 
-  console.log(`Created ${chunks.length} timestamped chunks for video ${videoId}`);
-  return allChunkIds;
+  console.log(`Created ${totalChunks} timestamped chunks for video ${videoId}`);
+  return { success: !hasError && totalChunks > 0, chunkCount: totalChunks };
 }
 
 // ============================================

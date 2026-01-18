@@ -288,7 +288,7 @@ export default function ContentSyncPage() {
               onClick={handleYouTubeSync}
               disabled={youtubeSyncStatus.status === 'syncing'}
               className="w-full"
-              variant="default"
+              variant="primary"
             >
               {youtubeSyncStatus.status === 'syncing' ? (
                 <>
@@ -364,7 +364,7 @@ export default function ContentSyncPage() {
               onClick={handleThinkificSync}
               disabled={thinkificSyncStatus.status === 'syncing'}
               className="w-full"
-              variant="outline"
+              variant="secondary"
             >
               {thinkificSyncStatus.status === 'syncing' ? (
                 <>
@@ -462,7 +462,7 @@ function SyncStatusBadge({ status }: SyncStatusBadgeProps) {
     idle: { label: 'Idle', variant: 'default' as const, icon: Clock },
     syncing: { label: 'Syncing', variant: 'gold' as const, icon: RefreshCw },
     completed: { label: 'Synced', variant: 'success' as const, icon: CheckCircle2 },
-    error: { label: 'Error', variant: 'destructive' as const, icon: XCircle },
+    error: { label: 'Error', variant: 'error' as const, icon: XCircle },
   };
 
   const config = configs[status];
