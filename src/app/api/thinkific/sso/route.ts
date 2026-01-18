@@ -6,7 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { getSession } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase';
 import {
   generateSSOUrl,
   generateLessonSSOUrl,
@@ -44,10 +45,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Get authenticated user
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const session = await getSession();
 
-    if (authError || !user) {
+    if (!session.user || !session.userId) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
@@ -55,10 +55,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Get user profile for Thinkific
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('first_name, last_name, email')
-      .eq('id', user.id)
+    const { data: profile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('discord_username, email')
+      .eq('id', session.userId)
       .single();
 
     if (!profile) {
@@ -73,10 +73,10 @@ export async function POST(request: NextRequest) {
 
     // Build Thinkific user object
     const thinkificUser: ThinkificUser = {
-      email: profile.email || user.email || '',
-      firstName: profile.first_name || 'User',
-      lastName: profile.last_name || '',
-      externalId: user.id,
+      email: profile.email || session.user.email || '',
+      firstName: session.user.username || 'User',
+      lastName: '',
+      externalId: session.userId,
     };
 
     let ssoUrl: string;
@@ -173,10 +173,9 @@ export async function GET(request: NextRequest) {
     }
 
     // Get authenticated user
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const session = await getSession();
 
-    if (authError || !user) {
+    if (!session.user || !session.userId) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
@@ -184,10 +183,10 @@ export async function GET(request: NextRequest) {
     }
 
     // Get user profile
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('first_name, last_name, email')
-      .eq('id', user.id)
+    const { data: profile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('discord_username, email')
+      .eq('id', session.userId)
       .single();
 
     if (!profile) {
@@ -198,10 +197,10 @@ export async function GET(request: NextRequest) {
     }
 
     const thinkificUser: ThinkificUser = {
-      email: profile.email || user.email || '',
-      firstName: profile.first_name || 'User',
-      lastName: profile.last_name || '',
-      externalId: user.id,
+      email: profile.email || session.user.email || '',
+      firstName: session.user.username || 'User',
+      lastName: '',
+      externalId: session.userId,
     };
 
     const link = await generateVideoTimestampLink(

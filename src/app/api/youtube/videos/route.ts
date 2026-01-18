@@ -5,7 +5,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { getSession } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase';
 
 // ============================================
 // GET /api/youtube/videos
@@ -15,10 +16,9 @@ import { createClient } from '@/lib/supabase/server';
 export async function GET(request: NextRequest) {
   try {
     // Get authenticated user
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const session = await getSession();
 
-    if (authError || !user) {
+    if (!session.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     const sortOrder = searchParams.get('sortOrder') || 'desc';
 
     // Build query
-    let query = supabase
+    let query = supabaseAdmin
       .from('youtube_videos')
       .select('*', { count: 'exact' });
 
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get category counts for filtering UI
-    const { data: categoryCounts } = await supabase
+    const { data: categoryCounts } = await supabaseAdmin
       .from('v_youtube_by_category')
       .select('*');
 
@@ -89,17 +89,16 @@ export async function GET(request: NextRequest) {
 }
 
 // ============================================
-// GET /api/youtube/videos/[videoId]
+// POST /api/youtube/videos
 // Get single video details
 // ============================================
 
 export async function POST(request: NextRequest) {
   try {
     // Get authenticated user
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const session = await getSession();
 
-    if (authError || !user) {
+    if (!session.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
@@ -117,7 +116,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get video details
-    const { data: video, error: videoError } = await supabase
+    const { data: video, error: videoError } = await supabaseAdmin
       .from('youtube_videos')
       .select('*')
       .eq('video_id', videoId)
@@ -131,9 +130,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Get transcript segments if available
-    let segments: any[] = [];
+    let segments: unknown[] = [];
     if (video.transcript_status === 'completed') {
-      const { data: segmentData } = await supabase
+      const { data: segmentData } = await supabaseAdmin
         .from('transcript_segments')
         .select('*')
         .eq('video_id', videoId)
@@ -143,7 +142,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get related videos
-    const { data: relatedData } = await supabase
+    const { data: relatedData } = await supabaseAdmin
       .rpc('get_related_youtube_videos', {
         p_video_id: videoId,
         p_limit: 5,

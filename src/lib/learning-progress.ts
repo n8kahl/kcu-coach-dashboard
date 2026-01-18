@@ -9,7 +9,7 @@
  * Provides a single API for displaying progress across the platform.
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { supabaseAdmin } from '@/lib/supabase';
 
 // ============================================
 // Types
@@ -85,7 +85,7 @@ export interface ModuleProgress {
  * Get all course progress for a user
  */
 export async function getUserCourseProgress(userId: string): Promise<CourseProgress[]> {
-  const supabase = await createClient();
+  const supabase = supabaseAdmin;
   const progress: CourseProgress[] = [];
 
   // Get Thinkific enrollments
@@ -158,7 +158,7 @@ export async function getUserCourseProgress(userId: string): Promise<CourseProgr
  * Get user's learning statistics
  */
 export async function getUserLearningStats(userId: string): Promise<UserLearningStats> {
-  const supabase = await createClient();
+  const supabase = supabaseAdmin;
 
   // Get user profile for XP and streaks
   const { data: profile } = await supabase
@@ -233,7 +233,7 @@ export async function getRecentLearningActivity(
   userId: string,
   limit: number = 10
 ): Promise<LearningActivity[]> {
-  const supabase = await createClient();
+  const supabase = supabaseAdmin;
   const activities: LearningActivity[] = [];
 
   // Get user's Thinkific ID
@@ -307,7 +307,7 @@ export async function getRecentLearningActivity(
 export async function getModuleProgressWithThinkific(
   userId: string
 ): Promise<ModuleProgress[]> {
-  const supabase = await createClient();
+  const supabase = supabaseAdmin;
 
   // Get local module progress
   const { data: modules } = await supabase
@@ -382,7 +382,7 @@ export async function syncThinkificToLocal(
   userId: string,
   thinkificUserId: number
 ): Promise<void> {
-  const supabase = await createClient();
+  const supabase = supabaseAdmin;
 
   // Get Thinkific enrollments
   const { data: enrollments } = await supabase

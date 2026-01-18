@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { getSession } from '@/lib/auth';
 import {
   syncAndIndexChannel,
   getChannelSyncStatus,
@@ -42,10 +42,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Get authenticated user
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const session = await getSession();
 
-    if (authError || !user) {
+    if (!session.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
@@ -53,13 +52,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user is admin
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-
-    if (!profile || profile.role !== 'admin') {
+    if (!session.isAdmin) {
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
@@ -126,10 +119,9 @@ export async function GET(request: NextRequest) {
     }
 
     // Get authenticated user
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const session = await getSession();
 
-    if (authError || !user) {
+    if (!session.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }

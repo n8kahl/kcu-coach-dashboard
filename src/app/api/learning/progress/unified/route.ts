@@ -5,7 +5,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { getSession } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase';
 import {
   getUserCourseProgress,
   getUserLearningStats,
@@ -21,16 +22,16 @@ import {
 export async function GET(request: NextRequest) {
   try {
     // Get authenticated user
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const session = await getSession();
 
-    if (authError || !user) {
+    if (!session.user || !session.userId) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       );
     }
 
+    const userId = session.userId;
     const searchParams = request.nextUrl.searchParams;
     const include = searchParams.get('include')?.split(',') || ['stats', 'courses', 'modules', 'activity'];
     const activityLimit = parseInt(searchParams.get('activityLimit') || '10', 10);
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
 
     if (include.includes('stats')) {
       promises.push(
-        getUserLearningStats(user.id).then(stats => {
+        getUserLearningStats(userId).then(stats => {
           result.stats = stats;
         })
       );
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
 
     if (include.includes('courses')) {
       promises.push(
-        getUserCourseProgress(user.id).then(courses => {
+        getUserCourseProgress(userId).then(courses => {
           result.courses = courses;
         })
       );
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
 
     if (include.includes('modules')) {
       promises.push(
-        getModuleProgressWithThinkific(user.id).then(modules => {
+        getModuleProgressWithThinkific(userId).then(modules => {
           result.modules = modules;
         })
       );
@@ -66,7 +67,7 @@ export async function GET(request: NextRequest) {
 
     if (include.includes('activity')) {
       promises.push(
-        getRecentLearningActivity(user.id, activityLimit).then(activity => {
+        getRecentLearningActivity(userId, activityLimit).then(activity => {
           result.recentActivity = activity;
         })
       );
@@ -76,7 +77,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      userId: user.id,
+      userId,
       ...result,
     });
 
@@ -94,23 +95,24 @@ export async function GET(request: NextRequest) {
 // Trigger sync between Thinkific and local progress
 // ============================================
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const session = await getSession();
 
-    if (authError || !user) {
+    if (!session.user || !session.userId) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       );
     }
 
+    const userId = session.userId;
+
     // Get user's Thinkific ID
-    const { data: profile } = await supabase
+    const { data: profile } = await supabaseAdmin
       .from('user_profiles')
       .select('thinkific_user_id')
-      .eq('id', user.id)
+      .eq('id', userId)
       .single();
 
     if (!profile?.thinkific_user_id) {
@@ -122,7 +124,7 @@ export async function POST(request: NextRequest) {
 
     // Import and call sync function
     const { syncThinkificToLocal } = await import('@/lib/learning-progress');
-    await syncThinkificToLocal(user.id, profile.thinkific_user_id);
+    await syncThinkificToLocal(userId, profile.thinkific_user_id);
 
     return NextResponse.json({
       success: true,
