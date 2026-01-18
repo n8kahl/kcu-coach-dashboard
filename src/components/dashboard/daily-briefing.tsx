@@ -180,30 +180,32 @@ export function DailyBriefing({ className }: DailyBriefingProps) {
         </div>
 
         {/* Market Context Quick View */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-[var(--bg-tertiary)] rounded-lg p-3">
-            <div className="text-xs text-[var(--text-tertiary)] mb-1">SPY</div>
-            <div className="flex items-center gap-2">
-              <span className="font-mono font-semibold">${briefing.marketContext.spyPrice.toFixed(2)}</span>
-              <span className={`text-sm ${
-                briefing.marketContext.spyChange >= 0 ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
-              }`}>
-                {briefing.marketContext.spyChange >= 0 ? '+' : ''}{briefing.marketContext.spyChange.toFixed(2)}%
-              </span>
+        {briefing.marketContext && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-[var(--bg-tertiary)] rounded-lg p-3">
+              <div className="text-xs text-[var(--text-tertiary)] mb-1">SPY</div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono font-semibold">${(briefing.marketContext.spyPrice ?? 0).toFixed(2)}</span>
+                <span className={`text-sm ${
+                  (briefing.marketContext.spyChange ?? 0) >= 0 ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
+                }`}>
+                  {(briefing.marketContext.spyChange ?? 0) >= 0 ? '+' : ''}{(briefing.marketContext.spyChange ?? 0).toFixed(2)}%
+                </span>
+              </div>
+            </div>
+            <div className="bg-[var(--bg-tertiary)] rounded-lg p-3">
+              <div className="text-xs text-[var(--text-tertiary)] mb-1">QQQ</div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono font-semibold">${(briefing.marketContext.qqqPrice ?? 0).toFixed(2)}</span>
+                <span className={`text-sm ${
+                  (briefing.marketContext.qqqChange ?? 0) >= 0 ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
+                }`}>
+                  {(briefing.marketContext.qqqChange ?? 0) >= 0 ? '+' : ''}{(briefing.marketContext.qqqChange ?? 0).toFixed(2)}%
+                </span>
+              </div>
             </div>
           </div>
-          <div className="bg-[var(--bg-tertiary)] rounded-lg p-3">
-            <div className="text-xs text-[var(--text-tertiary)] mb-1">QQQ</div>
-            <div className="flex items-center gap-2">
-              <span className="font-mono font-semibold">${briefing.marketContext.qqqPrice.toFixed(2)}</span>
-              <span className={`text-sm ${
-                briefing.marketContext.qqqChange >= 0 ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
-              }`}>
-                {briefing.marketContext.qqqChange >= 0 ? '+' : ''}{briefing.marketContext.qqqChange.toFixed(2)}%
-              </span>
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* Warnings */}
         {briefing.content.warnings && briefing.content.warnings.length > 0 && (
