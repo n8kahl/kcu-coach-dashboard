@@ -209,9 +209,9 @@ export default function OverviewPage() {
             <Card variant="default" padding="md">
               <Stat
                 label="Win Rate"
-                value={`${data.stats.win_rate.toFixed(1)}%`}
+                value={`${(data.stats.win_rate ?? 0).toFixed(1)}%`}
                 icon={<Target className="w-4 h-4" />}
-                valueColor={data.stats.win_rate >= 50 ? 'profit' : 'loss'}
+                valueColor={(data.stats.win_rate ?? 0) >= 50 ? 'profit' : 'loss'}
               />
             </Card>
             <Card variant="default" padding="md">
@@ -267,7 +267,7 @@ export default function OverviewPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-3 bg-[var(--bg-tertiary)]">
                     <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">Profit Factor</p>
-                    <p className="text-lg font-bold text-[var(--text-primary)]">{data.stats.profit_factor.toFixed(2)}</p>
+                    <p className="text-lg font-bold text-[var(--text-primary)]">{(data.stats.profit_factor ?? 0).toFixed(2)}</p>
                   </div>
                   <div className="p-3 bg-[var(--bg-tertiary)]">
                     <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">Best Setup</p>
