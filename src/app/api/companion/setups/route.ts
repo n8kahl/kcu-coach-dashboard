@@ -1,100 +1,110 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { getAuthenticatedUserId } from '@/lib/auth';
+import { getSession } from '@/lib/auth';
 
-// GET /api/companion/setups - Get active setups for user's watchlist
+// GET - Fetch detected setups
 export async function GET(request: Request) {
   try {
-    const userId = await getAuthenticatedUserId();
-    if (!userId) {
+    const session = await getSession();
+    if (!session?.userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const userId = session.userId;
     const { searchParams } = new URL(request.url);
+
     const symbol = searchParams.get('symbol');
-    const stage = searchParams.get('stage'); // 'forming', 'ready', 'triggered'
+    const stage = searchParams.get('stage'); // forming, ready, triggered
     const minConfluence = parseInt(searchParams.get('minConfluence') || '0');
 
     // Get user's watchlist symbols
     const { data: watchlist } = await supabaseAdmin
       .from('watchlists')
-      .select('id')
-      .eq('user_id', userId)
+      .select('symbols')
+      .eq('owner_id', userId)
+      .eq('is_shared', false)
       .single();
 
-    let watchedSymbols: string[] = [];
+    // Get shared watchlist symbols
+    const { data: sharedWatchlists } = await supabaseAdmin
+      .from('watchlists')
+      .select('symbols')
+      .eq('is_shared', true)
+      .eq('is_admin_watchlist', true);
 
-    if (watchlist) {
-      const { data: symbols } = await supabaseAdmin
-        .from('watchlist_symbols')
-        .select('symbol')
-        .eq('watchlist_id', watchlist.id);
+    const personalSymbols = watchlist?.symbols || [];
+    const sharedSymbols = sharedWatchlists?.flatMap(w => w.symbols || []) || [];
+    const allWatchedSymbols = Array.from(new Set([...personalSymbols, ...sharedSymbols]));
 
-      watchedSymbols = (symbols || []).map(s => s.symbol);
-    }
-
-    // Build query
+    // Build query for detected setups
     let query = supabaseAdmin
       .from('detected_setups')
       .select('*')
-      .in('setup_stage', ['forming', 'ready', 'triggered'])
-      .gte('confluence_score', minConfluence)
-      .order('confluence_score', { ascending: false });
+      .order('confluence_score', { ascending: false })
+      .limit(50);
 
-    // Filter by symbol if specified
+    // Filter by symbol if specified, otherwise filter by watched symbols
     if (symbol) {
       query = query.eq('symbol', symbol.toUpperCase());
-    } else if (watchedSymbols.length > 0) {
-      // Only show setups for watched symbols
-      query = query.in('symbol', watchedSymbols);
+    } else if (allWatchedSymbols.length > 0) {
+      query = query.in('symbol', allWatchedSymbols);
     }
 
-    // Filter by stage if specified
+    // Filter by stage
     if (stage) {
       query = query.eq('setup_stage', stage);
+    } else {
+      // By default, show active setups (forming and ready)
+      query = query.in('setup_stage', ['forming', 'ready']);
     }
 
-    const { data: setups, error } = await query.limit(50);
+    // Filter by minimum confluence score
+    if (minConfluence > 0) {
+      query = query.gte('confluence_score', minConfluence);
+    }
+
+    const { data: setups, error } = await query;
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error('Error fetching setups:', error);
+      return NextResponse.json({ error: 'Failed to fetch setups' }, { status: 500 });
     }
 
-    // Group by stage for easier consumption
-    const grouped = {
-      ready: (setups || []).filter(s => s.setup_stage === 'ready'),
-      forming: (setups || []).filter(s => s.setup_stage === 'forming'),
-      triggered: (setups || []).filter(s => s.setup_stage === 'triggered')
+    // Group by stage for frontend
+    const groupedSetups = {
+      ready: setups?.filter(s => s.setup_stage === 'ready') || [],
+      forming: setups?.filter(s => s.setup_stage === 'forming') || [],
+      triggered: setups?.filter(s => s.setup_stage === 'triggered') || []
     };
 
     return NextResponse.json({
       setups: setups || [],
-      grouped,
-      watchedSymbols
+      grouped: groupedSetups,
+      total: setups?.length || 0
     });
   } catch (error) {
-    console.error('Error fetching setups:', error);
+    console.error('Error in setups GET:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-// POST /api/companion/setups/subscribe - Subscribe to setup alerts
+// POST - Subscribe to setup alerts
 export async function POST(request: Request) {
   try {
-    const userId = await getAuthenticatedUserId();
-    if (!userId) {
+    const session = await getSession();
+    if (!session?.userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { setupId, alertOnReady = true, alertOnTrigger = true } = body;
+    const userId = session.userId;
+    const { setupId, alertOnReady = true, alertOnTrigger = true } = await request.json();
 
     if (!setupId) {
-      return NextResponse.json({ error: 'Setup ID is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Setup ID required' }, { status: 400 });
     }
 
     // Verify setup exists
-    const { data: setup } = await supabaseAdmin
+    const { data: setup, error: setupError } = await supabaseAdmin
       .from('detected_setups')
       .select('id')
       .eq('id', setupId)
@@ -104,30 +114,61 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Setup not found' }, { status: 404 });
     }
 
-    // Create subscription
-    const { data: subscription, error } = await supabaseAdmin
+    // Upsert subscription
+    const { error: subscribeError } = await supabaseAdmin
       .from('setup_subscriptions')
       .upsert({
         user_id: userId,
         setup_id: setupId,
-        alert_on_ready: alertOnReady,
-        alert_on_trigger: alertOnTrigger
+        notify_on_ready: alertOnReady,
+        notify_on_trigger: alertOnTrigger,
+        subscribed_at: new Date().toISOString()
       }, {
         onConflict: 'user_id,setup_id'
-      })
-      .select()
-      .single();
+      });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (subscribeError) {
+      console.error('Error subscribing to setup:', subscribeError);
+      return NextResponse.json({ error: 'Failed to subscribe' }, { status: 500 });
     }
 
-    return NextResponse.json({
-      message: 'Subscribed to setup alerts',
-      subscription
-    });
+    return NextResponse.json({ success: true, subscribed: true });
   } catch (error) {
-    console.error('Error subscribing to setup:', error);
+    console.error('Error in setups POST:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+// DELETE - Unsubscribe from setup alerts
+export async function DELETE(request: Request) {
+  try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const userId = session.userId;
+    const { searchParams } = new URL(request.url);
+    const setupId = searchParams.get('setupId');
+
+    if (!setupId) {
+      return NextResponse.json({ error: 'Setup ID required' }, { status: 400 });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('setup_subscriptions')
+      .delete()
+      .eq('user_id', userId)
+      .eq('setup_id', setupId);
+
+    if (error) {
+      console.error('Error unsubscribing from setup:', error);
+      return NextResponse.json({ error: 'Failed to unsubscribe' }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error in setups DELETE:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

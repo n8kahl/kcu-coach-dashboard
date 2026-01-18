@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Button, Badge, Input } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import {
   Plus,
@@ -16,7 +15,8 @@ import {
   Zap,
   Clock,
   BarChart3,
-  Layers
+  Layers,
+  AlertTriangle
 } from 'lucide-react';
 
 interface WatchlistSymbol {
@@ -25,6 +25,7 @@ interface WatchlistSymbol {
   added_at: string;
   levels: KeyLevel[];
   quote: MarketQuote | null;
+  is_shared: boolean;
 }
 
 interface KeyLevel {
@@ -54,6 +55,7 @@ interface DetectedSetup {
   level_score: number;
   trend_score: number;
   patience_score: number;
+  mtf_score: number;
   primary_level_type: string;
   primary_level_price: number;
   patience_candles: number;
@@ -62,6 +64,8 @@ interface DetectedSetup {
   suggested_stop: number;
   target_1: number;
   target_2: number;
+  target_3: number;
+  risk_reward: number;
   detected_at: string;
 }
 
@@ -138,46 +142,48 @@ export default function CompanionPage() {
 
   const readySetups = setups.filter(s => s.setup_stage === 'ready');
   const formingSetups = setups.filter(s => s.setup_stage === 'forming');
+  const sharedSymbols = watchlist.filter(s => s.is_shared);
+  const personalSymbols = watchlist.filter(s => !s.is_shared);
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">
+          <h1 className="text-2xl font-bold text-[var(--text-primary)] uppercase tracking-wide">
             Companion Mode
           </h1>
-          <p className="text-gray-400">
-            Real-time LTP setup detection and trade guidance
+          <p className="text-[var(--text-secondary)]">
+            Real-time LTP setup detection powered by Kay Capitals methodology
           </p>
         </div>
-        <Badge variant="warning" className="animate-pulse flex items-center gap-1">
+        <div className="badge badge-gold flex items-center gap-2">
           <Activity className="w-3 h-3" />
-          LIVE
-        </Badge>
+          <span className="pulse-dot">LIVE</span>
+        </div>
       </div>
 
       {/* Ready Setups Alert Banner */}
       {readySetups.length > 0 && (
-        <div className="glass-card p-4 border-l-4 border-yellow-500 animate-pulse-glow">
+        <div className="card card-hover border-l-4 border-[var(--accent-primary)] p-4" style={{ animation: 'pulse-dot 2s ease-in-out infinite' }}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-yellow-500 rounded-lg flex items-center justify-center">
-                <Target className="w-5 h-5 text-black" />
+              <div className="w-10 h-10 bg-[var(--accent-primary)] flex items-center justify-center">
+                <Target className="w-5 h-5 text-[var(--bg-primary)]" />
               </div>
               <div>
-                <p className="font-semibold text-white">
+                <p className="font-semibold text-[var(--text-primary)] uppercase tracking-wide">
                   {readySetups.length} Setup{readySetups.length > 1 ? 's' : ''} Ready!
                 </p>
-                <p className="text-sm text-gray-400">
+                <p className="text-sm text-[var(--text-secondary)]">
                   {readySetups.map(s => s.symbol).join(', ')} - All LTP criteria met
                 </p>
               </div>
             </div>
-            <Button size="sm">
+            <button className="btn btn-primary">
               View Setups
               <ChevronRight className="w-4 h-4 ml-1" />
-            </Button>
+            </button>
           </div>
         </div>
       )}
@@ -185,29 +191,58 @@ export default function CompanionPage() {
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Watchlist Panel */}
-        <div className="glass-card p-6 lg:col-span-1">
-          <h2 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
-            <Eye className="w-5 h-5 text-primary-400" />
+        <div className="card p-6 lg:col-span-1">
+          <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2 mb-4 uppercase tracking-wide">
+            <Eye className="w-5 h-5 text-[var(--accent-primary)]" />
             Watchlist
           </h2>
 
           {/* Add Symbol Input */}
           <div className="flex gap-2 mb-4">
-            <Input
+            <input
+              type="text"
               placeholder="Add symbol (e.g., NVDA)"
               value={newSymbol}
               onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
               onKeyDown={(e) => e.key === 'Enter' && addSymbol()}
-              className="flex-1"
+              className="input flex-1"
             />
-            <Button size="sm" onClick={addSymbol}>
+            <button className="btn btn-primary px-3" onClick={addSymbol}>
               <Plus className="w-4 h-4" />
-            </Button>
+            </button>
           </div>
 
-          {/* Symbol List */}
+          {/* Shared Watchlist (Admin) */}
+          {sharedSymbols.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-xs font-semibold text-[var(--accent-primary)] mb-2 uppercase tracking-wider flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                Coach Watchlist
+              </h3>
+              <div className="space-y-2">
+                {sharedSymbols.map((item) => (
+                  <WatchlistItem
+                    key={item.id}
+                    item={item}
+                    isSelected={selectedSymbol === item.symbol}
+                    onSelect={() => setSelectedSymbol(item.symbol)}
+                    onRemove={() => {}} // Can't remove shared
+                    setup={setups.find(s => s.symbol === item.symbol)}
+                    isShared
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Personal Symbols */}
           <div className="space-y-2">
-            {watchlist.map((item) => (
+            {personalSymbols.length > 0 && sharedSymbols.length > 0 && (
+              <h3 className="text-xs font-semibold text-[var(--text-tertiary)] mb-2 uppercase tracking-wider">
+                Personal
+              </h3>
+            )}
+            {personalSymbols.map((item) => (
               <WatchlistItem
                 key={item.id}
                 item={item}
@@ -219,7 +254,7 @@ export default function CompanionPage() {
             ))}
 
             {watchlist.length === 0 && !loading && (
-              <div className="text-center py-8 text-gray-500">
+              <div className="text-center py-8 text-[var(--text-tertiary)]">
                 <Eye className="w-8 h-8 mx-auto mb-2 opacity-50" />
                 <p>No symbols in watchlist</p>
                 <p className="text-sm">Add symbols to start detecting setups</p>
@@ -229,16 +264,16 @@ export default function CompanionPage() {
         </div>
 
         {/* Setups Panel */}
-        <div className="glass-card p-6 lg:col-span-2">
-          <h2 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
-            <Zap className="w-5 h-5 text-yellow-400" />
+        <div className="card p-6 lg:col-span-2">
+          <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2 mb-4 uppercase tracking-wide">
+            <Zap className="w-5 h-5 text-[var(--accent-primary)]" />
             LTP Setups
           </h2>
 
           {/* Ready Setups */}
           {readySetups.length > 0 && (
             <div className="mb-6">
-              <h3 className="text-sm font-semibold text-yellow-400 mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-[var(--accent-primary)] mb-3 flex items-center gap-2 uppercase tracking-wider">
                 <Target className="w-4 h-4" />
                 READY - Entry Window Open
               </h3>
@@ -253,7 +288,7 @@ export default function CompanionPage() {
           {/* Forming Setups */}
           {formingSetups.length > 0 && (
             <div>
-              <h3 className="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 flex items-center gap-2 uppercase tracking-wider">
                 <Clock className="w-4 h-4" />
                 FORMING - Watching
               </h3>
@@ -266,7 +301,7 @@ export default function CompanionPage() {
           )}
 
           {setups.length === 0 && (
-            <div className="text-center py-12 text-gray-500">
+            <div className="text-center py-12 text-[var(--text-tertiary)]">
               <BarChart3 className="w-12 h-12 mx-auto mb-3 opacity-50" />
               <p className="font-medium">No active setups detected</p>
               <p className="text-sm">Add symbols to your watchlist to start detecting LTP setups</p>
@@ -294,13 +329,15 @@ function WatchlistItem({
   isSelected,
   onSelect,
   onRemove,
-  setup
+  setup,
+  isShared = false
 }: {
   item: WatchlistSymbol;
   isSelected: boolean;
   onSelect: () => void;
   onRemove: () => void;
   setup?: DetectedSetup;
+  isShared?: boolean;
 }) {
   const hasSetup = !!setup;
   const isReady = setup?.setup_stage === 'ready';
@@ -308,61 +345,67 @@ function WatchlistItem({
   return (
     <div
       className={cn(
-        'p-3 border rounded-lg cursor-pointer transition-all',
+        'p-3 border cursor-pointer transition-all',
         isSelected
-          ? 'border-primary-500 bg-primary-500/10'
-          : 'border-dark-border hover:border-gray-600',
-        isReady && 'ring-1 ring-yellow-500 animate-pulse'
+          ? 'border-[var(--accent-primary)] bg-[var(--accent-primary-glow)]'
+          : 'border-[var(--border-primary)] hover:border-[var(--border-secondary)]',
+        isReady && 'ring-1 ring-[var(--accent-primary)]',
+        isShared && 'border-l-2 border-l-[var(--accent-primary)]'
       )}
       onClick={onSelect}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="font-bold text-white">{item.symbol}</div>
+          <div className="font-bold text-[var(--text-primary)]">{item.symbol}</div>
           {item.quote && (
-            <span className={`text-sm ${item.quote.change_percent >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+            <span className={`text-sm ${item.quote.change_percent >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}`}>
               {item.quote.change_percent >= 0 ? '+' : ''}{item.quote.change_percent?.toFixed(2)}%
             </span>
+          )}
+          {isShared && (
+            <span className="badge badge-gold text-[10px]">COACH</span>
           )}
         </div>
         <div className="flex items-center gap-2">
           {hasSetup && (
-            <Badge
-              variant={isReady ? 'warning' : 'default'}
-              className={isReady ? 'animate-pulse' : ''}
-            >
+            <span className={cn(
+              'badge',
+              isReady ? 'badge-gold' : 'badge-neutral'
+            )}>
               {setup.confluence_score}%
-            </Badge>
+            </span>
           )}
-          <button
-            onClick={(e) => { e.stopPropagation(); onRemove(); }}
-            className="p-1 hover:bg-dark-border rounded"
-          >
-            <X className="w-4 h-4 text-gray-500" />
-          </button>
+          {!isShared && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRemove(); }}
+              className="p-1 hover:bg-[var(--bg-elevated)]"
+            >
+              <X className="w-4 h-4 text-[var(--text-tertiary)]" />
+            </button>
+          )}
         </div>
       </div>
 
       {item.quote && (
-        <div className="mt-2 text-sm text-gray-400">
+        <div className="mt-2 text-sm text-[var(--text-secondary)] font-mono">
           ${item.quote.last_price?.toFixed(2)}
         </div>
       )}
 
       {hasSetup && (
-        <div className="mt-2 flex gap-2 text-xs">
+        <div className="mt-2 flex gap-3 text-xs font-mono">
           <span className={cn(
-            setup.level_score >= 70 ? 'text-green-500' : setup.level_score >= 50 ? 'text-yellow-500' : 'text-red-500'
+            setup.level_score >= 70 ? 'text-[var(--success)]' : setup.level_score >= 50 ? 'text-[var(--warning)]' : 'text-[var(--error)]'
           )}>
             L:{setup.level_score}
           </span>
           <span className={cn(
-            setup.trend_score >= 70 ? 'text-green-500' : setup.trend_score >= 50 ? 'text-yellow-500' : 'text-red-500'
+            setup.trend_score >= 70 ? 'text-[var(--success)]' : setup.trend_score >= 50 ? 'text-[var(--warning)]' : 'text-[var(--error)]'
           )}>
             T:{setup.trend_score}
           </span>
           <span className={cn(
-            setup.patience_score >= 70 ? 'text-green-500' : setup.patience_score >= 50 ? 'text-yellow-500' : 'text-red-500'
+            setup.patience_score >= 70 ? 'text-[var(--success)]' : setup.patience_score >= 50 ? 'text-[var(--warning)]' : 'text-[var(--error)]'
           )}>
             P:{setup.patience_score}
           </span>
@@ -379,17 +422,17 @@ function SetupCard({ setup, variant }: { setup: DetectedSetup; variant: 'ready' 
   return (
     <div
       className={cn(
-        'p-4 border rounded-lg',
+        'card p-4',
         isReady
-          ? 'border-yellow-500 bg-yellow-500/10'
-          : 'border-dark-border bg-dark-bg/50'
+          ? 'border-[var(--accent-primary)] bg-[var(--accent-primary-glow)]'
+          : 'border-[var(--border-primary)]'
       )}
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3">
           <div className={cn(
-            'w-10 h-10 rounded-lg flex items-center justify-center',
-            isReady ? 'bg-yellow-500 text-black' : 'bg-dark-border text-gray-400'
+            'w-10 h-10 flex items-center justify-center',
+            isReady ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]' : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)]'
           )}>
             {setup.direction === 'bullish' ? (
               <TrendingUp className="w-5 h-5" />
@@ -399,70 +442,78 @@ function SetupCard({ setup, variant }: { setup: DetectedSetup; variant: 'ready' 
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-lg text-white">{setup.symbol}</span>
-              <Badge variant={setup.direction === 'bullish' ? 'success' : 'error'}>
+              <span className="font-bold text-lg text-[var(--text-primary)]">{setup.symbol}</span>
+              <span className={cn(
+                'badge',
+                setup.direction === 'bullish' ? 'badge-success' : 'badge-error'
+              )}>
                 {setup.direction.toUpperCase()}
-              </Badge>
+              </span>
             </div>
-            <div className="text-sm text-gray-400">
+            <div className="text-sm text-[var(--text-secondary)]">
               {setup.primary_level_type?.toUpperCase()} @ ${setup.primary_level_price?.toFixed(2)}
             </div>
           </div>
         </div>
 
         <div className="text-right">
-          <div className={cn('text-2xl font-bold', isReady ? 'text-yellow-400' : 'text-white')}>
+          <div className={cn('text-2xl font-bold font-mono', isReady ? 'text-[var(--accent-primary)]' : 'text-[var(--text-primary)]')}>
             {setup.confluence_score}
           </div>
-          <div className="text-xs text-gray-500">CONFLUENCE</div>
+          <div className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide">Confluence</div>
         </div>
       </div>
 
       {/* LTP Scores */}
-      <div className="grid grid-cols-3 gap-2 mb-3">
+      <div className="grid grid-cols-4 gap-2 mb-3">
         <ScoreBar label="Level" score={setup.level_score} />
         <ScoreBar label="Trend" score={setup.trend_score} />
         <ScoreBar label="Patience" score={setup.patience_score} />
+        <ScoreBar label="MTF" score={setup.mtf_score || 0} />
       </div>
 
       {/* Coach Note */}
       {setup.coach_note && (
-        <div className="p-3 bg-dark-bg border border-dark-border rounded-lg text-sm text-gray-300 mb-3">
-          💡 {setup.coach_note}
+        <div className="p-3 bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-sm text-[var(--text-secondary)] mb-3">
+          <span className="text-[var(--accent-primary)]">KCU Coach:</span> {setup.coach_note}
         </div>
       )}
 
       {/* Trade Params (for ready setups) */}
       {isReady && setup.suggested_entry && (
-        <div className="grid grid-cols-4 gap-2 text-sm">
+        <div className="grid grid-cols-5 gap-2 text-sm mb-3">
           <div>
-            <div className="text-gray-500">Entry</div>
-            <div className="font-medium text-white">${setup.suggested_entry?.toFixed(2)}</div>
+            <div className="text-[var(--text-tertiary)] text-xs uppercase">Entry</div>
+            <div className="font-medium font-mono text-[var(--text-primary)]">${setup.suggested_entry?.toFixed(2)}</div>
           </div>
           <div>
-            <div className="text-gray-500">Stop</div>
-            <div className="font-medium text-red-500">${setup.suggested_stop?.toFixed(2)}</div>
+            <div className="text-[var(--text-tertiary)] text-xs uppercase">Stop</div>
+            <div className="font-medium font-mono text-[var(--error)]">${setup.suggested_stop?.toFixed(2)}</div>
           </div>
           <div>
-            <div className="text-gray-500">Target 1</div>
-            <div className="font-medium text-green-500">${setup.target_1?.toFixed(2)}</div>
+            <div className="text-[var(--text-tertiary)] text-xs uppercase">T1</div>
+            <div className="font-medium font-mono text-[var(--success)]">${setup.target_1?.toFixed(2)}</div>
           </div>
           <div>
-            <div className="text-gray-500">Target 2</div>
-            <div className="font-medium text-green-500">${setup.target_2?.toFixed(2)}</div>
+            <div className="text-[var(--text-tertiary)] text-xs uppercase">T2</div>
+            <div className="font-medium font-mono text-[var(--success)]">${setup.target_2?.toFixed(2)}</div>
+          </div>
+          <div>
+            <div className="text-[var(--text-tertiary)] text-xs uppercase">R:R</div>
+            <div className="font-medium font-mono text-[var(--accent-primary)]">{setup.risk_reward?.toFixed(1)}:1</div>
           </div>
         </div>
       )}
 
       {/* Actions */}
       <div className="flex gap-2 mt-4">
-        <Button variant={isReady ? 'primary' : 'secondary'} size="sm" className="flex-1">
+        <button className={cn('btn flex-1', isReady ? 'btn-primary' : 'btn-secondary')}>
           <Bell className="w-4 h-4 mr-1" />
           {isReady ? 'Alert on Break' : 'Watch Setup'}
-        </Button>
-        <Button variant="secondary" size="sm">
+        </button>
+        <button className="btn btn-ghost">
           <BarChart3 className="w-4 h-4" />
-        </Button>
+        </button>
       </div>
     </div>
   );
@@ -470,18 +521,25 @@ function SetupCard({ setup, variant }: { setup: DetectedSetup; variant: 'ready' 
 
 // Score Bar Component
 function ScoreBar({ label, score }: { label: string; score: number }) {
-  const color = score >= 70 ? 'bg-green-500' : score >= 50 ? 'bg-yellow-500' : 'bg-red-500';
+  const getColor = () => {
+    if (score >= 70) return 'var(--success)';
+    if (score >= 50) return 'var(--warning)';
+    return 'var(--error)';
+  };
 
   return (
     <div>
       <div className="flex justify-between text-xs mb-1">
-        <span className="text-gray-500">{label}</span>
-        <span className="text-gray-300">{score}</span>
+        <span className="text-[var(--text-tertiary)] uppercase tracking-wide">{label}</span>
+        <span className="text-[var(--text-secondary)] font-mono">{score}</span>
       </div>
-      <div className="h-1.5 bg-dark-border rounded-full overflow-hidden">
+      <div className="progress-bar">
         <div
-          className={`h-full ${color} transition-all duration-500`}
-          style={{ width: `${score}%` }}
+          className="progress-fill"
+          style={{
+            width: `${score}%`,
+            background: getColor()
+          }}
         />
       </div>
     </div>
@@ -504,44 +562,44 @@ function KeyLevelsPanel({
 
   // Organize levels by category
   const intradayLevels = levels.filter(l =>
-    ['pdh', 'pdl', 'orb_high', 'orb_low', 'vwap', 'open_price', 'hod', 'lod'].includes(l.level_type)
+    ['pdh', 'pdl', 'pdc', 'orb_high', 'orb_low', 'vwap', 'open_price', 'hod', 'lod', 'premarket_high', 'premarket_low'].includes(l.level_type)
   );
   const maLevels = levels.filter(l =>
-    ['ema_8', 'ema_21', 'sma_50', 'sma_200'].includes(l.level_type)
+    ['ema_9', 'ema_21', 'sma_50', 'sma_200'].includes(l.level_type)
   );
   const htfLevels = levels.filter(l =>
-    ['weekly_high', 'weekly_low', 'monthly_high', 'monthly_low'].includes(l.level_type)
+    ['weekly_high', 'weekly_low', 'monthly_high', 'monthly_low', 'hourly_pivot'].includes(l.level_type)
   );
 
   return (
-    <div className="glass-card p-6">
+    <div className="card p-6">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-          <Layers className="w-5 h-5 text-primary-400" />
+        <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2 uppercase tracking-wide">
+          <Layers className="w-5 h-5 text-[var(--accent-primary)]" />
           {symbol} Key Levels
         </h2>
-        <button onClick={onClose} className="p-1 hover:bg-dark-border rounded">
-          <X className="w-5 h-5 text-gray-400" />
+        <button onClick={onClose} className="p-1 hover:bg-[var(--bg-elevated)]">
+          <X className="w-5 h-5 text-[var(--text-secondary)]" />
         </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Intraday Levels */}
         <div>
-          <h4 className="text-sm font-semibold text-gray-400 mb-3">Intraday</h4>
+          <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 uppercase tracking-wider">Intraday</h4>
           <div className="space-y-2">
             {intradayLevels.map((level) => (
               <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
             ))}
             {intradayLevels.length === 0 && (
-              <p className="text-sm text-gray-500">Loading...</p>
+              <p className="text-sm text-[var(--text-muted)]">Loading...</p>
             )}
           </div>
         </div>
 
         {/* Moving Averages */}
         <div>
-          <h4 className="text-sm font-semibold text-gray-400 mb-3">Moving Averages</h4>
+          <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 uppercase tracking-wider">Moving Averages</h4>
           <div className="space-y-2">
             {maLevels.map((level) => (
               <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
@@ -551,7 +609,7 @@ function KeyLevelsPanel({
 
         {/* Higher Timeframe */}
         <div>
-          <h4 className="text-sm font-semibold text-gray-400 mb-3">Higher Timeframe</h4>
+          <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 uppercase tracking-wider">Higher Timeframe</h4>
           <div className="space-y-2">
             {htfLevels.map((level) => (
               <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
@@ -562,37 +620,37 @@ function KeyLevelsPanel({
 
       {/* ORB Info */}
       {quote?.orb_high && quote?.orb_low && (
-        <div className="mt-6 p-4 bg-dark-bg border border-dark-border rounded-lg">
-          <h4 className="text-sm font-semibold text-gray-400 mb-2">
+        <div className="mt-6 p-4 bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
+          <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-2 uppercase tracking-wider">
             Opening Range (First 15 min)
           </h4>
           <div className="flex items-center gap-6">
             <div>
-              <span className="text-xs text-gray-500">ORB High</span>
-              <div className="font-medium text-green-500">${quote.orb_high.toFixed(2)}</div>
+              <span className="text-xs text-[var(--text-muted)] uppercase">ORB High</span>
+              <div className="font-medium font-mono text-[var(--success)]">${quote.orb_high.toFixed(2)}</div>
             </div>
             <div>
-              <span className="text-xs text-gray-500">ORB Low</span>
-              <div className="font-medium text-red-500">${quote.orb_low.toFixed(2)}</div>
+              <span className="text-xs text-[var(--text-muted)] uppercase">ORB Low</span>
+              <div className="font-medium font-mono text-[var(--error)]">${quote.orb_low.toFixed(2)}</div>
             </div>
             <div>
-              <span className="text-xs text-gray-500">Range</span>
-              <div className="font-medium text-white">
+              <span className="text-xs text-[var(--text-muted)] uppercase">Range</span>
+              <div className="font-medium font-mono text-[var(--text-primary)]">
                 ${(quote.orb_high - quote.orb_low).toFixed(2)}
-                <span className="text-xs text-gray-500 ml-1">
+                <span className="text-xs text-[var(--text-tertiary)] ml-1">
                   ({((quote.orb_high - quote.orb_low) / quote.orb_low * 100).toFixed(2)}%)
                 </span>
               </div>
             </div>
             <div>
-              <span className="text-xs text-gray-500">Status</span>
+              <span className="text-xs text-[var(--text-muted)] uppercase">Status</span>
               <div className="font-medium">
                 {currentPrice > quote.orb_high ? (
-                  <span className="text-green-500">Above ORB</span>
+                  <span className="text-[var(--success)]">Above ORB</span>
                 ) : currentPrice < quote.orb_low ? (
-                  <span className="text-red-500">Below ORB</span>
+                  <span className="text-[var(--error)]">Below ORB</span>
                 ) : (
-                  <span className="text-yellow-500">Inside ORB</span>
+                  <span className="text-[var(--warning)]">Inside ORB</span>
                 )}
               </div>
             </div>
@@ -612,40 +670,44 @@ function LevelRow({ level, currentPrice }: { level: KeyLevel; currentPrice: numb
   const labelMap: Record<string, string> = {
     pdh: 'PDH',
     pdl: 'PDL',
+    pdc: 'PDC',
     orb_high: 'ORB High',
     orb_low: 'ORB Low',
     vwap: 'VWAP',
     open_price: 'Open',
     hod: 'HOD',
     lod: 'LOD',
-    ema_8: '8 EMA',
+    premarket_high: 'PM High',
+    premarket_low: 'PM Low',
+    ema_9: '9 EMA',
     ema_21: '21 EMA',
     sma_50: '50 SMA',
     sma_200: '200 SMA',
     weekly_high: 'Weekly High',
     weekly_low: 'Weekly Low',
     monthly_high: 'Monthly High',
-    monthly_low: 'Monthly Low'
+    monthly_low: 'Monthly Low',
+    hourly_pivot: 'Hourly Pivot'
   };
 
   return (
     <div className={cn(
-      'flex items-center justify-between p-2 rounded',
-      isNear ? 'bg-primary-500/20 border border-primary-500' : 'bg-dark-border/50'
+      'flex items-center justify-between p-2',
+      isNear ? 'bg-[var(--accent-primary-glow)] border border-[var(--accent-primary)]' : 'bg-[var(--bg-elevated)]'
     )}>
       <div>
-        <div className="text-sm font-medium text-white">
+        <div className="text-sm font-medium text-[var(--text-primary)]">
           {labelMap[level.level_type] || level.level_type}
         </div>
-        <div className="text-xs text-gray-500">
+        <div className="text-xs text-[var(--text-muted)]">
           {level.timeframe}
         </div>
       </div>
       <div className="text-right">
-        <div className={cn('font-mono font-medium', isNear ? 'text-primary-400' : 'text-white')}>
+        <div className={cn('font-mono font-medium', isNear ? 'text-[var(--accent-primary)]' : 'text-[var(--text-primary)]')}>
           ${level.price.toFixed(2)}
         </div>
-        <div className={`text-xs ${isAbove ? 'text-green-500' : 'text-red-500'}`}>
+        <div className={`text-xs font-mono ${isAbove ? 'text-[var(--success)]' : 'text-[var(--error)]'}`}>
           {distance > 0 ? '+' : ''}{distance.toFixed(2)}%
         </div>
       </div>

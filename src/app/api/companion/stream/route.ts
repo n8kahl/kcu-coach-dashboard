@@ -1,62 +1,76 @@
 import { NextResponse } from 'next/server';
-import { getAuthenticatedUserId } from '@/lib/auth';
+import { getSession } from '@/lib/auth';
 import { addConnection, removeConnection } from '@/lib/broadcast';
 
-// GET /api/companion/stream - SSE endpoint for real-time updates
+// SSE endpoint for real-time updates
 export async function GET(request: Request) {
-  const userId = await getAuthenticatedUserId();
-  if (!userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  let controllerRef: ReadableStreamDefaultController | null = null;
-
-  const stream = new ReadableStream({
-    start(controller) {
-      controllerRef = controller;
-
-      // Add this connection
-      addConnection(userId, controller);
-
-      // Send initial connection message
-      const connectMessage = `event: connected\ndata: ${JSON.stringify({
-        userId,
-        timestamp: new Date().toISOString()
-      })}\n\n`;
-      controller.enqueue(new TextEncoder().encode(connectMessage));
-
-      // Send heartbeat every 30 seconds to keep connection alive
-      const heartbeatInterval = setInterval(() => {
-        try {
-          const heartbeat = `event: heartbeat\ndata: ${JSON.stringify({
-            timestamp: new Date().toISOString()
-          })}\n\n`;
-          controller.enqueue(new TextEncoder().encode(heartbeat));
-        } catch {
-          clearInterval(heartbeatInterval);
-        }
-      }, 30000);
-
-      // Cleanup on close
-      request.signal.addEventListener('abort', () => {
-        clearInterval(heartbeatInterval);
-        if (controllerRef) {
-          removeConnection(userId, controllerRef);
-        }
-      });
-    },
-    cancel() {
-      if (controllerRef) {
-        removeConnection(userId, controllerRef);
-      }
+  try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-  });
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    },
-  });
+    const userId = session.userId;
+
+    // Create SSE stream
+    const stream = new ReadableStream({
+      start(controller) {
+        // Register connection
+        addConnection(userId, controller);
+
+        // Send initial connection message
+        const connectMessage = `event: connected\ndata: ${JSON.stringify({
+          userId,
+          timestamp: new Date().toISOString(),
+          message: 'Connected to KCU Companion Mode'
+        })}\n\n`;
+
+        try {
+          controller.enqueue(new TextEncoder().encode(connectMessage));
+        } catch (e) {
+          console.error('Error sending connect message:', e);
+        }
+
+        // Heartbeat every 30 seconds to keep connection alive
+        const heartbeat = setInterval(() => {
+          try {
+            const heartbeatMessage = `event: heartbeat\ndata: ${JSON.stringify({
+              timestamp: new Date().toISOString()
+            })}\n\n`;
+            controller.enqueue(new TextEncoder().encode(heartbeatMessage));
+          } catch (e) {
+            // Connection closed
+            clearInterval(heartbeat);
+            removeConnection(userId, controller);
+          }
+        }, 30000);
+
+        // Handle connection close
+        request.signal.addEventListener('abort', () => {
+          clearInterval(heartbeat);
+          removeConnection(userId, controller);
+          try {
+            controller.close();
+          } catch (e) {
+            // Already closed
+          }
+        });
+      },
+      cancel() {
+        // Cleanup handled in abort listener
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no' // Disable nginx buffering
+      }
+    });
+  } catch (error) {
+    console.error('Error in stream GET:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

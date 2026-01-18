@@ -1,15 +1,26 @@
-// Store active connections for SSE broadcasting
+/**
+ * SSE Broadcast Utility for KCU Coach
+ * Manages real-time connections for Companion Mode
+ */
+
+// In-memory connection storage
+// In production, use Redis for multi-server support
 const connections = new Map<string, Set<ReadableStreamDefaultController>>();
 
-// Helper to add connection
+/**
+ * Add a new SSE connection for a user
+ */
 export function addConnection(userId: string, controller: ReadableStreamDefaultController) {
   if (!connections.has(userId)) {
     connections.set(userId, new Set());
   }
   connections.get(userId)!.add(controller);
+  console.log(`[SSE] User ${userId} connected. Total connections: ${getConnectionCount()}`);
 }
 
-// Helper to remove connection
+/**
+ * Remove an SSE connection for a user
+ */
 export function removeConnection(userId: string, controller: ReadableStreamDefaultController) {
   const userConnections = connections.get(userId);
   if (userConnections) {
@@ -17,48 +28,155 @@ export function removeConnection(userId: string, controller: ReadableStreamDefau
     if (userConnections.size === 0) {
       connections.delete(userId);
     }
+    console.log(`[SSE] User ${userId} disconnected. Total connections: ${getConnectionCount()}`);
   }
 }
 
-// Helper to broadcast to a specific user
-export function broadcastToUser(userId: string, event: string, data: unknown) {
+/**
+ * Broadcast an event to a specific user
+ */
+export function broadcastToUser(userId: string, eventType: string, data: any) {
   const userConnections = connections.get(userId);
-  if (userConnections) {
-    const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    userConnections.forEach((controller) => {
-      try {
-        controller.enqueue(new TextEncoder().encode(message));
-      } catch {
-        // Connection closed, ignore
-      }
-    });
+  if (!userConnections) return false;
+
+  const message = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+  const encodedMessage = new TextEncoder().encode(message);
+
+  let sent = 0;
+  for (const controller of userConnections) {
+    try {
+      controller.enqueue(encodedMessage);
+      sent++;
+    } catch (e) {
+      // Connection closed, remove it
+      userConnections.delete(controller);
+    }
   }
+
+  return sent > 0;
 }
 
-// Helper to broadcast to all connected users
-export function broadcastToAll(event: string, data: unknown) {
-  const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  connections.forEach((userConnections) => {
-    userConnections.forEach((controller) => {
+/**
+ * Broadcast an event to all connected users
+ */
+export function broadcastToAll(eventType: string, data: any) {
+  const message = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+  const encodedMessage = new TextEncoder().encode(message);
+
+  let totalSent = 0;
+  for (const [userId, userConnections] of connections) {
+    for (const controller of userConnections) {
       try {
-        controller.enqueue(new TextEncoder().encode(message));
-      } catch {
-        // Connection closed, ignore
+        controller.enqueue(encodedMessage);
+        totalSent++;
+      } catch (e) {
+        // Connection closed, remove it
+        userConnections.delete(controller);
       }
-    });
-  });
+    }
+  }
+
+  console.log(`[SSE] Broadcast ${eventType} to ${totalSent} connections`);
+  return totalSent;
 }
 
-// Get number of active connections
+/**
+ * Get total number of active connections
+ */
 export function getConnectionCount(): number {
-  let count = 0;
-  connections.forEach((userConnections) => {
-    count += userConnections.size;
-  });
-  return count;
+  let total = 0;
+  for (const userConnections of connections.values()) {
+    total += userConnections.size;
+  }
+  return total;
 }
 
-// Check if user is connected
+/**
+ * Check if a user is connected
+ */
 export function isUserConnected(userId: string): boolean {
   return connections.has(userId) && connections.get(userId)!.size > 0;
+}
+
+/**
+ * Get all connected user IDs
+ */
+export function getConnectedUsers(): string[] {
+  return Array.from(connections.keys());
+}
+
+// Event type definitions for type safety
+export interface SetupEvent {
+  id: string;
+  symbol: string;
+  direction: 'bullish' | 'bearish';
+  confluenceScore: number;
+  levelScore: number;
+  trendScore: number;
+  patienceScore: number;
+  mtfScore: number;
+  coachNote: string;
+  suggestedEntry?: number;
+  suggestedStop?: number;
+  target1?: number;
+  target2?: number;
+  target3?: number;
+  riskReward?: number;
+}
+
+export interface AdminAlertEvent {
+  id: string;
+  alertType: 'loading' | 'entering' | 'adding' | 'take_profit' | 'exiting' | 'stopped_out' | 'update';
+  symbol: string;
+  direction: 'long' | 'short';
+  entryPrice?: number;
+  stopLoss?: number;
+  targets?: number[];
+  message?: string;
+  admin: {
+    username: string;
+    avatar?: string;
+  };
+}
+
+export interface PriceUpdateEvent {
+  symbol: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  volume: number;
+  vwap?: number;
+}
+
+export interface LevelApproachEvent {
+  symbol: string;
+  levelType: string;
+  levelPrice: number;
+  currentPrice: number;
+  distancePercent: number;
+}
+
+// Helper functions for broadcasting specific event types
+export function broadcastSetupForming(setup: SetupEvent) {
+  return broadcastToAll('setup_forming', setup);
+}
+
+export function broadcastSetupReady(setup: SetupEvent) {
+  return broadcastToAll('setup_ready', setup);
+}
+
+export function broadcastSetupTriggered(setup: SetupEvent) {
+  return broadcastToAll('setup_triggered', setup);
+}
+
+export function broadcastAdminAlert(alert: AdminAlertEvent) {
+  return broadcastToAll('admin_alert', alert);
+}
+
+export function broadcastPriceUpdate(userId: string, update: PriceUpdateEvent) {
+  return broadcastToUser(userId, 'price_update', update);
+}
+
+export function broadcastLevelApproach(userId: string, approach: LevelApproachEvent) {
+  return broadcastToUser(userId, 'level_approach', approach);
 }

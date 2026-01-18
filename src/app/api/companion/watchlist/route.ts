@@ -1,73 +1,95 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { getAuthenticatedUserId } from '@/lib/auth';
+import { getSession } from '@/lib/auth';
 
-// GET /api/companion/watchlist - Get user's watchlist with key levels
+// GET - Fetch user's watchlist with key levels
 export async function GET() {
   try {
-    const userId = await getAuthenticatedUserId();
-    if (!userId) {
+    const session = await getSession();
+    if (!session?.userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get or create watchlist
-    let { data: watchlist } = await supabaseAdmin
+    const userId = session.userId;
+
+    // Get or create user's personal watchlist
+    let { data: watchlist, error: watchlistError } = await supabaseAdmin
       .from('watchlists')
-      .select('id')
-      .eq('user_id', userId)
+      .select('id, name, is_shared, is_admin_watchlist, symbols')
+      .eq('owner_id', userId)
+      .eq('is_shared', false)
       .single();
 
     if (!watchlist) {
-      const { data: newWatchlist } = await supabaseAdmin
+      // Create personal watchlist if doesn't exist
+      const { data: newWatchlist, error: createError } = await supabaseAdmin
         .from('watchlists')
-        .insert({ user_id: userId })
-        .select('id')
+        .insert({
+          owner_id: userId,
+          name: 'My Watchlist',
+          is_shared: false,
+          is_admin_watchlist: false,
+          symbols: []
+        })
+        .select()
         .single();
+
+      if (createError) {
+        console.error('Error creating watchlist:', createError);
+        return NextResponse.json({ error: 'Failed to create watchlist' }, { status: 500 });
+      }
       watchlist = newWatchlist;
     }
 
-    if (!watchlist) {
-      return NextResponse.json({ error: 'Failed to get watchlist' }, { status: 500 });
-    }
+    // Get shared admin watchlist(s)
+    const { data: sharedWatchlists } = await supabaseAdmin
+      .from('watchlists')
+      .select('id, name, symbols')
+      .eq('is_shared', true)
+      .eq('is_admin_watchlist', true);
 
-    // Get symbols with their settings
-    const { data: symbols, error } = await supabaseAdmin
-      .from('watchlist_symbols')
-      .select('*')
-      .eq('watchlist_id', watchlist.id)
-      .order('added_at', { ascending: false });
+    // Combine all symbols
+    const personalSymbols = watchlist.symbols || [];
+    const sharedSymbols = sharedWatchlists?.flatMap(w => w.symbols || []) || [];
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    // Create combined list with source info
+    const allSymbols = [
+      ...sharedSymbols.map((s: string) => ({ symbol: s, is_shared: true })),
+      ...personalSymbols.filter((s: string) => !sharedSymbols.includes(s)).map((s: string) => ({ symbol: s, is_shared: false }))
+    ];
 
-    // Get key levels for each symbol
-    const symbolsWithLevels = await Promise.all(
-      (symbols || []).map(async (sym) => {
-        const { data: levels } = await supabaseAdmin
-          .from('symbol_levels')
+    // Fetch key levels for all symbols
+    const symbolList = Array.from(new Set([...personalSymbols, ...sharedSymbols]));
+
+    const { data: levels } = symbolList.length > 0
+      ? await supabaseAdmin
+          .from('key_levels')
           .select('*')
-          .eq('symbol', sym.symbol)
-          .gt('expires_at', new Date().toISOString());
+          .in('symbol', symbolList)
+          .gt('expires_at', new Date().toISOString())
+      : { data: [] };
 
-        // Get current quote from cache
-        const { data: quote } = await supabaseAdmin
+    // Fetch market data cache
+    const { data: marketData } = symbolList.length > 0
+      ? await supabaseAdmin
           .from('market_data_cache')
           .select('*')
-          .eq('symbol', sym.symbol)
-          .single();
+          .in('symbol', symbolList)
+      : { data: [] };
 
-        return {
-          ...sym,
-          levels: levels || [],
-          quote
-        };
-      })
-    );
+    // Combine data
+    const symbols = allSymbols.map((item: { symbol: string; is_shared: boolean }, index: number) => ({
+      id: `${watchlist.id}-${index}`,
+      symbol: item.symbol,
+      is_shared: item.is_shared,
+      added_at: new Date().toISOString(),
+      levels: levels?.filter(l => l.symbol === item.symbol) || [],
+      quote: marketData?.find(m => m.symbol === item.symbol) || null
+    }));
 
     return NextResponse.json({
-      watchlistId: watchlist.id,
-      symbols: symbolsWithLevels
+      watchlist_id: watchlist.id,
+      symbols
     });
   } catch (error) {
     console.error('Error fetching watchlist:', error);
@@ -75,93 +97,97 @@ export async function GET() {
   }
 }
 
-// POST /api/companion/watchlist - Add symbol to watchlist
+// POST - Add symbol to watchlist
 export async function POST(request: Request) {
   try {
-    const userId = await getAuthenticatedUserId();
-    if (!userId) {
+    const session = await getSession();
+    if (!session?.userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { symbol } = body;
+    const userId = session.userId;
+    const { symbol } = await request.json();
 
     if (!symbol || typeof symbol !== 'string') {
-      return NextResponse.json({ error: 'Symbol is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid symbol' }, { status: 400 });
     }
 
-    const normalizedSymbol = symbol.toUpperCase().trim();
+    const normalizedSymbol = symbol.trim().toUpperCase();
 
-    // Get or create watchlist
-    let { data: watchlist } = await supabaseAdmin
+    // Get user's watchlist
+    const { data: watchlist, error: watchlistError } = await supabaseAdmin
       .from('watchlists')
-      .select('id')
-      .eq('user_id', userId)
+      .select('id, symbols')
+      .eq('owner_id', userId)
+      .eq('is_shared', false)
       .single();
 
     if (!watchlist) {
-      const { data: newWatchlist } = await supabaseAdmin
+      // Create watchlist with the symbol
+      const { error: createError } = await supabaseAdmin
         .from('watchlists')
-        .insert({ user_id: userId })
-        .select('id')
-        .single();
-      watchlist = newWatchlist;
+        .insert({
+          owner_id: userId,
+          name: 'My Watchlist',
+          is_shared: false,
+          is_admin_watchlist: false,
+          symbols: [normalizedSymbol]
+        });
+
+      if (createError) {
+        console.error('Error creating watchlist:', createError);
+        return NextResponse.json({ error: 'Failed to add symbol' }, { status: 500 });
+      }
+    } else {
+      // Add symbol if not already present
+      const currentSymbols = watchlist.symbols || [];
+      if (!currentSymbols.includes(normalizedSymbol)) {
+        const { error: updateError } = await supabaseAdmin
+          .from('watchlists')
+          .update({ symbols: [...currentSymbols, normalizedSymbol] })
+          .eq('id', watchlist.id);
+
+        if (updateError) {
+          console.error('Error updating watchlist:', updateError);
+          return NextResponse.json({ error: 'Failed to add symbol' }, { status: 500 });
+        }
+      }
     }
 
-    if (!watchlist) {
-      return NextResponse.json({ error: 'Failed to get watchlist' }, { status: 500 });
-    }
+    // Trigger async level calculation (in production this would be a background job)
+    // For now, we'll let the LTP engine handle this on its next scan
 
-    // Add symbol (upsert to handle duplicates)
-    const { data: added, error } = await supabaseAdmin
-      .from('watchlist_symbols')
-      .upsert({
-        watchlist_id: watchlist.id,
-        symbol: normalizedSymbol
-      }, {
-        onConflict: 'watchlist_id,symbol'
-      })
-      .select()
-      .single();
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    // Trigger level calculation for this symbol (async)
-    // In production, this would be a background job
-    triggerLevelCalculation(normalizedSymbol);
-
-    return NextResponse.json({
-      message: `${normalizedSymbol} added to watchlist`,
-      symbol: added
-    });
+    return NextResponse.json({ success: true, symbol: normalizedSymbol });
   } catch (error) {
-    console.error('Error adding to watchlist:', error);
+    console.error('Error adding symbol:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-// DELETE /api/companion/watchlist - Remove symbol from watchlist
+// DELETE - Remove symbol from watchlist
 export async function DELETE(request: Request) {
   try {
-    const userId = await getAuthenticatedUserId();
-    if (!userId) {
+    const session = await getSession();
+    if (!session?.userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const userId = session.userId;
     const { searchParams } = new URL(request.url);
     const symbol = searchParams.get('symbol');
 
     if (!symbol) {
-      return NextResponse.json({ error: 'Symbol is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Symbol required' }, { status: 400 });
     }
 
-    // Get watchlist
-    const { data: watchlist } = await supabaseAdmin
+    const normalizedSymbol = symbol.trim().toUpperCase();
+
+    // Get user's watchlist
+    const { data: watchlist, error: watchlistError } = await supabaseAdmin
       .from('watchlists')
-      .select('id')
-      .eq('user_id', userId)
+      .select('id, symbols')
+      .eq('owner_id', userId)
+      .eq('is_shared', false)
       .single();
 
     if (!watchlist) {
@@ -169,28 +195,21 @@ export async function DELETE(request: Request) {
     }
 
     // Remove symbol
-    const { error } = await supabaseAdmin
-      .from('watchlist_symbols')
-      .delete()
-      .eq('watchlist_id', watchlist.id)
-      .eq('symbol', symbol.toUpperCase());
+    const updatedSymbols = (watchlist.symbols || []).filter((s: string) => s !== normalizedSymbol);
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    const { error: updateError } = await supabaseAdmin
+      .from('watchlists')
+      .update({ symbols: updatedSymbols })
+      .eq('id', watchlist.id);
+
+    if (updateError) {
+      console.error('Error updating watchlist:', updateError);
+      return NextResponse.json({ error: 'Failed to remove symbol' }, { status: 500 });
     }
 
-    return NextResponse.json({
-      message: `${symbol.toUpperCase()} removed from watchlist`
-    });
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Error removing from watchlist:', error);
+    console.error('Error removing symbol:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-}
-
-// Helper to trigger level calculation (would be a queue job in production)
-async function triggerLevelCalculation(symbol: string) {
-  // This would typically add to a job queue
-  // For now, we'll just log it
-  console.log(`Level calculation triggered for ${symbol}`);
 }
