@@ -20,14 +20,21 @@ export async function GET(request: NextRequest) {
 
   try {
     // Exchange code for Discord user info
+    console.log('Exchanging Discord code for user info...');
     const discordUser = await exchangeDiscordCode(code);
+    console.log('Discord user retrieved:', discordUser.id, discordUser.username);
 
     // Check if user exists in our database (using user_profiles table)
-    let { data: user } = await supabaseAdmin
+    let { data: user, error: fetchError } = await supabaseAdmin
       .from('user_profiles')
       .select('*')
       .eq('discord_id', discordUser.id)
       .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      // PGRST116 = no rows found (expected for new users)
+      console.error('Error fetching user:', fetchError);
+    }
 
     if (!user) {
       // Create new user in user_profiles table
@@ -69,6 +76,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Set session cookie (map user_profiles fields to session fields)
+    console.log('Setting session cookie for user:', user.id);
     await setSessionCookie({
       userId: user.id,
       discordId: user.discord_id,
@@ -77,10 +85,14 @@ export async function GET(request: NextRequest) {
       isAdmin: user.is_admin || false,
     });
 
+    console.log('Login successful, redirecting to dashboard');
     // Redirect to dashboard
     return NextResponse.redirect(`${baseUrl}/dashboard`);
   } catch (error) {
     console.error('Auth callback error:', error);
-    return NextResponse.redirect(`${baseUrl}/login?error=auth_failed`);
+    // Include more detail in the error for debugging
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error details:', errorMessage);
+    return NextResponse.redirect(`${baseUrl}/login?error=auth_failed&detail=${encodeURIComponent(errorMessage)}`);
   }
 }
