@@ -12,7 +12,15 @@
       "Bash(npx supabase:*)",
       "Bash(ls:*)",
       "Bash(cat:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(curl:*)",
+      "Bash(npx tsx:*)",
+      "Bash(railway variables:*)",
+      "Bash(railway whoami:*)",
+      "Bash(echo:*)",
+      "Bash(node -e \"\nconst { createClient } = require\\(''@supabase/supabase-js''\\);\nconst supabase = createClient\\(\n  ''https://hnelkpcwudibqluphcxw.supabase.co'',\n  process.env.SUPABASE_SERVICE_ROLE_KEY\n\\);\n\nasync function fixColumns\\(\\) {\n  // Use raw SQL via RPC\n  const { data, error } = await supabase.rpc\\(''exec_sql'', {\n    sql: ''ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS channel_id VARCHAR\\(50\\); ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS channel_title VARCHAR\\(200\\);''\n  }\\);\n  \n  if \\(error\\) {\n    console.log\\(''RPC not available, trying direct approach...''\\);\n    \n    // Try inserting a test row to see current columns\n    const { data: cols, error: colErr } = await supabase\n      .from\\(''youtube_videos''\\)\n      .select\\(''*''\\)\n      .limit\\(0\\);\n    \n    console.log\\(''Current table accessible:'', !colErr\\);\n    if \\(colErr\\) console.log\\(''Error:'', colErr.message\\);\n  } else {\n    console.log\\(''Success:'', data\\);\n  }\n}\n\nfixColumns\\(\\);\n\")",
+      "Bash(source .env.local)",
+      "Bash(node -e:*)"
     ]
   }
 }

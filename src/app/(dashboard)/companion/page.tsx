@@ -10,10 +10,8 @@ import {
   TrendingUp,
   TrendingDown,
   Target,
-  Activity,
   Eye,
   Bell,
-  ChevronRight,
   Zap,
   Clock,
   BarChart3,
@@ -21,7 +19,11 @@ import {
   AlertTriangle,
   RefreshCw,
   Wifi,
-  WifiOff
+  WifiOff,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Activity,
 } from 'lucide-react';
 
 interface WatchlistSymbol {
@@ -74,6 +76,13 @@ interface DetectedSetup {
   detected_at: string;
 }
 
+interface MarketStatus {
+  spy: { price: number; change: number };
+  qqq: { price: number; change: number };
+  isOpen: boolean;
+  timeToClose: string;
+}
+
 export default function CompanionPage() {
   const [watchlist, setWatchlist] = useState<WatchlistSymbol[]>([]);
   const [setups, setSetups] = useState<DetectedSetup[]>([]);
@@ -81,12 +90,11 @@ export default function CompanionPage() {
   const [loading, setLoading] = useState(true);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
+  const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
 
   // Handle real-time SSE events
   const handleStreamEvent = useCallback((event: CompanionEvent) => {
     if (event.type === 'setup_forming' || event.type === 'setup_ready') {
-      // Update setups with real-time data
       setSetups(prev => {
         const existing = prev.findIndex(s => s.symbol === event.data.symbol);
         const newSetup: DetectedSetup = {
@@ -120,7 +128,6 @@ export default function CompanionPage() {
         return [newSetup, ...prev];
       });
     } else if (event.type === 'price_update') {
-      // Update watchlist prices in real-time
       setWatchlist(prev => prev.map(item => {
         if (item.symbol === event.data.symbol) {
           return {
@@ -138,7 +145,6 @@ export default function CompanionPage() {
     }
   }, []);
 
-  // Connect to SSE stream for real-time updates
   const { connected: streamConnected, error: streamError } = useCompanionStream({
     onEvent: handleStreamEvent,
   });
@@ -146,10 +152,11 @@ export default function CompanionPage() {
   useEffect(() => {
     fetchWatchlist();
     fetchSetups();
+    fetchMarketStatus();
 
-    // Fallback: Poll for updates every 60 seconds if SSE is connected, 30 seconds if not
     const interval = setInterval(() => {
       fetchSetups();
+      fetchMarketStatus();
     }, streamConnected ? 60000 : 30000);
 
     return () => clearInterval(interval);
@@ -177,16 +184,26 @@ export default function CompanionPage() {
     }
   };
 
+  const fetchMarketStatus = async () => {
+    try {
+      const res = await fetch('/api/market/status');
+      if (res.ok) {
+        const data = await res.json();
+        setMarketStatus(data);
+      }
+    } catch (error) {
+      // Silently fail - market status is optional
+    }
+  };
+
   const addSymbol = async () => {
     if (!newSymbol.trim()) return;
-
     try {
       const res = await fetch('/api/companion/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol: newSymbol.trim() })
       });
-
       if (res.ok) {
         setNewSymbol('');
         fetchWatchlist();
@@ -198,9 +215,7 @@ export default function CompanionPage() {
 
   const removeSymbol = async (symbol: string) => {
     try {
-      await fetch(`/api/companion/watchlist?symbol=${symbol}`, {
-        method: 'DELETE'
-      });
+      await fetch(`/api/companion/watchlist?symbol=${symbol}`, { method: 'DELETE' });
       fetchWatchlist();
     } catch (error) {
       console.error('Error removing symbol:', error);
@@ -209,464 +224,591 @@ export default function CompanionPage() {
 
   const refreshLevels = async () => {
     setRefreshing(true);
-    setRefreshStatus('Refreshing market data...');
     try {
-      const res = await fetch('/api/companion/refresh', {
+      await fetch('/api/companion/refresh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshAll: true })
       });
-      const data = await res.json();
-
-      if (res.ok) {
-        setRefreshStatus(`Refreshed ${data.refreshed}/${data.total} symbols (${data.totalLevels} levels)`);
-        // Refresh watchlist to get updated levels
-        fetchWatchlist();
-        fetchSetups();
-      } else {
-        setRefreshStatus(data.detail || data.error || 'Refresh failed');
-      }
+      fetchWatchlist();
+      fetchSetups();
     } catch (error) {
-      console.error('Error refreshing levels:', error);
-      setRefreshStatus('Error refreshing levels');
+      console.error('Error refreshing:', error);
     } finally {
       setRefreshing(false);
-      // Clear status after 5 seconds
-      setTimeout(() => setRefreshStatus(null), 5000);
     }
   };
 
   const readySetups = setups.filter(s => s.setup_stage === 'ready');
   const formingSetups = setups.filter(s => s.setup_stage === 'forming');
-  const sharedSymbols = watchlist.filter(s => s.is_shared);
-  const personalSymbols = watchlist.filter(s => !s.is_shared);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--text-primary)] uppercase tracking-wide">
-            Companion Mode
-          </h1>
-          <p className="text-[var(--text-secondary)]">
-            Real-time LTP setup detection powered by Kay Capitals methodology
-          </p>
-          {refreshStatus && (
-            <p className="text-sm text-[var(--accent-primary)] mt-1">{refreshStatus}</p>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={refreshLevels}
-            disabled={refreshing || watchlist.length === 0}
-            className="btn btn-secondary flex items-center gap-2"
-            title="Refresh key levels for all watchlist symbols"
-          >
-            <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
-            {refreshing ? 'Refreshing...' : 'Refresh Levels'}
-          </button>
-          <div className={cn(
-            'badge flex items-center gap-2',
-            streamConnected ? 'badge-gold' : 'badge-neutral'
-          )} title={streamError || (streamConnected ? 'Real-time updates active' : 'Connecting...')}>
-            {streamConnected ? (
-              <>
-                <Wifi className="w-3 h-3" />
-                <span className="pulse-dot">LIVE</span>
-              </>
-            ) : (
-              <>
-                <WifiOff className="w-3 h-3" />
-                <span>OFFLINE</span>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
+    <div className="space-y-4">
+      {/* Market Context Header */}
+      <MarketContextHeader
+        marketStatus={marketStatus}
+        streamConnected={streamConnected}
+        streamError={streamError}
+        onRefresh={refreshLevels}
+        refreshing={refreshing}
+        readyCount={readySetups.length}
+        formingCount={formingSetups.length}
+        symbolCount={watchlist.length}
+      />
 
-      {/* Ready Setups Alert Banner */}
-      {readySetups.length > 0 && (
-        <div className="card card-hover border-l-4 border-[var(--accent-primary)] p-4" style={{ animation: 'pulse-dot 2s ease-in-out infinite' }}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-[var(--accent-primary)] flex items-center justify-center">
-                <Target className="w-5 h-5 text-[var(--bg-primary)]" />
-              </div>
-              <div>
-                <p className="font-semibold text-[var(--text-primary)] uppercase tracking-wide">
-                  {readySetups.length} Setup{readySetups.length > 1 ? 's' : ''} Ready!
-                </p>
-                <p className="text-sm text-[var(--text-secondary)]">
-                  {readySetups.map(s => s.symbol).join(', ')} - All LTP criteria met
-                </p>
-              </div>
-            </div>
-            <Button
-              variant="primary"
-              onClick={() => {
-                // Scroll to the first ready setup in the watchlist
-                const firstReadySetup = document.querySelector('[aria-label*="confluence score"]');
-                firstReadySetup?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                // Or select the first ready setup
-                if (readySetups.length > 0) {
-                  setSelectedSymbol(readySetups[0].symbol);
-                }
-              }}
-              icon={<ChevronRight className="w-4 h-4" />}
-              iconPosition="right"
-            >
-              View Setups
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Main Grid - now with md: breakpoint for tablets */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-        {/* Watchlist Panel */}
-        <div className="card p-6 lg:col-span-1">
-          <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2 mb-4 uppercase tracking-wide">
-            <Eye className="w-5 h-5 text-[var(--accent-primary)]" />
-            Watchlist
-          </h2>
-
-          {/* Add Symbol Input */}
-          <div className="flex gap-2 mb-4">
-            <input
-              type="text"
-              placeholder="Add symbol (e.g., NVDA)"
-              value={newSymbol}
-              onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
-              onKeyDown={(e) => e.key === 'Enter' && addSymbol()}
-              className="input flex-1"
-            />
-            <button className="btn btn-primary px-3" onClick={addSymbol}>
-              <Plus className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Shared Watchlist (Admin) */}
-          {sharedSymbols.length > 0 && (
-            <div className="mb-4">
-              <h3 className="text-xs font-semibold text-[var(--accent-primary)] mb-2 uppercase tracking-wider flex items-center gap-1">
-                <AlertTriangle className="w-3 h-3" />
-                Coach Watchlist
-              </h3>
-              <div className="space-y-2">
-                {sharedSymbols.map((item) => (
-                  <WatchlistItem
-                    key={item.id}
-                    item={item}
-                    isSelected={selectedSymbol === item.symbol}
-                    onSelect={() => setSelectedSymbol(item.symbol)}
-                    onRemove={() => {}} // Can't remove shared
-                    setup={setups.find(s => s.symbol === item.symbol)}
-                    isShared
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Personal Symbols */}
-          <div className="space-y-2">
-            {personalSymbols.length > 0 && sharedSymbols.length > 0 && (
-              <h3 className="text-xs font-semibold text-[var(--text-tertiary)] mb-2 uppercase tracking-wider">
-                Personal
-              </h3>
-            )}
-            {personalSymbols.map((item) => (
-              <WatchlistItem
-                key={item.id}
-                item={item}
-                isSelected={selectedSymbol === item.symbol}
-                onSelect={() => setSelectedSymbol(item.symbol)}
-                onRemove={() => removeSymbol(item.symbol)}
-                setup={setups.find(s => s.symbol === item.symbol)}
-              />
-            ))}
-
-            {watchlist.length === 0 && !loading && (
-              <div className="text-center py-8 text-[var(--text-tertiary)]">
-                <Eye className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p>No symbols in watchlist</p>
-                <p className="text-sm">Add symbols to start detecting setups</p>
-              </div>
-            )}
-          </div>
+      {/* Main 2-Column Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        {/* Left Column - Watchlist */}
+        <div className="lg:col-span-1 space-y-4">
+          <WatchlistPanel
+            watchlist={watchlist}
+            setups={setups}
+            selectedSymbol={selectedSymbol}
+            onSelectSymbol={setSelectedSymbol}
+            onAddSymbol={addSymbol}
+            onRemoveSymbol={removeSymbol}
+            newSymbol={newSymbol}
+            setNewSymbol={setNewSymbol}
+            loading={loading}
+          />
         </div>
 
-        {/* Setups Panel */}
-        <div className="card p-6 lg:col-span-2">
-          <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2 mb-4 uppercase tracking-wide">
-            <Zap className="w-5 h-5 text-[var(--accent-primary)]" />
-            LTP Setups
-          </h2>
-
-          {/* Ready Setups */}
+        {/* Right Column - Setups & Levels */}
+        <div className="lg:col-span-3 space-y-4">
+          {/* Ready Setups - Priority Display */}
           {readySetups.length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-[var(--accent-primary)] mb-3 flex items-center gap-2 uppercase tracking-wider">
-                <Target className="w-4 h-4" />
-                READY - Entry Window Open
-              </h3>
-              <div className="space-y-3">
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 bg-[var(--accent-primary)] rounded-full animate-pulse" />
+                <h2 className="text-sm font-semibold text-[var(--accent-primary)] uppercase tracking-wider">
+                  Ready to Trade ({readySetups.length})
+                </h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {readySetups.map((setup) => (
                   <SetupCard key={setup.id} setup={setup} variant="ready" />
                 ))}
               </div>
-            </div>
+            </section>
           )}
 
           {/* Forming Setups */}
           {formingSetups.length > 0 && (
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 flex items-center gap-2 uppercase tracking-wider">
-                <Clock className="w-4 h-4" />
-                FORMING - Watching
-              </h3>
-              <div className="space-y-3">
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <Clock className="w-4 h-4 text-[var(--text-tertiary)]" />
+                <h2 className="text-sm font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+                  Forming ({formingSetups.length})
+                </h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {formingSetups.map((setup) => (
                   <SetupCard key={setup.id} setup={setup} variant="forming" />
                 ))}
               </div>
+            </section>
+          )}
+
+          {/* Empty State */}
+          {setups.length === 0 && !loading && (
+            <div className="bg-[var(--bg-secondary)] border border-[var(--border-primary)] p-12 text-center">
+              <Target className="w-16 h-16 mx-auto mb-4 text-[var(--text-tertiary)] opacity-50" />
+              <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">No Active Setups</h3>
+              <p className="text-[var(--text-tertiary)] max-w-md mx-auto">
+                Add symbols to your watchlist and the LTP detection engine will scan for setups in real-time.
+              </p>
             </div>
           )}
 
-          {setups.length === 0 && (
-            <div className="text-center py-12 text-[var(--text-tertiary)]">
-              <BarChart3 className="w-12 h-12 mx-auto mb-3 opacity-50" />
-              <p className="font-medium">No active setups detected</p>
-              <p className="text-sm">Add symbols to your watchlist to start detecting LTP setups</p>
-            </div>
+          {/* Key Levels Panel */}
+          {selectedSymbol && (
+            <KeyLevelsPanel
+              symbol={selectedSymbol}
+              watchlistItem={watchlist.find(w => w.symbol === selectedSymbol)}
+              setup={setups.find(s => s.symbol === selectedSymbol)}
+              onClose={() => setSelectedSymbol(null)}
+            />
           )}
         </div>
       </div>
-
-      {/* Key Levels Panel (when symbol selected) */}
-      {selectedSymbol && (
-        <KeyLevelsPanel
-          symbol={selectedSymbol}
-          levels={watchlist.find(w => w.symbol === selectedSymbol)?.levels || []}
-          quote={watchlist.find(w => w.symbol === selectedSymbol)?.quote}
-          onClose={() => setSelectedSymbol(null)}
-        />
-      )}
     </div>
   );
 }
 
-// Watchlist Item Component
+// ============================================================================
+// MARKET CONTEXT HEADER
+// ============================================================================
+function MarketContextHeader({
+  marketStatus,
+  streamConnected,
+  streamError,
+  onRefresh,
+  refreshing,
+  readyCount,
+  formingCount,
+  symbolCount,
+}: {
+  marketStatus: MarketStatus | null;
+  streamConnected: boolean;
+  streamError: string | null;
+  onRefresh: () => void;
+  refreshing: boolean;
+  readyCount: number;
+  formingCount: number;
+  symbolCount: number;
+}) {
+  return (
+    <div className="bg-[var(--bg-secondary)] border border-[var(--border-primary)] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        {/* Left: Market Indices */}
+        <div className="flex items-center gap-6">
+          {marketStatus ? (
+            <>
+              <MarketTicker symbol="SPY" price={marketStatus.spy.price} change={marketStatus.spy.change} />
+              <MarketTicker symbol="QQQ" price={marketStatus.qqq.price} change={marketStatus.qqq.change} />
+              <div className="h-8 w-px bg-[var(--border-primary)]" />
+              <div className="flex items-center gap-2">
+                <div className={cn(
+                  'w-2 h-2 rounded-full',
+                  marketStatus.isOpen ? 'bg-[var(--success)]' : 'bg-[var(--error)]'
+                )} />
+                <span className="text-sm text-[var(--text-secondary)]">
+                  {marketStatus.isOpen ? `Closes in ${marketStatus.timeToClose}` : 'Market Closed'}
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center gap-2 text-[var(--text-tertiary)]">
+              <Activity className="w-4 h-4 animate-pulse" />
+              <span className="text-sm">Loading market data...</span>
+            </div>
+          )}
+        </div>
+
+        {/* Center: Setup Summary */}
+        <div className="flex items-center gap-4">
+          <SetupSummaryBadge count={readyCount} label="Ready" variant="gold" />
+          <SetupSummaryBadge count={formingCount} label="Forming" variant="neutral" />
+          <SetupSummaryBadge count={symbolCount} label="Watching" variant="info" />
+        </div>
+
+        {/* Right: Actions */}
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onRefresh}
+            disabled={refreshing}
+            icon={<RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />}
+          >
+            Refresh
+          </Button>
+          <div
+            className={cn(
+              'flex items-center gap-2 px-3 py-1.5 text-xs font-medium uppercase tracking-wide',
+              streamConnected
+                ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] border border-[var(--accent-primary)]/30'
+                : 'bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] border border-[var(--border-primary)]'
+            )}
+            title={streamError || (streamConnected ? 'Real-time updates active' : 'Connecting...')}
+          >
+            {streamConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+            {streamConnected ? 'LIVE' : 'OFFLINE'}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MarketTicker({ symbol, price, change }: { symbol: string; price: number; change: number }) {
+  const isPositive = change >= 0;
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-sm font-medium text-[var(--text-secondary)]">{symbol}</span>
+      <span className="text-sm font-mono text-[var(--text-primary)]">${price.toFixed(2)}</span>
+      <span className={cn(
+        'text-xs font-mono px-1.5 py-0.5',
+        isPositive ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--error)]/10 text-[var(--error)]'
+      )}>
+        {isPositive ? '+' : ''}{change.toFixed(2)}%
+      </span>
+    </div>
+  );
+}
+
+function SetupSummaryBadge({ count, label, variant }: { count: number; label: string; variant: 'gold' | 'neutral' | 'info' }) {
+  const colors = {
+    gold: count > 0 ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] border-[var(--accent-primary)]/30' : 'bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] border-[var(--border-primary)]',
+    neutral: 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border-[var(--border-primary)]',
+    info: 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border-[var(--border-primary)]',
+  };
+
+  return (
+    <div className={cn('flex items-center gap-2 px-3 py-1.5 border text-sm', colors[variant])}>
+      <span className="font-bold font-mono">{count}</span>
+      <span className="text-xs uppercase tracking-wide opacity-70">{label}</span>
+    </div>
+  );
+}
+
+// ============================================================================
+// WATCHLIST PANEL
+// ============================================================================
+function WatchlistPanel({
+  watchlist,
+  setups,
+  selectedSymbol,
+  onSelectSymbol,
+  onAddSymbol,
+  onRemoveSymbol,
+  newSymbol,
+  setNewSymbol,
+  loading,
+}: {
+  watchlist: WatchlistSymbol[];
+  setups: DetectedSetup[];
+  selectedSymbol: string | null;
+  onSelectSymbol: (symbol: string | null) => void;
+  onAddSymbol: () => void;
+  onRemoveSymbol: (symbol: string) => void;
+  newSymbol: string;
+  setNewSymbol: (symbol: string) => void;
+  loading: boolean;
+}) {
+  const sharedSymbols = watchlist.filter(s => s.is_shared);
+  const personalSymbols = watchlist.filter(s => !s.is_shared);
+
+  return (
+    <div className="bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
+      {/* Header */}
+      <div className="p-4 border-b border-[var(--border-primary)]">
+        <div className="flex items-center gap-2 mb-3">
+          <Eye className="w-4 h-4 text-[var(--accent-primary)]" />
+          <h2 className="text-sm font-semibold text-[var(--text-primary)] uppercase tracking-wider">Watchlist</h2>
+        </div>
+
+        {/* Add Symbol Input */}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder="Add symbol..."
+            value={newSymbol}
+            onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+            onKeyDown={(e) => e.key === 'Enter' && onAddSymbol()}
+            className="flex-1 px-3 py-2 text-sm bg-[var(--bg-primary)] border border-[var(--border-primary)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:border-[var(--accent-primary)] focus:outline-none"
+          />
+          <button
+            onClick={onAddSymbol}
+            className="px-3 py-2 bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:bg-[var(--accent-primary)]/90 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Symbols List */}
+      <div className="max-h-[calc(100vh-320px)] overflow-y-auto">
+        {/* Coach Watchlist */}
+        {sharedSymbols.length > 0 && (
+          <div className="p-2">
+            <div className="flex items-center gap-1 px-2 py-1 text-xs font-semibold text-[var(--accent-primary)] uppercase tracking-wider">
+              <AlertTriangle className="w-3 h-3" />
+              Coach Picks
+            </div>
+            <div className="space-y-1">
+              {sharedSymbols.map((item) => (
+                <WatchlistItem
+                  key={item.id}
+                  item={item}
+                  setup={setups.find(s => s.symbol === item.symbol)}
+                  isSelected={selectedSymbol === item.symbol}
+                  onSelect={() => onSelectSymbol(selectedSymbol === item.symbol ? null : item.symbol)}
+                  onRemove={() => {}}
+                  isShared
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Personal Watchlist */}
+        <div className="p-2">
+          {sharedSymbols.length > 0 && personalSymbols.length > 0 && (
+            <div className="px-2 py-1 text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+              Personal
+            </div>
+          )}
+          <div className="space-y-1">
+            {personalSymbols.map((item) => (
+              <WatchlistItem
+                key={item.id}
+                item={item}
+                setup={setups.find(s => s.symbol === item.symbol)}
+                isSelected={selectedSymbol === item.symbol}
+                onSelect={() => onSelectSymbol(selectedSymbol === item.symbol ? null : item.symbol)}
+                onRemove={() => onRemoveSymbol(item.symbol)}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Empty State */}
+        {watchlist.length === 0 && !loading && (
+          <div className="p-8 text-center">
+            <Eye className="w-10 h-10 mx-auto mb-2 text-[var(--text-tertiary)] opacity-30" />
+            <p className="text-sm text-[var(--text-tertiary)]">No symbols yet</p>
+            <p className="text-xs text-[var(--text-tertiary)] opacity-70">Add symbols to start scanning</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function WatchlistItem({
   item,
+  setup,
   isSelected,
   onSelect,
   onRemove,
-  setup,
-  isShared = false
+  isShared = false,
 }: {
   item: WatchlistSymbol;
+  setup?: DetectedSetup;
   isSelected: boolean;
   onSelect: () => void;
   onRemove: () => void;
-  setup?: DetectedSetup;
   isShared?: boolean;
 }) {
   const hasSetup = !!setup;
   const isReady = setup?.setup_stage === 'ready';
+  const changePercent = item.quote?.change_percent ?? 0;
+  const isPositive = changePercent >= 0;
 
   return (
     <div
       role="button"
       tabIndex={0}
-      className={cn(
-        'p-3 border cursor-pointer transition-all',
-        'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]',
-        isSelected
-          ? 'border-[var(--accent-primary)] bg-[var(--accent-primary-glow)]'
-          : 'border-[var(--border-primary)] hover:border-[var(--border-secondary)]',
-        isReady && 'ring-1 ring-[var(--accent-primary)]',
-        isShared && 'border-l-2 border-l-[var(--accent-primary)]'
-      )}
       onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-      aria-selected={isSelected}
-      aria-label={`${item.symbol}${hasSetup ? `, confluence score ${setup.confluence_score}%` : ''}`}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelect()}
+      className={cn(
+        'group p-3 cursor-pointer transition-all',
+        isSelected
+          ? 'bg-[var(--accent-primary)]/10 border-l-2 border-l-[var(--accent-primary)]'
+          : 'hover:bg-[var(--bg-tertiary)] border-l-2 border-l-transparent',
+        isReady && !isSelected && 'border-l-[var(--accent-primary)]/50'
+      )}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="font-bold text-[var(--text-primary)]">{item.symbol}</div>
-          {item.quote && (
-            <span className={`text-sm ${item.quote.change_percent >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}`}>
-              {item.quote.change_percent >= 0 ? '+' : ''}{item.quote.change_percent?.toFixed(2)}%
+      {/* Top Row: Symbol + Price */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-[var(--text-primary)]">{item.symbol}</span>
+          {isShared && (
+            <span className="px-1.5 py-0.5 text-[9px] font-bold bg-[var(--accent-primary)]/20 text-[var(--accent-primary)] uppercase">
+              Coach
             </span>
           )}
-          {isShared && (
-            <span className="badge badge-gold text-[10px]">COACH</span>
-          )}
         </div>
-        <div className="flex items-center gap-2">
-          {hasSetup && (
+        {!isShared && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            className="opacity-0 group-hover:opacity-100 p-1 hover:bg-[var(--bg-elevated)] transition-opacity"
+          >
+            <X className="w-3 h-3 text-[var(--text-tertiary)]" />
+          </button>
+        )}
+      </div>
+
+      {/* Middle Row: Price + Change */}
+      {item.quote && (
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-sm font-mono text-[var(--text-secondary)]">
+            ${item.quote.last_price?.toFixed(2)}
+          </span>
+          <span className={cn(
+            'text-xs font-mono px-1.5 py-0.5',
+            isPositive ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--error)]/10 text-[var(--error)]'
+          )}>
+            {isPositive ? '+' : ''}{changePercent.toFixed(2)}%
+          </span>
+        </div>
+      )}
+
+      {/* Bottom Row: Score Bar */}
+      {hasSetup && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <ScoreBarMini scores={[setup.level_score, setup.trend_score, setup.patience_score, setup.mtf_score]} />
             <span className={cn(
-              'badge',
-              isReady ? 'badge-gold' : 'badge-neutral'
+              'text-xs font-bold font-mono ml-2',
+              isReady ? 'text-[var(--accent-primary)]' : 'text-[var(--text-secondary)]'
             )}>
               {setup.confluence_score}%
             </span>
-          )}
-          {!isShared && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onRemove(); }}
-              className="p-1 hover:bg-[var(--bg-elevated)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)]"
-              aria-label={`Remove ${item.symbol} from watchlist`}
-            >
-              <X className="w-4 h-4 text-[var(--text-tertiary)]" aria-hidden="true" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {item.quote && (
-        <div className="mt-2 text-sm text-[var(--text-secondary)] font-mono">
-          ${item.quote.last_price?.toFixed(2)}
-        </div>
-      )}
-
-      {hasSetup && (
-        <div className="mt-2 flex gap-3 text-xs font-mono">
-          <span className={cn(
-            setup.level_score >= 70 ? 'text-[var(--success)]' : setup.level_score >= 50 ? 'text-[var(--warning)]' : 'text-[var(--error)]'
-          )}>
-            L:{setup.level_score}
-          </span>
-          <span className={cn(
-            setup.trend_score >= 70 ? 'text-[var(--success)]' : setup.trend_score >= 50 ? 'text-[var(--warning)]' : 'text-[var(--error)]'
-          )}>
-            T:{setup.trend_score}
-          </span>
-          <span className={cn(
-            setup.patience_score >= 70 ? 'text-[var(--success)]' : setup.patience_score >= 50 ? 'text-[var(--warning)]' : 'text-[var(--error)]'
-          )}>
-            P:{setup.patience_score}
-          </span>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-// Setup Card Component
-function SetupCard({ setup, variant }: { setup: DetectedSetup; variant: 'ready' | 'forming' }) {
-  const isReady = variant === 'ready';
+function ScoreBarMini({ scores }: { scores: number[] }) {
+  const getColor = (score: number) => {
+    if (score >= 70) return 'var(--success)';
+    if (score >= 50) return 'var(--warning)';
+    return 'var(--error)';
+  };
 
   return (
-    <div
-      className={cn(
-        'card p-4',
-        isReady
-          ? 'border-[var(--accent-primary)] bg-[var(--accent-primary-glow)]'
-          : 'border-[var(--border-primary)]'
-      )}
-    >
-      <div className="flex items-start justify-between mb-3">
+    <div className="flex gap-0.5 flex-1">
+      {scores.map((score, i) => (
+        <div
+          key={i}
+          className="h-1.5 flex-1 bg-[var(--bg-tertiary)] overflow-hidden"
+          title={['Level', 'Trend', 'Patience', 'MTF'][i]}
+        >
+          <div
+            className="h-full transition-all"
+            style={{ width: `${score}%`, backgroundColor: getColor(score) }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================================
+// SETUP CARD
+// ============================================================================
+function SetupCard({ setup, variant }: { setup: DetectedSetup; variant: 'ready' | 'forming' }) {
+  const isReady = variant === 'ready';
+  const isBullish = setup.direction === 'bullish';
+
+  return (
+    <div className={cn(
+      'bg-[var(--bg-secondary)] border overflow-hidden transition-all hover:border-[var(--accent-primary)]/50',
+      isReady ? 'border-[var(--accent-primary)]/30' : 'border-[var(--border-primary)]'
+    )}>
+      {/* Header */}
+      <div className={cn(
+        'px-4 py-3 flex items-center justify-between',
+        isReady ? 'bg-[var(--accent-primary)]/5' : ''
+      )}>
         <div className="flex items-center gap-3">
+          {/* Direction Icon */}
           <div className={cn(
             'w-10 h-10 flex items-center justify-center',
-            isReady ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]' : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)]'
+            isBullish ? 'bg-[var(--success)]/10' : 'bg-[var(--error)]/10'
           )}>
-            {setup.direction === 'bullish' ? (
-              <TrendingUp className="w-5 h-5" />
+            {isBullish ? (
+              <TrendingUp className={cn('w-5 h-5', 'text-[var(--success)]')} />
             ) : (
-              <TrendingDown className="w-5 h-5" />
+              <TrendingDown className={cn('w-5 h-5', 'text-[var(--error)]')} />
             )}
           </div>
+
+          {/* Symbol + Direction */}
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-lg text-[var(--text-primary)]">{setup.symbol}</span>
+              <span className="text-lg font-bold text-[var(--text-primary)]">{setup.symbol}</span>
               <span className={cn(
-                'badge',
-                setup.direction === 'bullish' ? 'badge-success' : 'badge-error'
+                'px-2 py-0.5 text-[10px] font-bold uppercase',
+                isBullish ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--error)]/10 text-[var(--error)]'
               )}>
-                {setup.direction.toUpperCase()}
+                {isBullish ? 'Long' : 'Short'}
               </span>
             </div>
-            <div className="text-sm text-[var(--text-secondary)]">
+            <div className="text-xs text-[var(--text-tertiary)]">
               {setup.primary_level_type?.toUpperCase()} @ ${setup.primary_level_price?.toFixed(2)}
             </div>
           </div>
         </div>
 
+        {/* Confluence Score */}
         <div className="text-right">
-          <div className={cn('text-2xl font-bold font-mono', isReady ? 'text-[var(--accent-primary)]' : 'text-[var(--text-primary)]')}>
+          <div className={cn(
+            'text-3xl font-bold font-mono',
+            setup.confluence_score >= 75 ? 'text-[var(--accent-primary)]' :
+            setup.confluence_score >= 60 ? 'text-[var(--success)]' :
+            'text-[var(--warning)]'
+          )}>
             {setup.confluence_score}
           </div>
-          <div className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide">Confluence</div>
+          <div className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider">Confluence</div>
         </div>
       </div>
 
-      {/* LTP Scores */}
-      <div className="grid grid-cols-4 gap-2 mb-3">
-        <ScoreBar label="Level" score={setup.level_score} />
-        <ScoreBar label="Trend" score={setup.trend_score} />
-        <ScoreBar label="Patience" score={setup.patience_score} />
-        <ScoreBar label="MTF" score={setup.mtf_score || 0} />
+      {/* Score Bars */}
+      <div className="px-4 py-3 border-t border-[var(--border-primary)]">
+        <div className="grid grid-cols-4 gap-3">
+          <ScoreBarVertical label="L" score={setup.level_score} />
+          <ScoreBarVertical label="T" score={setup.trend_score} />
+          <ScoreBarVertical label="P" score={setup.patience_score} />
+          <ScoreBarVertical label="M" score={setup.mtf_score || 0} />
+        </div>
       </div>
 
       {/* Coach Note */}
       {setup.coach_note && (
-        <div className="p-3 bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-sm text-[var(--text-secondary)] mb-3">
-          <span className="text-[var(--accent-primary)]">KCU Coach:</span> {setup.coach_note}
+        <div className="px-4 py-3 bg-[var(--bg-tertiary)] border-t border-[var(--border-primary)]">
+          <p className="text-xs text-[var(--text-secondary)]">
+            <span className="text-[var(--accent-primary)] font-semibold">Coach: </span>
+            {setup.coach_note}
+          </p>
         </div>
       )}
 
-      {/* Trade Params (for ready setups) */}
-      {isReady && setup.suggested_entry && (
-        <div className="grid grid-cols-5 gap-2 text-sm mb-3">
-          <div>
-            <div className="text-[var(--text-tertiary)] text-xs uppercase">Entry</div>
-            <div className="font-medium font-mono text-[var(--text-primary)]">${setup.suggested_entry?.toFixed(2)}</div>
-          </div>
-          <div>
-            <div className="text-[var(--text-tertiary)] text-xs uppercase">Stop</div>
-            <div className="font-medium font-mono text-[var(--error)]">${setup.suggested_stop?.toFixed(2)}</div>
-          </div>
-          <div>
-            <div className="text-[var(--text-tertiary)] text-xs uppercase">T1</div>
-            <div className="font-medium font-mono text-[var(--success)]">${setup.target_1?.toFixed(2)}</div>
-          </div>
-          <div>
-            <div className="text-[var(--text-tertiary)] text-xs uppercase">T2</div>
-            <div className="font-medium font-mono text-[var(--success)]">${setup.target_2?.toFixed(2)}</div>
-          </div>
-          <div>
-            <div className="text-[var(--text-tertiary)] text-xs uppercase">R:R</div>
-            <div className="font-medium font-mono text-[var(--accent-primary)]">{setup.risk_reward?.toFixed(1)}:1</div>
+      {/* Trade Params - Only for Ready */}
+      {isReady && setup.suggested_entry > 0 && (
+        <div className="px-4 py-3 border-t border-[var(--border-primary)] bg-[var(--bg-primary)]">
+          <div className="grid grid-cols-5 gap-2 text-center">
+            <TradeParam label="Entry" value={`$${setup.suggested_entry.toFixed(2)}`} />
+            <TradeParam label="Stop" value={`$${setup.suggested_stop.toFixed(2)}`} color="error" />
+            <TradeParam label="T1" value={`$${setup.target_1.toFixed(2)}`} color="success" />
+            <TradeParam label="T2" value={`$${setup.target_2.toFixed(2)}`} color="success" />
+            <TradeParam label="R:R" value={`${setup.risk_reward?.toFixed(1)}:1`} color="accent" />
           </div>
         </div>
       )}
 
       {/* Actions */}
-      <div className="flex gap-2 mt-4">
-        <button className={cn('btn flex-1', isReady ? 'btn-primary' : 'btn-secondary')}>
-          <Bell className="w-4 h-4 mr-1" />
-          {isReady ? 'Alert on Break' : 'Watch Setup'}
+      <div className="px-4 py-3 border-t border-[var(--border-primary)] flex gap-2">
+        <button
+          onClick={() => {
+            if ('Notification' in window && Notification.permission === 'default') {
+              Notification.requestPermission();
+            }
+            alert(`Alert set for ${setup.symbol}.\n\nYou'll be notified when ${
+              isReady ? `price breaks $${setup.suggested_entry?.toFixed(2)}` : 'setup becomes ready'
+            }`);
+          }}
+          className={cn(
+            'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium transition-colors',
+            isReady
+              ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)] hover:bg-[var(--accent-primary)]/90'
+              : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]'
+          )}
+        >
+          <Bell className="w-4 h-4" />
+          {isReady ? 'Alert Entry' : 'Watch'}
         </button>
-        <button className="btn btn-ghost">
-          <BarChart3 className="w-4 h-4" />
+        <button
+          onClick={() => {
+            const tvSymbol = setup.symbol.includes(':') ? setup.symbol : `NASDAQ:${setup.symbol}`;
+            window.open(`https://www.tradingview.com/chart/?symbol=${tvSymbol}`, '_blank');
+          }}
+          className="px-3 py-2 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-colors"
+          title="Open Chart"
+        >
+          <ExternalLink className="w-4 h-4" />
         </button>
       </div>
     </div>
   );
 }
 
-// Score Bar Component
-function ScoreBar({ label, score }: { label: string; score: number }) {
+function ScoreBarVertical({ label, score }: { label: string; score: number }) {
   const getColor = () => {
     if (score >= 70) return 'var(--success)';
     if (score >= 50) return 'var(--warning)';
@@ -674,262 +816,139 @@ function ScoreBar({ label, score }: { label: string; score: number }) {
   };
 
   return (
-    <div>
-      <div className="flex justify-between text-xs mb-1">
-        <span className="text-[var(--text-tertiary)] uppercase tracking-wide">{label}</span>
-        <span className="text-[var(--text-secondary)] font-mono">{score}</span>
-      </div>
-      <div className="progress-bar">
+    <div className="text-center">
+      <div className="text-[10px] font-semibold text-[var(--text-tertiary)] uppercase mb-1">{label}</div>
+      <div className="h-2 bg-[var(--bg-tertiary)] overflow-hidden mb-1">
         <div
-          className="progress-fill"
-          style={{
-            width: `${score}%`,
-            background: getColor()
-          }}
+          className="h-full transition-all"
+          style={{ width: `${score}%`, backgroundColor: getColor() }}
         />
       </div>
+      <div className="text-xs font-mono text-[var(--text-secondary)]">{score}</div>
     </div>
   );
 }
 
-// Key Levels Panel
+function TradeParam({ label, value, color }: { label: string; value: string; color?: 'success' | 'error' | 'accent' }) {
+  const colorClass = color === 'success' ? 'text-[var(--success)]' :
+                     color === 'error' ? 'text-[var(--error)]' :
+                     color === 'accent' ? 'text-[var(--accent-primary)]' :
+                     'text-[var(--text-primary)]';
+  return (
+    <div>
+      <div className="text-[9px] text-[var(--text-tertiary)] uppercase">{label}</div>
+      <div className={cn('text-xs font-mono font-medium', colorClass)}>{value}</div>
+    </div>
+  );
+}
+
+// ============================================================================
+// KEY LEVELS PANEL
+// ============================================================================
 function KeyLevelsPanel({
   symbol,
-  levels,
-  quote,
-  onClose
+  watchlistItem,
+  setup,
+  onClose,
 }: {
   symbol: string;
-  levels: KeyLevel[];
-  quote: MarketQuote | null | undefined;
+  watchlistItem?: WatchlistSymbol;
+  setup?: DetectedSetup;
   onClose: () => void;
 }) {
+  const [expanded, setExpanded] = useState(true);
+  const levels = watchlistItem?.levels || [];
+  const quote = watchlistItem?.quote;
   const currentPrice = quote?.last_price || 0;
 
-  // Organize levels by category (per KCU methodology)
-  const premarketLevels = levels.filter(l =>
-    ['pmh', 'pml', 'premarket_high', 'premarket_low'].includes(l.level_type)
-  );
-  const dailyLevels = levels.filter(l =>
-    ['pdh', 'pdl', 'pdc', 'open_price'].includes(l.level_type)
-  );
-  const intradayLevels = levels.filter(l =>
-    ['orb_high', 'orb_low', 'vwap', 'hod', 'lod'].includes(l.level_type)
-  );
-  const structuralLevels = levels.filter(l =>
-    l.level_type.startsWith('structural_') || ['hourly_pivot'].includes(l.level_type)
-  );
-  const maLevels = levels.filter(l =>
-    ['ema_9', 'ema_21', 'sma_50', 'sma_200'].includes(l.level_type)
-  );
-  const weeklyLevels = levels.filter(l =>
-    ['pwh', 'pwl', 'weekly_high', 'weekly_low', 'monthly_high', 'monthly_low'].includes(l.level_type)
-  );
-
-  // Detect confluence zones (levels within 0.3% of each other)
-  const confluenceZones = detectConfluenceZones(levels, currentPrice);
-
-  // Calculate trend status
+  // Organize levels
   const vwap = levels.find(l => l.level_type === 'vwap')?.price;
   const ema21 = levels.find(l => l.level_type === 'ema_21')?.price;
-  const pmHigh = premarketLevels.find(l => ['pmh', 'premarket_high'].includes(l.level_type))?.price;
-  const pmLow = premarketLevels.find(l => ['pml', 'premarket_low'].includes(l.level_type))?.price;
+  const pmHigh = levels.find(l => ['pmh', 'premarket_high'].includes(l.level_type))?.price;
+  const pmLow = levels.find(l => ['pml', 'premarket_low'].includes(l.level_type))?.price;
 
   const isAboveVWAP = vwap && currentPrice > vwap;
   const isAboveEMA21 = ema21 && currentPrice > ema21;
-  const pmBreak = pmHigh && pmLow ? (
+  const pmStatus = pmHigh && pmLow ? (
     currentPrice > pmHigh ? 'above' : currentPrice < pmLow ? 'below' : 'inside'
   ) : null;
 
+  // Detect confluence zones
+  const confluenceZones = detectConfluenceZones(levels, currentPrice);
+
+  // Group levels by category
+  const dailyLevels = levels.filter(l => ['pdh', 'pdl', 'pdc', 'open_price'].includes(l.level_type));
+  const intradayLevels = levels.filter(l => ['orb_high', 'orb_low', 'vwap', 'hod', 'lod'].includes(l.level_type));
+  const maLevels = levels.filter(l => ['ema_9', 'ema_21', 'sma_50', 'sma_200'].includes(l.level_type));
+
   return (
-    <div className="card p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2 uppercase tracking-wide">
+    <div className="bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
+      {/* Header */}
+      <div
+        className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-[var(--bg-tertiary)]"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-3">
           <Layers className="w-5 h-5 text-[var(--accent-primary)]" />
-          {symbol} Key Levels
-        </h2>
-        <button onClick={onClose} className="p-1 hover:bg-[var(--bg-elevated)]">
-          <X className="w-5 h-5 text-[var(--text-secondary)]" />
-        </button>
-      </div>
-
-      {/* Trend Status Banner (per KCU methodology) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <div className={cn(
-          'p-3 border text-center',
-          isAboveVWAP ? 'border-[var(--success)] bg-[var(--success)]/10' : 'border-[var(--error)] bg-[var(--error)]/10'
-        )}>
-          <div className="text-xs text-[var(--text-tertiary)] uppercase">VWAP</div>
-          <div className={cn('font-semibold', isAboveVWAP ? 'text-[var(--success)]' : 'text-[var(--error)]')}>
-            {isAboveVWAP ? 'ABOVE' : 'BELOW'}
+          <div>
+            <span className="font-semibold text-[var(--text-primary)]">{symbol}</span>
+            <span className="text-[var(--text-tertiary)] ml-2">Key Levels</span>
           </div>
+          {quote && (
+            <span className="font-mono text-sm text-[var(--text-secondary)]">
+              ${currentPrice.toFixed(2)}
+            </span>
+          )}
         </div>
-        <div className={cn(
-          'p-3 border text-center',
-          isAboveEMA21 ? 'border-[var(--success)] bg-[var(--success)]/10' : 'border-[var(--error)] bg-[var(--error)]/10'
-        )}>
-          <div className="text-xs text-[var(--text-tertiary)] uppercase">21 EMA</div>
-          <div className={cn('font-semibold', isAboveEMA21 ? 'text-[var(--success)]' : 'text-[var(--error)]')}>
-            {isAboveEMA21 ? 'ABOVE' : 'BELOW'}
-          </div>
-        </div>
-        <div className={cn(
-          'p-3 border text-center',
-          pmBreak === 'above' ? 'border-[var(--success)] bg-[var(--success)]/10' :
-          pmBreak === 'below' ? 'border-[var(--error)] bg-[var(--error)]/10' :
-          'border-[var(--warning)] bg-[var(--warning)]/10'
-        )}>
-          <div className="text-xs text-[var(--text-tertiary)] uppercase">Premarket</div>
-          <div className={cn('font-semibold',
-            pmBreak === 'above' ? 'text-[var(--success)]' :
-            pmBreak === 'below' ? 'text-[var(--error)]' :
-            'text-[var(--warning)]'
-          )}>
-            {pmBreak === 'above' ? 'PM HIGH BROKE' : pmBreak === 'below' ? 'PM LOW BROKE' : 'INSIDE RANGE'}
-          </div>
-        </div>
-        <div className={cn(
-          'p-3 border text-center',
-          isAboveVWAP && isAboveEMA21 ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]/10' :
-          !isAboveVWAP && !isAboveEMA21 ? 'border-[var(--error)] bg-[var(--error)]/10' :
-          'border-[var(--warning)] bg-[var(--warning)]/10'
-        )}>
-          <div className="text-xs text-[var(--text-tertiary)] uppercase">Bias</div>
-          <div className={cn('font-semibold',
-            isAboveVWAP && isAboveEMA21 ? 'text-[var(--accent-primary)]' :
-            !isAboveVWAP && !isAboveEMA21 ? 'text-[var(--error)]' :
-            'text-[var(--warning)]'
-          )}>
-            {isAboveVWAP && isAboveEMA21 ? 'BULLISH' : !isAboveVWAP && !isAboveEMA21 ? 'BEARISH' : 'NEUTRAL'}
-          </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); onClose(); }}
+            className="p-1 hover:bg-[var(--bg-elevated)]"
+          >
+            <X className="w-4 h-4 text-[var(--text-tertiary)]" />
+          </button>
+          {expanded ? <ChevronUp className="w-4 h-4 text-[var(--text-tertiary)]" /> : <ChevronDown className="w-4 h-4 text-[var(--text-tertiary)]" />}
         </div>
       </div>
 
-      {/* Confluence Zones (King & Queen) */}
-      {confluenceZones.length > 0 && (
-        <div className="mb-6 p-4 bg-[var(--accent-primary-glow)] border border-[var(--accent-primary)]">
-          <h4 className="text-sm font-semibold text-[var(--accent-primary)] mb-2 uppercase tracking-wider flex items-center gap-2">
-            <Target className="w-4 h-4" />
-            Confluence Zones (King & Queen)
-          </h4>
-          <div className="flex flex-wrap gap-3">
-            {confluenceZones.map((zone, idx) => (
-              <div key={idx} className="bg-[var(--bg-primary)] p-2 border border-[var(--accent-primary)]">
-                <div className="font-mono font-semibold text-[var(--accent-primary)]">${zone.price.toFixed(2)}</div>
-                <div className="text-xs text-[var(--text-secondary)]">{zone.levels.join(' + ')}</div>
-              </div>
-            ))}
+      {expanded && (
+        <div className="border-t border-[var(--border-primary)]">
+          {/* Trend Status Row */}
+          <div className="grid grid-cols-4 gap-px bg-[var(--border-primary)]">
+            <TrendStatusBadge label="VWAP" status={isAboveVWAP ? 'above' : 'below'} />
+            <TrendStatusBadge label="21 EMA" status={isAboveEMA21 ? 'above' : 'below'} />
+            <TrendStatusBadge label="Premarket" status={pmStatus || 'neutral'} />
+            <TrendStatusBadge
+              label="Bias"
+              status={isAboveVWAP && isAboveEMA21 ? 'bullish' : !isAboveVWAP && !isAboveEMA21 ? 'bearish' : 'neutral'}
+            />
           </div>
-        </div>
-      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Premarket Levels */}
-        {premarketLevels.length > 0 && (
-          <div>
-            <h4 className="text-sm font-semibold text-[var(--accent-primary)] mb-3 uppercase tracking-wider">Premarket</h4>
-            <div className="space-y-2">
-              {premarketLevels.map((level) => (
-                <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Daily Levels (PDH, PDL, PDC) */}
-        <div>
-          <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 uppercase tracking-wider">Daily</h4>
-          <div className="space-y-2">
-            {dailyLevels.map((level) => (
-              <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
-            ))}
-          </div>
-        </div>
-
-        {/* Intraday Levels */}
-        <div>
-          <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 uppercase tracking-wider">Intraday</h4>
-          <div className="space-y-2">
-            {intradayLevels.map((level) => (
-              <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
-            ))}
-            {intradayLevels.length === 0 && (
-              <p className="text-sm text-[var(--text-muted)]">Loading...</p>
-            )}
-          </div>
-        </div>
-
-        {/* Structural Levels (4H chart) */}
-        {structuralLevels.length > 0 && (
-          <div>
-            <h4 className="text-sm font-semibold text-[var(--warning)] mb-3 uppercase tracking-wider">Structural (4H)</h4>
-            <div className="space-y-2">
-              {structuralLevels.map((level) => (
-                <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Moving Averages */}
-        <div>
-          <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 uppercase tracking-wider">Moving Averages</h4>
-          <div className="space-y-2">
-            {maLevels.map((level) => (
-              <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
-            ))}
-          </div>
-        </div>
-
-        {/* Weekly/Monthly Levels */}
-        {weeklyLevels.length > 0 && (
-          <div>
-            <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 uppercase tracking-wider">Weekly/Monthly</h4>
-            <div className="space-y-2">
-              {weeklyLevels.map((level) => (
-                <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ORB Info */}
-      {quote?.orb_high && quote?.orb_low && (
-        <div className="mt-6 p-4 bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
-          <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-2 uppercase tracking-wider">
-            Opening Range (First 15 min)
-          </h4>
-          <div className="flex items-center gap-6">
-            <div>
-              <span className="text-xs text-[var(--text-muted)] uppercase">ORB High</span>
-              <div className="font-medium font-mono text-[var(--success)]">${quote.orb_high.toFixed(2)}</div>
-            </div>
-            <div>
-              <span className="text-xs text-[var(--text-muted)] uppercase">ORB Low</span>
-              <div className="font-medium font-mono text-[var(--error)]">${quote.orb_low.toFixed(2)}</div>
-            </div>
-            <div>
-              <span className="text-xs text-[var(--text-muted)] uppercase">Range</span>
-              <div className="font-medium font-mono text-[var(--text-primary)]">
-                ${(quote.orb_high - quote.orb_low).toFixed(2)}
-                <span className="text-xs text-[var(--text-tertiary)] ml-1">
-                  ({((quote.orb_high - quote.orb_low) / quote.orb_low * 100).toFixed(2)}%)
+          {/* Confluence Zones */}
+          {confluenceZones.length > 0 && (
+            <div className="p-4 border-t border-[var(--border-primary)] bg-[var(--accent-primary)]/5">
+              <div className="flex items-center gap-2 mb-2">
+                <Target className="w-4 h-4 text-[var(--accent-primary)]" />
+                <span className="text-xs font-semibold text-[var(--accent-primary)] uppercase tracking-wider">
+                  Confluence Zones
                 </span>
               </div>
-            </div>
-            <div>
-              <span className="text-xs text-[var(--text-muted)] uppercase">Status</span>
-              <div className="font-medium">
-                {currentPrice > quote.orb_high ? (
-                  <span className="text-[var(--success)]">Above ORB</span>
-                ) : currentPrice < quote.orb_low ? (
-                  <span className="text-[var(--error)]">Below ORB</span>
-                ) : (
-                  <span className="text-[var(--warning)]">Inside ORB</span>
-                )}
+              <div className="flex flex-wrap gap-2">
+                {confluenceZones.map((zone, idx) => (
+                  <div key={idx} className="px-3 py-1.5 bg-[var(--bg-primary)] border border-[var(--accent-primary)]/30">
+                    <div className="font-mono font-semibold text-[var(--accent-primary)]">${zone.price.toFixed(2)}</div>
+                    <div className="text-[10px] text-[var(--text-tertiary)]">{zone.levels.join(' + ')}</div>
+                  </div>
+                ))}
               </div>
             </div>
+          )}
+
+          {/* Levels Grid */}
+          <div className="grid grid-cols-3 gap-px bg-[var(--border-primary)]">
+            <LevelGroup title="Daily" levels={dailyLevels} currentPrice={currentPrice} />
+            <LevelGroup title="Intraday" levels={intradayLevels} currentPrice={currentPrice} />
+            <LevelGroup title="Moving Avg" levels={maLevels} currentPrice={currentPrice} />
           </div>
         </div>
       )}
@@ -937,113 +956,110 @@ function KeyLevelsPanel({
   );
 }
 
-// Confluence Zone Detection (King & Queen strategy)
-interface ConfluenceZone {
-  price: number;
-  levels: string[];
+function TrendStatusBadge({ label, status }: { label: string; status: string }) {
+  const getStyle = () => {
+    switch (status) {
+      case 'above':
+      case 'bullish':
+        return 'bg-[var(--success)]/10 text-[var(--success)]';
+      case 'below':
+      case 'bearish':
+        return 'bg-[var(--error)]/10 text-[var(--error)]';
+      default:
+        return 'bg-[var(--warning)]/10 text-[var(--warning)]';
+    }
+  };
+
+  const getText = () => {
+    switch (status) {
+      case 'above': return 'ABOVE';
+      case 'below': return 'BELOW';
+      case 'bullish': return 'BULLISH';
+      case 'bearish': return 'BEARISH';
+      case 'inside': return 'INSIDE';
+      default: return 'NEUTRAL';
+    }
+  };
+
+  return (
+    <div className={cn('p-3 text-center bg-[var(--bg-secondary)]', getStyle())}>
+      <div className="text-[10px] uppercase tracking-wider opacity-70">{label}</div>
+      <div className="text-sm font-semibold">{getText()}</div>
+    </div>
+  );
 }
 
-function detectConfluenceZones(levels: KeyLevel[], currentPrice: number): ConfluenceZone[] {
+function LevelGroup({ title, levels, currentPrice }: { title: string; levels: KeyLevel[]; currentPrice: number }) {
+  return (
+    <div className="bg-[var(--bg-secondary)] p-3">
+      <div className="text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider mb-2">{title}</div>
+      <div className="space-y-1">
+        {levels.map((level) => {
+          const distance = currentPrice > 0 ? ((level.price - currentPrice) / currentPrice * 100) : 0;
+          const isNear = Math.abs(distance) < 0.5;
+          return (
+            <div key={level.id} className={cn(
+              'flex items-center justify-between py-1 px-2 text-xs',
+              isNear && 'bg-[var(--accent-primary)]/10'
+            )}>
+              <span className="text-[var(--text-secondary)]">{getLevelLabel(level.level_type)}</span>
+              <div className="text-right">
+                <span className={cn('font-mono', isNear ? 'text-[var(--accent-primary)]' : 'text-[var(--text-primary)]')}>
+                  ${level.price.toFixed(2)}
+                </span>
+                <span className={cn(
+                  'ml-2 font-mono text-[10px]',
+                  distance > 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'
+                )}>
+                  {distance > 0 ? '+' : ''}{distance.toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          );
+        })}
+        {levels.length === 0 && (
+          <div className="text-[10px] text-[var(--text-tertiary)] italic">No data</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// UTILITIES
+// ============================================================================
+function detectConfluenceZones(levels: KeyLevel[], currentPrice: number) {
   if (levels.length < 2 || currentPrice === 0) return [];
 
-  const zones: ConfluenceZone[] = [];
-  const threshold = currentPrice * 0.003; // 0.3% threshold
-
-  // Group levels that are within 0.3% of each other
+  const zones: { price: number; levels: string[] }[] = [];
+  const threshold = currentPrice * 0.003;
   const sorted = [...levels].sort((a, b) => a.price - b.price);
 
   for (let i = 0; i < sorted.length; i++) {
     const cluster: KeyLevel[] = [sorted[i]];
-
     for (let j = i + 1; j < sorted.length; j++) {
       if (Math.abs(sorted[j].price - sorted[i].price) <= threshold) {
         cluster.push(sorted[j]);
       }
     }
-
-    // Only add if we have 2+ levels in confluence
     if (cluster.length >= 2) {
       const avgPrice = cluster.reduce((sum, l) => sum + l.price, 0) / cluster.length;
       const levelNames = cluster.map(l => getLevelLabel(l.level_type));
-
-      // Check if we already have a zone at this price
       const existing = zones.find(z => Math.abs(z.price - avgPrice) < threshold);
       if (!existing) {
         zones.push({ price: avgPrice, levels: levelNames });
       }
     }
   }
-
   return zones;
 }
 
-// Level label mapping
 function getLevelLabel(levelType: string): string {
   const labelMap: Record<string, string> = {
-    pdh: 'PDH',
-    pdl: 'PDL',
-    pdc: 'PDC',
-    orb_high: 'ORB High',
-    orb_low: 'ORB Low',
-    vwap: 'VWAP',
-    open_price: 'Open',
-    hod: 'HOD',
-    lod: 'LOD',
-    premarket_high: 'PM High',
-    premarket_low: 'PM Low',
-    pmh: 'PM High',
-    pml: 'PM Low',
-    pwh: 'Weekly High',
-    pwl: 'Weekly Low',
-    ema_9: '9 EMA',
-    ema_21: '21 EMA',
-    sma_50: '50 SMA',
-    sma_200: '200 SMA',
-    weekly_high: 'Weekly High',
-    weekly_low: 'Weekly Low',
-    monthly_high: 'Monthly High',
-    monthly_low: 'Monthly Low',
-    hourly_pivot: 'Hourly Pivot',
-    structural_support: 'Support (4H)',
-    structural_resistance: 'Resistance (4H)',
+    pdh: 'PDH', pdl: 'PDL', pdc: 'PDC', open_price: 'Open',
+    orb_high: 'ORB-H', orb_low: 'ORB-L', vwap: 'VWAP', hod: 'HOD', lod: 'LOD',
+    premarket_high: 'PM-H', premarket_low: 'PM-L', pmh: 'PM-H', pml: 'PM-L',
+    ema_9: '9EMA', ema_21: '21EMA', sma_50: '50SMA', sma_200: '200SMA',
   };
-
-  // Handle dynamic structural levels
-  if (levelType.startsWith('structural_')) {
-    return levelType.replace('structural_', '').charAt(0).toUpperCase() +
-           levelType.replace('structural_', '').slice(1) + ' (4H)';
-  }
-
-  return labelMap[levelType] || levelType;
-}
-
-// Level Row Component
-function LevelRow({ level, currentPrice }: { level: KeyLevel; currentPrice: number }) {
-  const distance = currentPrice > 0 ? ((level.price - currentPrice) / currentPrice * 100) : 0;
-  const isAbove = level.price > currentPrice;
-  const isNear = Math.abs(distance) < 0.5; // Within 0.5%
-
-  return (
-    <div className={cn(
-      'flex items-center justify-between p-2',
-      isNear ? 'bg-[var(--accent-primary-glow)] border border-[var(--accent-primary)]' : 'bg-[var(--bg-elevated)]'
-    )}>
-      <div>
-        <div className="text-sm font-medium text-[var(--text-primary)]">
-          {getLevelLabel(level.level_type)}
-        </div>
-        <div className="text-xs text-[var(--text-muted)]">
-          {level.timeframe}
-        </div>
-      </div>
-      <div className="text-right">
-        <div className={cn('font-mono font-medium', isNear ? 'text-[var(--accent-primary)]' : 'text-[var(--text-primary)]')}>
-          ${level.price.toFixed(2)}
-        </div>
-        <div className={`text-xs font-mono ${isAbove ? 'text-[var(--success)]' : 'text-[var(--error)]'}`}>
-          {distance > 0 ? '+' : ''}{distance.toFixed(2)}%
-        </div>
-      </div>
-    </div>
-  );
+  return labelMap[levelType] || levelType.toUpperCase();
 }

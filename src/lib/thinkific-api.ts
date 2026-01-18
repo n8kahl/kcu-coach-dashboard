@@ -84,7 +84,7 @@ export class ThinkificAPI {
 
   private async requestPaginated<T>(
     endpoint: string,
-    limit: number = 100
+    limit: number = 25
   ): Promise<T[]> {
     const allItems: T[] = [];
     let page = 1;
@@ -94,16 +94,40 @@ export class ThinkificAPI {
       const separator = endpoint.includes('?') ? '&' : '?';
       const paginatedEndpoint = `${endpoint}${separator}page=${page}&limit=${limit}`;
 
-      const response = await this.request<ThinkificPaginatedResponse<T>>(
-        paginatedEndpoint
-      );
+      // Thinkific API can return { items: [] } or just an array
+      const rawResponse = await this.request<unknown>(paginatedEndpoint);
 
-      allItems.push(...response.items);
+      let items: T[] = [];
+      let nextPage: number | null = null;
 
-      if (
-        response.meta?.pagination?.next_page === null ||
-        response.items.length < limit
-      ) {
+      // Handle different response formats
+      if (Array.isArray(rawResponse)) {
+        // Direct array response
+        items = rawResponse as T[];
+        hasMore = false;
+      } else if (rawResponse && typeof rawResponse === 'object') {
+        const response = rawResponse as Record<string, unknown>;
+
+        // Try 'items' key first (standard paginated response)
+        if (Array.isArray(response.items)) {
+          items = response.items as T[];
+          const meta = response.meta as { pagination?: { next_page?: number | null } } | undefined;
+          nextPage = meta?.pagination?.next_page ?? null;
+        }
+        // Fallback: look for array values in response
+        else {
+          const arrayKey = Object.keys(response).find(key => Array.isArray(response[key]));
+          if (arrayKey) {
+            items = response[arrayKey] as T[];
+            const meta = response.meta as { pagination?: { next_page?: number | null } } | undefined;
+            nextPage = meta?.pagination?.next_page ?? null;
+          }
+        }
+      }
+
+      allItems.push(...items);
+
+      if (nextPage === null || items.length < limit) {
         hasMore = false;
       } else {
         page++;
@@ -214,8 +238,15 @@ export class ThinkificAPI {
     try {
       // 1. Fetch all courses
       console.log('[ThinkificSync] Fetching courses...');
+      console.log(`[ThinkificSync] Using subdomain: ${this.subdomain}`);
+      console.log(`[ThinkificSync] API key configured: ${!!this.apiKey}`);
+
       const courses = await this.getCourses();
       console.log(`[ThinkificSync] Found ${courses.length} courses`);
+
+      if (courses.length > 0) {
+        console.log('[ThinkificSync] First course sample:', JSON.stringify(courses[0], null, 2));
+      }
 
       for (const course of courses) {
         try {
@@ -298,6 +329,7 @@ export class ThinkificAPI {
   // ============================================
 
   private async upsertCourse(course: ThinkificCourse): Promise<void> {
+    console.log(`[ThinkificSync] Upserting course ${course.id}: ${course.name}`);
     const { error } = await supabaseAdmin.from('thinkific_courses').upsert(
       {
         thinkific_id: course.id,
@@ -305,7 +337,7 @@ export class ThinkificAPI {
         slug: course.slug,
         description: course.description,
         instructor_id: course.instructor_id,
-        reviews_enabled: course.reviews_enabled,
+        reviews_enabled: course.reviews_enabled ?? false,
         course_card_image_url: course.course_card_image_url,
         banner_image_url: course.banner_image_url,
         intro_video_youtube: course.intro_video_youtube,
@@ -318,27 +350,34 @@ export class ThinkificAPI {
       { onConflict: 'thinkific_id' }
     );
 
-    if (error) throw error;
+    if (error) {
+      console.error(`[ThinkificSync] Course upsert error:`, error);
+      throw new Error(`Course upsert failed: ${error.message} (${error.code})`);
+    }
   }
 
   private async upsertChapter(
     chapter: ThinkificChapter,
     courseId: number
   ): Promise<void> {
+    console.log(`[ThinkificSync] Upserting chapter ${chapter.id}: ${chapter.name}`);
     const { error } = await supabaseAdmin.from('thinkific_chapters').upsert(
       {
         thinkific_id: chapter.id,
         course_id: courseId,
         name: chapter.name,
         description: chapter.description,
-        position: chapter.position,
+        position: chapter.position ?? 0,
         content_count: chapter.content_ids?.length || 0,
         synced_at: new Date().toISOString(),
       },
       { onConflict: 'thinkific_id' }
     );
 
-    if (error) throw error;
+    if (error) {
+      console.error(`[ThinkificSync] Chapter upsert error:`, error);
+      throw new Error(`Chapter upsert failed: ${error.message} (${error.code})`);
+    }
   }
 
   private async upsertContent(
@@ -346,6 +385,7 @@ export class ThinkificAPI {
     chapterId: number,
     courseId: number
   ): Promise<void> {
+    console.log(`[ThinkificSync] Upserting content ${content.id}: ${content.name} (${content.content_type})`);
     const { error } = await supabaseAdmin.from('thinkific_contents').upsert(
       {
         thinkific_id: content.id,
@@ -353,21 +393,24 @@ export class ThinkificAPI {
         course_id: courseId,
         name: content.name,
         content_type: content.content_type,
-        position: content.position,
+        position: content.position ?? 0,
         video_duration: content.video_duration_in_seconds || null,
         video_url: content.video_identifier || null,
         video_provider: content.video_type || null,
         passing_score: content.passing_score || null,
         time_limit: content.time_limit_in_minutes || null,
         text_content: content.html_content || null,
-        free_preview: content.free_preview,
+        free_preview: content.free_preview ?? false,
         description: content.description,
         synced_at: new Date().toISOString(),
       },
       { onConflict: 'thinkific_id' }
     );
 
-    if (error) throw error;
+    if (error) {
+      console.error(`[ThinkificSync] Content upsert error:`, error);
+      throw new Error(`Content upsert failed: ${error.message} (${error.code})`);
+    }
   }
 
   private async updateCourseCounts(courseId: number): Promise<void> {

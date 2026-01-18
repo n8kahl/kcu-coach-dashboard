@@ -186,58 +186,7 @@ export default function JournalPage() {
             </TabsContent>
 
           <TabsContent value="insights">
-            <PageSection title="AI Insights" description="Pattern analysis from your trading">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Card>
-                  <CardHeader title="Strengths" />
-                  <CardContent>
-                    <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
-                      <li className="flex items-start gap-2">
-                        <span className="text-[var(--profit)]">✓</span>
-                        Strong LTP compliance on winning trades (85% had all 3 components)
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-[var(--profit)]">✓</span>
-                        Best performance during morning session (10-11:30 AM)
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-[var(--profit)]">✓</span>
-                        NVDA trades showing highest win rate (78%)
-                      </li>
-                    </ul>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader title="Areas for Improvement" />
-                  <CardContent>
-                    <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
-                      <li className="flex items-start gap-2">
-                        <span className="text-[var(--warning)]">!</span>
-                        Losses often occur after lunch (lower volume period)
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-[var(--warning)]">!</span>
-                        Patience candle missing on 40% of losing trades
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-[var(--warning)]">!</span>
-                        Consider reducing position size on counter-trend trades
-                      </li>
-                    </ul>
-                  </CardContent>
-                </Card>
-
-                <Card className="md:col-span-2">
-                  <CardHeader title="Recommended Focus" />
-                  <CardContent>
-                    <p className="text-sm text-[var(--text-secondary)]">
-                      Based on your recent trades, focusing on <span className="text-[var(--accent-primary)] font-semibold">waiting for patience candles</span> could improve your win rate by an estimated 8-12%. Your entries at key levels are solid, but premature entries without confirmation are your biggest leak.
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-            </PageSection>
+            <AIInsightsSection trades={trades} stats={stats} />
             </TabsContent>
           </Tabs>
         )}
@@ -290,6 +239,203 @@ export default function JournalPage() {
         )}
       </PageShell>
     </>
+  );
+}
+
+// AI Insights Section Component
+function AIInsightsSection({
+  trades,
+  stats,
+}: {
+  trades: TradeEntry[];
+  stats: TradeStats;
+}) {
+  // Generate dynamic insights based on actual trade data
+  const generateInsights = () => {
+    const strengths: string[] = [];
+    const improvements: string[] = [];
+    let recommendation = '';
+
+    if (trades.length === 0) {
+      return {
+        strengths: ['Start logging trades to see your strengths'],
+        improvements: ['Log at least 5 trades to get personalized insights'],
+        recommendation: 'Begin by logging your trades to receive AI-powered analysis of your trading patterns.',
+      };
+    }
+
+    // Analyze win rate
+    if (stats.win_rate >= 60) {
+      strengths.push(`Strong win rate of ${stats.win_rate.toFixed(0)}% - above the 50% breakeven threshold`);
+    } else if (stats.win_rate < 50) {
+      improvements.push(`Win rate of ${stats.win_rate.toFixed(0)}% is below breakeven - focus on trade selection`);
+    }
+
+    // Analyze profit factor
+    if (stats.profit_factor >= 1.5) {
+      strengths.push(`Excellent profit factor of ${stats.profit_factor.toFixed(2)} - your winners outpace your losers`);
+    } else if (stats.profit_factor < 1) {
+      improvements.push('Profit factor below 1.0 - consider tightening stop losses or letting winners run');
+    }
+
+    // Analyze trade volume and patterns
+    const winningTrades = trades.filter((t) => (t.pnl ?? 0) > 0);
+    const losingTrades = trades.filter((t) => (t.pnl ?? 0) < 0);
+
+    // Analyze LTP compliance on winners vs losers (if ltp_score exists)
+    const winnersWithLTP = winningTrades.filter((t) => t.ltp_score && t.ltp_score.overall >= 7);
+    const losersWithLTP = losingTrades.filter((t) => t.ltp_score && t.ltp_score.overall >= 7);
+
+    if (winningTrades.length > 0 && winnersWithLTP.length / winningTrades.length > 0.6) {
+      const ltpWinRate = Math.round((winnersWithLTP.length / winningTrades.length) * 100);
+      strengths.push(`${ltpWinRate}% of your winning trades had strong LTP compliance`);
+    }
+
+    if (losingTrades.length > 0) {
+      const losersWithoutLTP = losingTrades.filter((t) => !t.ltp_score || t.ltp_score.overall < 5);
+      if (losersWithoutLTP.length / losingTrades.length > 0.5) {
+        const noLTPRate = Math.round((losersWithoutLTP.length / losingTrades.length) * 100);
+        improvements.push(`${noLTPRate}% of losing trades lacked LTP confirmation - wait for proper setups`);
+      }
+    }
+
+    // Analyze by symbol
+    const symbolStats: Record<string, { wins: number; losses: number; pnl: number }> = {};
+    trades.forEach((t) => {
+      if (!symbolStats[t.symbol]) {
+        symbolStats[t.symbol] = { wins: 0, losses: 0, pnl: 0 };
+      }
+      if ((t.pnl ?? 0) > 0) symbolStats[t.symbol].wins++;
+      else symbolStats[t.symbol].losses++;
+      symbolStats[t.symbol].pnl += t.pnl ?? 0;
+    });
+
+    const sortedSymbols = Object.entries(symbolStats)
+      .filter(([_, s]) => s.wins + s.losses >= 3)
+      .sort(([_, a], [__, b]) => {
+        const aWinRate = a.wins / (a.wins + a.losses);
+        const bWinRate = b.wins / (b.wins + b.losses);
+        return bWinRate - aWinRate;
+      });
+
+    if (sortedSymbols.length > 0) {
+      const [bestSymbol, bestStats] = sortedSymbols[0];
+      const winRate = Math.round((bestStats.wins / (bestStats.wins + bestStats.losses)) * 100);
+      if (winRate >= 60) {
+        strengths.push(`Strong edge in ${bestSymbol} with ${winRate}% win rate`);
+      }
+
+      if (sortedSymbols.length > 1) {
+        const [worstSymbol, worstStats] = sortedSymbols[sortedSymbols.length - 1];
+        const worstWinRate = Math.round((worstStats.wins / (worstStats.wins + worstStats.losses)) * 100);
+        if (worstWinRate < 40) {
+          improvements.push(`Consider reducing exposure to ${worstSymbol} (${worstWinRate}% win rate)`);
+        }
+      }
+    }
+
+    // Analyze by direction
+    const longTrades = trades.filter((t) => t.direction === 'long');
+    const shortTrades = trades.filter((t) => t.direction === 'short');
+
+    if (longTrades.length >= 3 && shortTrades.length >= 3) {
+      const longWinRate = longTrades.filter((t) => (t.pnl ?? 0) > 0).length / longTrades.length;
+      const shortWinRate = shortTrades.filter((t) => (t.pnl ?? 0) > 0).length / shortTrades.length;
+
+      if (longWinRate > shortWinRate + 0.15) {
+        strengths.push(`Stronger on longs (${Math.round(longWinRate * 100)}%) than shorts (${Math.round(shortWinRate * 100)}%)`);
+        if (shortWinRate < 0.4) {
+          improvements.push('Consider being more selective with short setups');
+        }
+      } else if (shortWinRate > longWinRate + 0.15) {
+        strengths.push(`Stronger on shorts (${Math.round(shortWinRate * 100)}%) than longs (${Math.round(longWinRate * 100)}%)`);
+      }
+    }
+
+    // Analyze average win vs loss
+    if (stats.average_win > 0 && stats.average_loss > 0) {
+      const rrRatio = stats.average_win / stats.average_loss;
+      if (rrRatio >= 1.5) {
+        strengths.push(`Good risk/reward ratio of ${rrRatio.toFixed(1)}:1 on average`);
+      } else if (rrRatio < 1) {
+        improvements.push(`Average win ($${stats.average_win.toFixed(0)}) is smaller than average loss ($${stats.average_loss.toFixed(0)}) - consider wider targets`);
+      }
+    }
+
+    // Generate recommendation based on analysis
+    if (improvements.length === 0) {
+      recommendation = 'Your trading is showing strong patterns. Continue following your system and maintain discipline. Consider journaling your mental state for each trade to identify any subtle patterns.';
+    } else {
+      // Find the most impactful improvement
+      if (stats.win_rate < 50) {
+        recommendation = 'Focus on trade selection and LTP compliance. Wait for A+ setups with all three components (Level, Trend, Patience) before entering trades.';
+      } else if (stats.profit_factor < 1.2) {
+        recommendation = 'Your entries are good, but consider letting winners run longer. Review your exit strategy and consider trailing stops on profitable positions.';
+      } else {
+        recommendation = improvements[0].includes('LTP')
+          ? 'Waiting for patience candles could significantly improve your results. The data shows your LTP-compliant trades perform better.'
+          : 'Review your recent losing trades and look for common patterns. Focus on the areas for improvement identified above.';
+      }
+    }
+
+    // Ensure we have at least some insights
+    if (strengths.length === 0) {
+      strengths.push('You are actively logging your trades - great discipline!');
+      if (trades.length >= 5) {
+        strengths.push('Building a trade history to analyze patterns');
+      }
+    }
+
+    if (improvements.length === 0 && trades.length < 10) {
+      improvements.push('Log more trades to unlock detailed pattern analysis');
+    }
+
+    return { strengths, improvements, recommendation };
+  };
+
+  const { strengths, improvements, recommendation } = generateInsights();
+
+  return (
+    <PageSection title="AI Insights" description="Pattern analysis from your trading">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader title="Strengths" />
+          <CardContent>
+            <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
+              {strengths.map((strength, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="text-[var(--profit)] flex-shrink-0">✓</span>
+                  {strength}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader title="Areas for Improvement" />
+          <CardContent>
+            <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
+              {improvements.map((improvement, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="text-[var(--warning)] flex-shrink-0">!</span>
+                  {improvement}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+
+        <Card className="md:col-span-2">
+          <CardHeader title="Recommended Focus" />
+          <CardContent>
+            <p className="text-sm text-[var(--text-secondary)]">
+              {recommendation}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    </PageSection>
   );
 }
 
