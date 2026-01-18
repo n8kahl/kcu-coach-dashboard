@@ -8,6 +8,7 @@
 import { marketDataService } from './market-data';
 import { identifyKeyLevels, determineTrend, calculateEMA } from './ltp-engine';
 import { getEventsSummary, EconomicEvent } from './economic-calendar';
+import { getUpcomingEarnings, EarningsEvent } from './earnings-calendar';
 import { supabaseAdmin } from './supabase';
 import logger from './logger';
 
@@ -21,6 +22,7 @@ export interface Briefing {
   keyLevels: SymbolLevels[];
   setups: LTPSetup[];
   economicEvents: EconomicEvent[];
+  earnings?: EarningsEvent[];
   lessonOfDay?: LessonOfDay;
 }
 
@@ -281,9 +283,10 @@ export async function generateMorningBriefing(): Promise<Briefing | null> {
   try {
     logger.info('Generating morning briefing');
 
-    const [marketContext, eventsSummary] = await Promise.all([
+    const [marketContext, eventsSummary, earnings] = await Promise.all([
       getMarketContext(),
       getEventsSummary(),
+      getUpcomingEarnings(7), // Get earnings for next 7 days
     ]);
 
     if (!marketContext) {
@@ -303,6 +306,11 @@ export async function generateMorningBriefing(): Promise<Briefing | null> {
 
     // Select lesson of the day
     const lessonOfDay = selectLessonOfDay();
+
+    // Filter earnings to only include watchlist symbols (top 10)
+    const watchlistEarnings = earnings
+      .filter(e => BRIEFING_SYMBOLS.includes(e.symbol))
+      .slice(0, 10);
 
     // Build content
     const headline = buildHeadline(marketContext, eventsSummary.hasHighImpact);
@@ -325,6 +333,13 @@ export async function generateMorningBriefing(): Promise<Briefing | null> {
     if (marketContext.overallSentiment === 'risk_off') {
       warnings.push('Risk-off environment detected. Consider smaller position sizes.');
     }
+    // Add earnings warnings for today
+    const todayEarnings = watchlistEarnings.filter(
+      e => e.reportDate === new Date().toISOString().split('T')[0]
+    );
+    if (todayEarnings.length > 0) {
+      warnings.push(`Earnings today: ${todayEarnings.map(e => e.symbol).join(', ')}. Expect increased volatility.`);
+    }
 
     const content: BriefingContent = {
       headline,
@@ -343,6 +358,7 @@ export async function generateMorningBriefing(): Promise<Briefing | null> {
       keyLevels,
       setups,
       economicEvents: eventsSummary.events,
+      earnings: watchlistEarnings,
       lessonOfDay,
     };
 
@@ -356,6 +372,7 @@ export async function generateMorningBriefing(): Promise<Briefing | null> {
         key_levels: briefing.keyLevels,
         setups: briefing.setups,
         economic_events: briefing.economicEvents,
+        earnings: briefing.earnings,
         lesson_of_day: briefing.lessonOfDay,
       })
       .select('id')
@@ -507,6 +524,7 @@ export async function getLatestBriefing(type: 'morning' | 'eod' | 'weekly'): Pro
       keyLevels: row.key_levels || [],
       setups: row.setups || [],
       economicEvents: row.economic_events || [],
+      earnings: row.earnings || [],
       lessonOfDay: row.lesson_of_day,
     };
 

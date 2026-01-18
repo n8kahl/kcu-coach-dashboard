@@ -58,6 +58,13 @@ interface Briefing {
     eventTime?: string;
     impact: string;
   }>;
+  earnings?: Array<{
+    symbol: string;
+    companyName: string;
+    reportDate: string;
+    reportTime: 'bmo' | 'amc' | 'dmh';
+    fiscalQuarter: string;
+  }>;
   lessonOfDay?: {
     title: string;
     content: string;
@@ -235,6 +242,38 @@ export function DailyBriefing({ className }: DailyBriefingProps) {
                           size="sm"
                         >
                           {event.impact}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Earnings */}
+            {briefing.earnings && briefing.earnings.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-[var(--text-primary)] mb-2 flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4" />
+                  Upcoming Earnings
+                </h4>
+                <div className="space-y-1">
+                  {briefing.earnings.map((earning, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm bg-[var(--bg-tertiary)] rounded p-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">{earning.symbol}</span>
+                        <span className="text-[var(--text-tertiary)] text-xs">{earning.fiscalQuarter}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-[var(--text-tertiary)]">
+                          {new Date(earning.reportDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                        </span>
+                        <Badge
+                          variant={earning.reportTime === 'bmo' ? 'warning' : 'default'}
+                          size="sm"
+                        >
+                          {earning.reportTime === 'bmo' ? 'Pre-Market' :
+                           earning.reportTime === 'amc' ? 'After Close' : 'During'}
                         </Badge>
                       </div>
                     </div>
