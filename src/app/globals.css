@@ -74,9 +74,27 @@
   --spacing-2xl: 3rem;
 
   /* Animation durations */
+  --duration-micro: 100ms;
   --duration-fast: 150ms;
   --duration-normal: 250ms;
   --duration-slow: 400ms;
+  --duration-luxe: 600ms;
+
+  /* Premium Animation Timing Functions */
+  --ease-premium: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+  /* Premium Glow Shadows */
+  --shadow-glow-sm: 0 0 10px rgba(245, 158, 11, 0.15);
+  --shadow-glow-md: 0 0 20px rgba(245, 158, 11, 0.25);
+  --shadow-glow-lg: 0 0 40px rgba(245, 158, 11, 0.35);
+  --shadow-glow-xl: 0 0 60px rgba(245, 158, 11, 0.45);
+
+  /* Profit/Loss Glow */
+  --shadow-profit: 0 0 20px rgba(34, 197, 94, 0.3);
+  --shadow-loss: 0 0 20px rgba(239, 68, 68, 0.3);
 }
 
 /* Custom color palette available via CSS variables above */
@@ -516,4 +534,332 @@ body {
 
 .tooltip:hover::after {
   opacity: 1;
+}
+
+/* =============================================================================
+ * PREMIUM ANIMATION SYSTEM
+ * Production-ready keyframe animations for a "bougie" trading platform
+ * ============================================================================= */
+
+/* Live Indicator Animation - for real-time status dots */
+@keyframes live-indicator {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.7;
+  }
+}
+
+.live-indicator {
+  animation: live-indicator 1.5s var(--ease-smooth) infinite;
+}
+
+/* Glow Pulse - for premium highlighted elements */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: var(--shadow-glow-sm);
+  }
+  50% {
+    box-shadow: var(--shadow-glow-lg);
+  }
+}
+
+.glow-pulse {
+  animation: glow-pulse 2s var(--ease-smooth) infinite;
+}
+
+/* Float Animation - subtle hover effect for cards */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-float {
+  animation: float 3s var(--ease-smooth) infinite;
+}
+
+/* Shine Sweep - premium badge/button effect */
+@keyframes shine-sweep {
+  0% {
+    transform: translateX(-100%) skewX(-15deg);
+  }
+  100% {
+    transform: translateX(200%) skewX(-15deg);
+  }
+}
+
+.shine-sweep {
+  position: relative;
+  overflow: hidden;
+}
+
+.shine-sweep::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.1),
+    transparent
+  );
+  animation: shine-sweep 3s var(--ease-smooth) infinite;
+}
+
+/* Scale In - for modal/card entrances */
+@keyframes scale-in {
+  0% {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-scale-in {
+  animation: scale-in 0.4s var(--ease-premium);
+}
+
+/* Slide Up Fade - for list items and staggered content */
+@keyframes slide-up-fade {
+  0% {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-up-fade {
+  animation: slide-up-fade 0.5s var(--ease-premium);
+}
+
+/* Blur In - premium page transition */
+@keyframes blur-in {
+  0% {
+    filter: blur(8px);
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    filter: blur(0);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-blur-in {
+  animation: blur-in 0.6s var(--ease-premium);
+}
+
+/* Profit Flash - for positive P&L updates */
+@keyframes profit-flash {
+  0% {
+    background-color: rgba(34, 197, 94, 0.3);
+    box-shadow: var(--shadow-profit);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.profit-flash {
+  animation: profit-flash 0.6s var(--ease-smooth);
+}
+
+/* Loss Flash - for negative P&L updates */
+@keyframes loss-flash {
+  0% {
+    background-color: rgba(239, 68, 68, 0.3);
+    box-shadow: var(--shadow-loss);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.loss-flash {
+  animation: loss-flash 0.6s var(--ease-smooth);
+}
+
+/* Number Morph - for stat value changes */
+@keyframes number-morph {
+  0% {
+    transform: scale(1.15);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-number-morph {
+  animation: number-morph 0.4s var(--ease-bounce);
+}
+
+/* Achievement Unlock - celebration animation */
+@keyframes achievement-unlock {
+  0% {
+    transform: scale(0.5) rotate(-10deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1) rotate(5deg);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+    opacity: 1;
+  }
+}
+
+.animate-achievement-unlock {
+  animation: achievement-unlock 0.8s var(--ease-spring);
+}
+
+/* Ripple Effect Base */
+.ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.ripple::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: rgba(245, 158, 11, 0.3);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: width 0.6s var(--ease-smooth), height 0.6s var(--ease-smooth), opacity 0.6s;
+  opacity: 0;
+}
+
+.ripple:active::before {
+  width: 200%;
+  height: 200%;
+  opacity: 1;
+}
+
+/* Card Tilt Effect (3D hover) */
+.card-tilt {
+  transform-style: preserve-3d;
+  transition: transform var(--duration-normal) var(--ease-smooth);
+}
+
+.card-tilt:hover {
+  transform: perspective(1000px) rotateX(2deg) rotateY(-2deg) translateZ(10px);
+}
+
+/* Premium Button States */
+.btn-premium {
+  position: relative;
+  overflow: hidden;
+  transition: all var(--duration-normal) var(--ease-smooth);
+}
+
+.btn-premium::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.1) 0%,
+    transparent 50%,
+    transparent 100%
+  );
+  opacity: 0;
+  transition: opacity var(--duration-fast);
+}
+
+.btn-premium:hover::before {
+  opacity: 1;
+}
+
+.btn-premium:active {
+  transform: scale(0.98);
+}
+
+/* Stagger Children - for list animations */
+.stagger-children > * {
+  animation: slide-up-fade 0.4s var(--ease-premium) backwards;
+}
+
+.stagger-children > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger-children > *:nth-child(2) { animation-delay: 0.1s; }
+.stagger-children > *:nth-child(3) { animation-delay: 0.15s; }
+.stagger-children > *:nth-child(4) { animation-delay: 0.2s; }
+.stagger-children > *:nth-child(5) { animation-delay: 0.25s; }
+.stagger-children > *:nth-child(6) { animation-delay: 0.3s; }
+.stagger-children > *:nth-child(7) { animation-delay: 0.35s; }
+.stagger-children > *:nth-child(8) { animation-delay: 0.4s; }
+.stagger-children > *:nth-child(9) { animation-delay: 0.45s; }
+.stagger-children > *:nth-child(10) { animation-delay: 0.5s; }
+
+/* Progress Fill Animation */
+@keyframes progress-fill-glow {
+  0%, 100% {
+    box-shadow: 0 0 4px var(--accent-primary);
+  }
+  50% {
+    box-shadow: 0 0 12px var(--accent-primary);
+  }
+}
+
+.progress-fill-animated {
+  animation: progress-fill-glow 2s var(--ease-smooth) infinite;
+}
+
+/* Underline Slide - for navigation items */
+.underline-slide {
+  position: relative;
+}
+
+.underline-slide::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--accent-primary);
+  transition: width var(--duration-normal) var(--ease-smooth);
+}
+
+.underline-slide:hover::after,
+.underline-slide.active::after {
+  width: 100%;
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

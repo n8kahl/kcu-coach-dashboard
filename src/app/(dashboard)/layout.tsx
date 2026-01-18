@@ -3,6 +3,8 @@
 import { Sidebar, MobileSidebar } from '@/components/layout/sidebar';
 import { MarketStatusBar } from '@/components/layout/header';
 import { AICoach } from '@/components/chat/ai-coach';
+import { PageTransition } from '@/components/layout/page-transition';
+import { CommandPalette } from '@/components/navigation/command-palette';
 
 // Mock market data (would be fetched from API in production)
 const mockMarketData = {
@@ -42,12 +44,17 @@ export default function DashboardLayout({
         {/* Market Status Bar */}
         <MarketStatusBar {...mockMarketData} />
 
-        {/* Page Content */}
-        <div className="p-6">{children}</div>
+        {/* Page Content with Premium Transitions */}
+        <PageTransition className="p-6">
+          {children}
+        </PageTransition>
       </div>
 
       {/* AI Coach Floating Chat */}
       <AICoach />
+
+      {/* Command Palette - Press Cmd+K to open */}
+      <CommandPalette />
     </div>
   );
 }

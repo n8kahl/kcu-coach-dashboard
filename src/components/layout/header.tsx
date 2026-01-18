@@ -37,22 +37,34 @@ export function Header({ title, subtitle, breadcrumbs, actions }: HeaderProps) {
           <div>
             {/* Breadcrumbs */}
             {breadcrumbs && breadcrumbs.length > 0 && (
-              <nav className="flex items-center gap-2 text-xs text-[var(--text-tertiary)] mb-1">
-                {breadcrumbs.map((crumb, index) => (
-                  <span key={index} className="flex items-center gap-2">
-                    {crumb.href ? (
-                      <a
-                        href={crumb.href}
-                        className="hover:text-[var(--text-secondary)] transition-colors"
-                      >
-                        {crumb.label}
-                      </a>
-                    ) : (
-                      <span className="text-[var(--text-secondary)]">{crumb.label}</span>
-                    )}
-                    {index < breadcrumbs.length - 1 && <span>/</span>}
-                  </span>
-                ))}
+              <nav
+                aria-label="Breadcrumb"
+                className="flex items-center gap-2 text-xs text-[var(--text-tertiary)] mb-1"
+              >
+                <ol className="flex items-center gap-2" role="list">
+                  {breadcrumbs.map((crumb, index) => (
+                    <li key={index} className="flex items-center gap-2">
+                      {crumb.href ? (
+                        <a
+                          href={crumb.href}
+                          className="hover:text-[var(--text-secondary)] transition-colors focus:outline-none focus-visible:text-[var(--accent-primary)]"
+                        >
+                          {crumb.label}
+                        </a>
+                      ) : (
+                        <span
+                          className="text-[var(--text-secondary)]"
+                          aria-current={index === breadcrumbs.length - 1 ? 'page' : undefined}
+                        >
+                          {crumb.label}
+                        </span>
+                      )}
+                      {index < breadcrumbs.length - 1 && (
+                        <span aria-hidden="true">/</span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
               </nav>
             )}
             {/* Title */}
@@ -65,26 +77,36 @@ export function Header({ title, subtitle, breadcrumbs, actions }: HeaderProps) {
           </div>
 
           {/* Right side */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3" role="toolbar" aria-label="Header actions">
             {/* Search toggle */}
             <button
               onClick={() => setShowSearch(!showSearch)}
               className={cn(
-                'p-2 transition-colors',
+                'p-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]',
                 showSearch
                   ? 'text-[var(--accent-primary)]'
                   : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
               )}
+              aria-label={showSearch ? 'Close search' : 'Open search'}
+              aria-expanded={showSearch}
+              aria-controls="header-search"
             >
-              <Search className="w-5 h-5" />
+              <Search className="w-5 h-5" aria-hidden="true" />
             </button>
 
             {/* Notifications */}
             <div className="relative">
-              <button className="p-2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors">
-                <Bell className="w-5 h-5" />
+              <button
+                className="p-2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]"
+                aria-label="Notifications"
+              >
+                <Bell className="w-5 h-5" aria-hidden="true" />
               </button>
-              <span className="absolute top-1 right-1 w-2 h-2 bg-[var(--accent-primary)]" />
+              <span
+                className="absolute top-1 right-1 w-2 h-2 bg-[var(--accent-primary)]"
+                aria-label="New notifications available"
+                role="status"
+              />
             </div>
 
             {/* Help */}
@@ -92,9 +114,11 @@ export function Header({ title, subtitle, breadcrumbs, actions }: HeaderProps) {
               href="https://discord.gg/kcu"
               target="_blank"
               rel="noopener noreferrer"
-              className="p-2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+              className="p-2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]"
+              aria-label="Get help on Discord (opens in new tab)"
             >
-              <HelpCircle className="w-5 h-5" />
+              <HelpCircle className="w-5 h-5" aria-hidden="true" />
+              <ExternalLink className="w-3 h-3 absolute -top-1 -right-1 opacity-0 group-hover:opacity-100" aria-hidden="true" />
             </a>
 
             {/* Actions slot */}
@@ -106,18 +130,24 @@ export function Header({ title, subtitle, breadcrumbs, actions }: HeaderProps) {
         <AnimatePresence>
           {showSearch && (
             <motion.div
+              id="header-search"
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
+              role="search"
             >
               <div className="pt-4">
+                <label htmlFor="header-search-input" className="sr-only">
+                  Search trades, topics, achievements
+                </label>
                 <Input
+                  id="header-search-input"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search trades, topics, achievements..."
-                  leftIcon={<Search className="w-4 h-4" />}
+                  leftIcon={<Search className="w-4 h-4" aria-hidden="true" />}
                   autoFocus
                 />
               </div>

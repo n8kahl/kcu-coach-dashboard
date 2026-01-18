@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/header';
-import { PageShell, PageSection, Grid } from '@/components/layout/page-shell';
+import { PageShell, PageSection, Grid, LoadingState, ErrorState, SkeletonStats } from '@/components/layout/page-shell';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Stat, StatGrid } from '@/components/ui/stat';
@@ -19,7 +19,6 @@ import {
   Target,
   Share2,
   ArrowRight,
-  Loader2,
 } from 'lucide-react';
 import type { TradeStats, LeaderboardEntry, Achievement, User } from '@/types';
 
@@ -132,26 +131,30 @@ export default function OverviewPage() {
 
   const username = data.user?.username || 'Trader';
 
-  // Loading state
+  // Loading state with skeleton UI
   if (loading) {
     return (
       <>
         <Header
           title="Dashboard"
-          subtitle="Loading..."
+          subtitle="Loading your data..."
           breadcrumbs={[{ label: 'Dashboard' }, { label: 'Overview' }]}
         />
         <PageShell>
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-primary)]" />
-            <span className="ml-3 text-[var(--text-secondary)]">Loading dashboard...</span>
-          </div>
+          <PageSection>
+            <SkeletonStats count={4} />
+          </PageSection>
+          <LoadingState
+            text="Loading your dashboard..."
+            size="lg"
+            aria-label="Loading dashboard data"
+          />
         </PageShell>
       </>
     );
   }
 
-  // Error state
+  // Error state with retry functionality
   if (error) {
     return (
       <>
@@ -161,16 +164,13 @@ export default function OverviewPage() {
           breadcrumbs={[{ label: 'Dashboard' }, { label: 'Overview' }]}
         />
         <PageShell>
-          <Card className="border-[var(--loss)]">
-            <CardContent>
-              <p className="text-[var(--loss)] text-center py-4">{error}</p>
-              <div className="flex justify-center">
-                <Button variant="secondary" onClick={() => window.location.reload()}>
-                  Retry
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <ErrorState
+            title="Failed to Load Dashboard"
+            message={error}
+            severity="error"
+            onRetry={() => window.location.reload()}
+            retryText="Reload Dashboard"
+          />
         </PageShell>
       </>
     );

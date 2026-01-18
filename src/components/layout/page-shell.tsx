@@ -140,18 +140,22 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
   );
 }
 
-interface LoadingStateProps {
-  text?: string;
-}
-
-export function LoadingState({ text = 'Loading...' }: LoadingStateProps) {
-  return (
-    <div className="flex flex-col items-center justify-center py-16">
-      <div className="relative w-12 h-12 mb-4">
-        <div className="absolute inset-0 border-2 border-[var(--border-secondary)] animate-pulse" />
-        <div className="absolute inset-0 border-t-2 border-[var(--accent-primary)] animate-spin" />
-      </div>
-      <p className="text-sm text-[var(--text-tertiary)]">{text}</p>
-    </div>
-  );
-}
+// Re-export the unified feedback components for backward compatibility
+// These enhanced versions provide better accessibility, animations, and variants
+export {
+  LoadingState,
+  ErrorState,
+  SuccessState,
+  Skeleton,
+  SkeletonCard,
+  SkeletonTable,
+  SkeletonStats,
+  // Premium skeleton presets for trading dashboard
+  SkeletonChart,
+  SkeletonTradeRow,
+  SkeletonLeaderboard,
+  SkeletonAchievement,
+  SkeletonLessonCard,
+  SkeletonWatchlist,
+  SkeletonDashboard,
+} from '@/components/ui/feedback';

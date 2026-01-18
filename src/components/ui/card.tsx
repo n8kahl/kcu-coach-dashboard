@@ -1,22 +1,91 @@
 'use client';
 
-import { forwardRef } from 'react';
+import { forwardRef, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { motion, type HTMLMotionProps } from 'framer-motion';
+import { motion, type HTMLMotionProps, useMotionValue, useSpring, useTransform } from 'framer-motion';
 
 export interface CardProps extends Omit<HTMLMotionProps<'div'>, 'ref'> {
-  variant?: 'default' | 'elevated' | 'bordered' | 'glow';
+  variant?: 'default' | 'elevated' | 'bordered' | 'glow' | 'premium';
   hoverable?: boolean;
   padding?: 'none' | 'sm' | 'md' | 'lg';
+  /** Enable 3D tilt effect on hover */
+  tilt?: boolean;
+  /** Disable entrance animation */
+  disableAnimation?: boolean;
 }
 
 const Card = forwardRef<HTMLDivElement, CardProps>(
-  ({ className, variant = 'default', hoverable = false, padding = 'md', children, ...props }, ref) => {
+  ({
+    className,
+    variant = 'default',
+    hoverable = false,
+    padding = 'md',
+    tilt = false,
+    disableAnimation = false,
+    children,
+    onMouseMove,
+    onMouseLeave,
+    ...props
+  }, ref) => {
+    const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+
+    // Check for reduced motion preference
+    useEffect(() => {
+      const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+      setPrefersReducedMotion(mediaQuery.matches);
+
+      const handleChange = (e: MediaQueryListEvent) => {
+        setPrefersReducedMotion(e.matches);
+      };
+
+      mediaQuery.addEventListener('change', handleChange);
+      return () => mediaQuery.removeEventListener('change', handleChange);
+    }, []);
+
+    const shouldAnimate = !disableAnimation && !prefersReducedMotion;
+
+    // 3D tilt effect values
+    const mouseX = useMotionValue(0);
+    const mouseY = useMotionValue(0);
+
+    const rotateX = useSpring(useTransform(mouseY, [-0.5, 0.5], [5, -5]), {
+      stiffness: 300,
+      damping: 30,
+    });
+    const rotateY = useSpring(useTransform(mouseX, [-0.5, 0.5], [-5, 5]), {
+      stiffness: 300,
+      damping: 30,
+    });
+
+    const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+      if (tilt && shouldAnimate) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = (e.clientX - rect.left) / rect.width - 0.5;
+        const y = (e.clientY - rect.top) / rect.height - 0.5;
+        mouseX.set(x);
+        mouseY.set(y);
+      }
+      onMouseMove?.(e);
+    };
+
+    const handleMouseLeave = (e: React.MouseEvent<HTMLDivElement>) => {
+      if (tilt && shouldAnimate) {
+        mouseX.set(0);
+        mouseY.set(0);
+      }
+      onMouseLeave?.(e);
+    };
+
     const variants = {
       default: 'bg-[var(--bg-card)] border border-[var(--border-primary)]',
       elevated: 'bg-[var(--bg-elevated)] border border-[var(--border-secondary)] shadow-[var(--shadow-md)]',
       bordered: 'bg-transparent border-2 border-[var(--border-secondary)]',
-      glow: 'bg-[var(--bg-card)] border-2 border-[var(--accent-primary)] shadow-[var(--shadow-glow)]',
+      glow: 'bg-[var(--bg-card)] border-2 border-[var(--accent-primary)] shadow-glow-md',
+      premium: cn(
+        'bg-gradient-to-br from-[var(--bg-card)] to-[var(--bg-elevated)]',
+        'border border-[var(--border-accent)]',
+        'shadow-card-hover'
+      ),
     };
 
     const paddings = {
@@ -27,15 +96,39 @@ const Card = forwardRef<HTMLDivElement, CardProps>(
     };
 
     const hoverStyles = hoverable
-      ? 'transition-all duration-250 hover:bg-[var(--bg-card-hover)] hover:border-[var(--border-accent)] hover:shadow-[var(--shadow-glow)] cursor-pointer'
+      ? cn(
+          'transition-all duration-normal ease-premium cursor-pointer',
+          'hover:bg-[var(--bg-card-hover)] hover:border-[var(--border-accent)]',
+          'hover:shadow-card-hover hover:-translate-y-1',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)]'
+        )
       : '';
+
+    const motionProps = shouldAnimate
+      ? {
+          initial: { opacity: 0, y: 10 },
+          animate: { opacity: 1, y: 0 },
+          transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] },
+        }
+      : {};
+
+    const tiltProps = tilt && shouldAnimate
+      ? {
+          style: {
+            rotateX,
+            rotateY,
+            transformStyle: 'preserve-3d' as const,
+          },
+        }
+      : {};
 
     return (
       <motion.div
         ref={ref}
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2 }}
+        {...motionProps}
+        {...tiltProps}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
         className={cn(variants[variant], paddings[padding], hoverStyles, className)}
         {...props}
       >

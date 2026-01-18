@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { useCompanionStream, type CompanionEvent } from '@/hooks/useCompanionStream';
+import { Button } from '@/components/ui/button';
 import {
   Plus,
   X,
@@ -301,16 +302,28 @@ export default function CompanionPage() {
                 </p>
               </div>
             </div>
-            <button className="btn btn-primary">
+            <Button
+              variant="primary"
+              onClick={() => {
+                // Scroll to the first ready setup in the watchlist
+                const firstReadySetup = document.querySelector('[aria-label*="confluence score"]');
+                firstReadySetup?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // Or select the first ready setup
+                if (readySetups.length > 0) {
+                  setSelectedSymbol(readySetups[0].symbol);
+                }
+              }}
+              icon={<ChevronRight className="w-4 h-4" />}
+              iconPosition="right"
+            >
               View Setups
-              <ChevronRight className="w-4 h-4 ml-1" />
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
-      {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Main Grid - now with md: breakpoint for tablets */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Watchlist Panel */}
         <div className="card p-6 lg:col-span-1">
           <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2 mb-4 uppercase tracking-wide">
@@ -465,8 +478,11 @@ function WatchlistItem({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
       className={cn(
         'p-3 border cursor-pointer transition-all',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]',
         isSelected
           ? 'border-[var(--accent-primary)] bg-[var(--accent-primary-glow)]'
           : 'border-[var(--border-primary)] hover:border-[var(--border-secondary)]',
@@ -474,6 +490,14 @@ function WatchlistItem({
         isShared && 'border-l-2 border-l-[var(--accent-primary)]'
       )}
       onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      aria-selected={isSelected}
+      aria-label={`${item.symbol}${hasSetup ? `, confluence score ${setup.confluence_score}%` : ''}`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -499,9 +523,10 @@ function WatchlistItem({
           {!isShared && (
             <button
               onClick={(e) => { e.stopPropagation(); onRemove(); }}
-              className="p-1 hover:bg-[var(--bg-elevated)]"
+              className="p-1 hover:bg-[var(--bg-elevated)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)]"
+              aria-label={`Remove ${item.symbol} from watchlist`}
             >
-              <X className="w-4 h-4 text-[var(--text-tertiary)]" />
+              <X className="w-4 h-4 text-[var(--text-tertiary)]" aria-hidden="true" />
             </button>
           )}
         </div>
