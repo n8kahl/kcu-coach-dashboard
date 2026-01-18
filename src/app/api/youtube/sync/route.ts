@@ -98,7 +98,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('YouTube sync error:', error);
     return NextResponse.json(
-      { error: 'Failed to sync YouTube channel' },
+      {
+        error: 'Failed to sync YouTube channel',
+        details: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     );
   }
@@ -111,9 +114,23 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    if (!isYouTubeConfigured()) {
+    // Debug: log config status
+    const configured = isYouTubeConfigured();
+    console.log('YouTube config check:', {
+      configured,
+      hasApiKey: !!process.env.YOUTUBE_API_KEY,
+      hasChannelId: !!process.env.KAY_CAPITALS_CHANNEL_ID,
+    });
+
+    if (!configured) {
       return NextResponse.json(
-        { error: 'YouTube API is not configured' },
+        {
+          error: 'YouTube API is not configured',
+          debug: {
+            hasApiKey: !!process.env.YOUTUBE_API_KEY,
+            hasChannelId: !!process.env.KAY_CAPITALS_CHANNEL_ID,
+          },
+        },
         { status: 503 }
       );
     }
@@ -155,7 +172,10 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Get sync status error:', error);
     return NextResponse.json(
-      { error: 'Failed to get sync status' },
+      {
+        error: 'Failed to get sync status',
+        details: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     );
   }
