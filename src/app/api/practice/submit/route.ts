@@ -1,13 +1,14 @@
 /**
  * Practice Submit API
  *
- * POST /api/practice/submit - Submit a practice attempt
+ * POST /api/practice/submit - Submit a practice attempt with AI coaching
  */
 
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import { generateAttemptFeedback } from '@/lib/scenario-generator';
+import { generateAICoachingFeedback, generateQuickDrillFeedback } from '@/lib/practice-ai-coach';
 import logger from '@/lib/logger';
 
 interface SubmitRequest {
@@ -21,6 +22,10 @@ interface SubmitRequest {
     notes?: string;
   };
   timeTakenSeconds?: number;
+  sessionId?: string;
+  mode?: string;
+  useAICoaching?: boolean;
+  emotionTag?: string;
 }
 
 /**
@@ -35,7 +40,17 @@ export async function POST(request: Request) {
     }
 
     const body: SubmitRequest = await request.json();
-    const { scenarioId, decision, reasoning, ltpChecklist, timeTakenSeconds } = body;
+    const {
+      scenarioId,
+      decision,
+      reasoning,
+      ltpChecklist,
+      timeTakenSeconds,
+      sessionId,
+      mode,
+      useAICoaching,
+      emotionTag,
+    } = body;
 
     // Validate request
     if (!scenarioId || !decision) {
@@ -65,7 +80,7 @@ export async function POST(request: Request) {
     // Determine if correct
     const isCorrect = decision === scenario.correct_action;
 
-    // Generate feedback
+    // Build scenario data for feedback
     const scenarioData = {
       title: scenario.title,
       description: scenario.description,
@@ -73,21 +88,94 @@ export async function POST(request: Request) {
       scenarioType: scenario.scenario_type,
       difficulty: scenario.difficulty,
       chartData: scenario.chart_data,
-      keyLevels: scenario.key_levels,
+      keyLevels: scenario.key_levels || [],
       decisionPoint: scenario.decision_point,
       correctAction: scenario.correct_action,
       outcomeData: scenario.outcome_data,
-      ltpAnalysis: scenario.ltp_analysis,
+      ltpAnalysis: scenario.ltp_analysis || {
+        level: { score: 70, reason: 'Level analysis' },
+        trend: { score: 70, reason: 'Trend analysis' },
+        patience: { score: 70, reason: 'Patience analysis' },
+      },
       explanation: scenario.explanation,
-      tags: scenario.tags,
+      tags: scenario.tags || [],
+      focusArea: scenario.focus_area,
+      relatedLessonSlug: scenario.related_lesson_slug,
     };
 
-    const feedback = await generateAttemptFeedback(
-      scenarioData,
-      decision,
-      reasoning,
-      isCorrect
-    );
+    // Generate feedback - AI or basic
+    let feedback: string;
+    let aiCoaching = null;
+
+    if (mode === 'quick_drill') {
+      // Quick drill gets simple feedback
+      const quickFeedback = await generateQuickDrillFeedback(scenarioData, {
+        decision,
+        reasoning,
+        timeTakenSeconds,
+      });
+      feedback = `${quickFeedback.quickFeedback} ${quickFeedback.tip}`;
+    } else if (useAICoaching) {
+      // Get user context for personalized coaching
+      const { data: userStats } = await supabaseAdmin
+        .from('user_practice_stats')
+        .select('*')
+        .eq('user_id', session.userId)
+        .single();
+
+      const { data: streakData } = await supabaseAdmin
+        .from('practice_streaks')
+        .select('current_count, best_count')
+        .eq('user_id', session.userId)
+        .eq('streak_type', 'correct_in_row')
+        .single();
+
+      const userContext = userStats ? {
+        totalAttempts: userStats.total_attempts || 0,
+        correctAttempts: userStats.correct_attempts || 0,
+        accuracyPercent: userStats.accuracy_percent || 0,
+        currentStreak: streakData?.current_count || 0,
+      } : undefined;
+
+      // Generate AI coaching feedback
+      try {
+        aiCoaching = await generateAICoachingFeedback(
+          scenarioData,
+          {
+            decision,
+            reasoning,
+            ltpChecklist: ltpChecklist ? {
+              levelScore: ltpChecklist.levelScore,
+              trendScore: ltpChecklist.trendScore,
+              patienceScore: ltpChecklist.patienceScore,
+              notes: ltpChecklist.notes,
+            } : undefined,
+            timeTakenSeconds,
+            emotionTag,
+          },
+          userContext
+        );
+        feedback = aiCoaching.summary;
+      } catch (aiError) {
+        logger.warn('AI coaching failed, using basic feedback', {
+          error: aiError instanceof Error ? aiError.message : String(aiError),
+        });
+        feedback = await generateAttemptFeedback(
+          scenarioData,
+          decision,
+          reasoning,
+          isCorrect
+        );
+      }
+    } else {
+      // Basic feedback
+      feedback = await generateAttemptFeedback(
+        scenarioData,
+        decision,
+        reasoning,
+        isCorrect
+      );
+    }
 
     // Save the attempt
     const { data: attempt, error: attemptError } = await supabaseAdmin
@@ -100,7 +188,11 @@ export async function POST(request: Request) {
         ltp_checklist: ltpChecklist,
         is_correct: isCorrect,
         feedback,
+        ai_coaching_response: aiCoaching ? JSON.stringify(aiCoaching) : null,
         time_taken_seconds: timeTakenSeconds,
+        session_id: sessionId || null,
+        source: mode || 'practice',
+        emotion_tag: emotionTag || null,
       })
       .select()
       .single();
@@ -117,12 +209,29 @@ export async function POST(request: Request) {
       .eq('user_id', session.userId)
       .single();
 
+    // Get updated streak
+    const { data: updatedStreak } = await supabaseAdmin
+      .from('practice_streaks')
+      .select('current_count, best_count')
+      .eq('user_id', session.userId)
+      .eq('streak_type', 'correct_in_row')
+      .single();
+
     logger.info('Practice attempt submitted', {
       userId: session.userId,
       scenarioId,
       decision,
       isCorrect,
+      mode,
+      hasAICoaching: !!aiCoaching,
     });
+
+    // Format LTP analysis for response
+    const ltpAnalysis = scenario.ltp_analysis ? {
+      level: scenario.ltp_analysis.level || { score: 70, reason: scenario.ltp_analysis.levelNotes || '' },
+      trend: scenario.ltp_analysis.trend || { score: 70, reason: scenario.ltp_analysis.trendNotes || '' },
+      patience: scenario.ltp_analysis.patience || { score: 70, reason: scenario.ltp_analysis.patienceNotes || '' },
+    } : null;
 
     return NextResponse.json({
       success: true,
@@ -130,15 +239,18 @@ export async function POST(request: Request) {
         id: attempt.id,
         isCorrect,
         feedback,
+        aiCoaching,
       },
       correctAction: scenario.correct_action,
       outcomeData: scenario.outcome_data,
-      ltpAnalysis: scenario.ltp_analysis,
+      ltpAnalysis,
       explanation: scenario.explanation,
       userStats: stats ? {
         totalAttempts: stats.total_attempts,
         correctAttempts: stats.correct_attempts,
         accuracyPercent: stats.accuracy_percent,
+        currentStreak: updatedStreak?.current_count || 0,
+        bestStreak: updatedStreak?.best_count || 0,
       } : null,
     });
 

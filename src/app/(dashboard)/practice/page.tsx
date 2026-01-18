@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Header } from '@/components/layout/header';
 import { PageShell, PageSection } from '@/components/layout/page-shell';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Stat, StatGrid } from '@/components/ui/stat';
 import { ProgressBar } from '@/components/ui/progress';
+import { PracticeChart } from '@/components/practice/practice-chart';
+import { cn } from '@/lib/utils';
 import {
   Target,
   TrendingUp,
@@ -21,8 +23,22 @@ import {
   Loader2,
   BarChart3,
   RefreshCw,
+  Zap,
+  Brain,
+  Play,
+  Flame,
+  Award,
+  BookOpen,
+  Share2,
+  Sparkles,
+  Timer,
+  ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  MessageSquare,
 } from 'lucide-react';
 
+// Types
 interface Scenario {
   id: string;
   title: string;
@@ -31,6 +47,10 @@ interface Scenario {
   scenario_type: string;
   difficulty: string;
   tags: string[];
+  focus_area: string;
+  category: string;
+  community_attempts: number;
+  community_accuracy: number;
   userAttempts: number;
   userCorrect: number;
 }
@@ -42,18 +62,28 @@ interface ScenarioDetail {
   symbol: string;
   scenarioType: string;
   difficulty: string;
-  chartData: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }>;
-  keyLevels: Array<{ price: number; type: string; strength: number }>;
+  chartTimeframe: string;
+  chartData: {
+    candles: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }>;
+    volume_profile?: { high_vol_node?: number; low_vol_node?: number };
+  };
+  keyLevels: Array<{ type: string; price: number; strength: number; label: string }>;
+  decisionPoint: { price: number; time: number; context: string };
   hasAttempted: boolean;
   correctAction?: string;
-  outcomeData?: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }>;
+  outcomeData?: {
+    result: string;
+    exit_price?: number;
+    pnl_percent?: number;
+    candles_to_target?: number;
+  };
   ltpAnalysis?: {
-    levelScore: number;
-    trendScore: number;
-    patienceScore: number;
-    overallGrade: string;
+    level: { score: number; reason: string };
+    trend: { score: number; reason: string };
+    patience: { score: number; reason: string };
   };
   explanation?: string;
+  relatedLessonSlug?: string;
   lastAttempt?: {
     decision: string;
     isCorrect: boolean;
@@ -66,31 +96,114 @@ interface UserStats {
   correctAttempts: number;
   accuracyPercent: number;
   uniqueScenarios: number;
+  avgTimeSeconds: number;
+  currentStreak: number;
+  bestStreak: number;
+  daysPracticed: number;
 }
 
+interface CoachingFeedback {
+  isCorrect: boolean;
+  summary: string;
+  detailedFeedback: string;
+  ltpBreakdown: {
+    level: string;
+    trend: string;
+    patience: string;
+  };
+  whatYouMissed?: string;
+  encouragement: string;
+  richContent?: string;
+  nextSteps: string[];
+  personalizedTip?: string;
+}
+
+type PracticeMode = 'standard' | 'quick_drill' | 'deep_analysis' | 'replay';
+
+// Practice Mode Definitions
+const PRACTICE_MODES = [
+  {
+    id: 'standard' as PracticeMode,
+    name: 'Standard',
+    description: 'Full scenario with detailed feedback',
+    icon: Target,
+    color: 'accent',
+  },
+  {
+    id: 'quick_drill' as PracticeMode,
+    name: 'Quick Drill',
+    description: '30-second decisions, rapid fire',
+    icon: Zap,
+    color: 'warning',
+  },
+  {
+    id: 'deep_analysis' as PracticeMode,
+    name: 'Deep Analysis',
+    description: 'Full AI coaching with LTP checklist',
+    icon: Brain,
+    color: 'success',
+  },
+  {
+    id: 'replay' as PracticeMode,
+    name: 'Live Replay',
+    description: 'Watch candles unfold in real-time',
+    icon: Play,
+    color: 'info',
+  },
+];
+
 export default function PracticePage() {
+  // Core state
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioDetail | null>(null);
   const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [scenarioLoading, setScenarioLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Practice mode state
+  const [practiceMode, setPracticeMode] = useState<PracticeMode>('standard');
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionStats, setSessionStats] = useState({ attempted: 0, correct: 0 });
+
+  // Result and feedback state
   const [result, setResult] = useState<{
     isCorrect: boolean;
-    feedback: string;
+    feedback: CoachingFeedback | string;
     correctAction: string;
   } | null>(null);
+
+  // Timer state for quick drill
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [startTime, setStartTime] = useState<number | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // LTP Checklist state for deep analysis
+  const [ltpChecklist, setLtpChecklist] = useState({
+    levelScore: 50,
+    trendScore: 50,
+    patienceScore: 50,
+    notes: '',
+  });
+
+  // UI state
+  const [showOutcome, setShowOutcome] = useState(false);
+  const [showFeedbackDetails, setShowFeedbackDetails] = useState(false);
+  const [decisionReached, setDecisionReached] = useState(false);
 
   // Filters
   const [difficultyFilter, setDifficultyFilter] = useState<string>('');
+  const [focusFilter, setFocusFilter] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<string>('');
 
+  // Fetch scenarios
   const fetchScenarios = useCallback(async () => {
     try {
       const params = new URLSearchParams();
       if (difficultyFilter) params.append('difficulty', difficultyFilter);
+      if (focusFilter) params.append('focus', focusFilter);
       if (typeFilter) params.append('type', typeFilter);
+      params.append('limit', '50');
 
       const res = await fetch(`/api/practice/scenarios?${params}`);
       if (res.ok) {
@@ -100,11 +213,12 @@ export default function PracticePage() {
     } catch (error) {
       console.error('Error fetching scenarios:', error);
     }
-  }, [difficultyFilter, typeFilter]);
+  }, [difficultyFilter, focusFilter, typeFilter]);
 
+  // Fetch user stats
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch('/api/practice/submit');
+      const res = await fetch('/api/practice/stats');
       if (res.ok) {
         const data = await res.json();
         setUserStats(data.stats);
@@ -114,6 +228,7 @@ export default function PracticePage() {
     }
   }, []);
 
+  // Initialize
   useEffect(() => {
     async function init() {
       setLoading(true);
@@ -123,16 +238,50 @@ export default function PracticePage() {
     init();
   }, [fetchScenarios, fetchStats]);
 
+  // Start a new practice session
+  const startSession = async () => {
+    try {
+      const res = await fetch('/api/practice/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: practiceMode }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSessionId(data.sessionId);
+        setSessionStats({ attempted: 0, correct: 0 });
+      }
+    } catch (error) {
+      console.error('Error starting session:', error);
+    }
+  };
+
+  // Select a scenario
   const selectScenario = async (id: string) => {
     setScenarioLoading(true);
     setResult(null);
-    setStartTime(Date.now());
+    setShowOutcome(false);
+    setDecisionReached(false);
+    setShowFeedbackDetails(false);
+    setLtpChecklist({ levelScore: 50, trendScore: 50, patienceScore: 50, notes: '' });
 
     try {
       const res = await fetch(`/api/practice/scenarios/${id}`);
       if (res.ok) {
         const data = await res.json();
         setSelectedScenario(data);
+        setStartTime(Date.now());
+
+        // Start timer for quick drill mode
+        if (practiceMode === 'quick_drill') {
+          setTimeRemaining(30);
+          startTimer();
+        }
+
+        // Start session if not already started
+        if (!sessionId) {
+          startSession();
+        }
       }
     } catch (error) {
       console.error('Error fetching scenario:', error);
@@ -141,8 +290,32 @@ export default function PracticePage() {
     }
   };
 
+  // Timer for quick drill
+  const startTimer = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+
+    timerRef.current = setInterval(() => {
+      setTimeRemaining(prev => {
+        if (prev === null || prev <= 1) {
+          clearInterval(timerRef.current!);
+          // Auto-submit "wait" on timeout
+          submitDecision('wait');
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Submit decision
   const submitDecision = async (decision: 'long' | 'short' | 'wait') => {
     if (!selectedScenario) return;
+
+    // Stop timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
 
     setSubmitting(true);
     const timeTaken = startTime ? Math.round((Date.now() - startTime) / 1000) : undefined;
@@ -154,17 +327,29 @@ export default function PracticePage() {
         body: JSON.stringify({
           scenarioId: selectedScenario.id,
           decision,
+          reasoning: ltpChecklist.notes || undefined,
+          ltpChecklist: practiceMode === 'deep_analysis' ? ltpChecklist : undefined,
           timeTakenSeconds: timeTaken,
+          sessionId,
+          mode: practiceMode,
+          useAICoaching: practiceMode === 'deep_analysis' || practiceMode === 'standard',
         }),
       });
 
       if (res.ok) {
         const data = await res.json();
+
         setResult({
           isCorrect: data.attempt.isCorrect,
-          feedback: data.attempt.feedback,
+          feedback: data.attempt.aiCoaching || data.attempt.feedback,
           correctAction: data.correctAction,
         });
+
+        // Update session stats
+        setSessionStats(prev => ({
+          attempted: prev.attempted + 1,
+          correct: prev.correct + (data.attempt.isCorrect ? 1 : 0),
+        }));
 
         // Update the scenario with outcome data
         setSelectedScenario(prev => prev ? {
@@ -176,23 +361,40 @@ export default function PracticePage() {
           hasAttempted: true,
         } : null);
 
-        // Update stats
-        if (data.userStats) {
-          setUserStats(data.userStats);
-        } else {
-          fetchStats();
+        // Show outcome for replay mode
+        if (practiceMode === 'replay') {
+          setShowOutcome(true);
         }
 
-        // Refresh scenarios list
+        // Update stats
+        fetchStats();
         fetchScenarios();
       }
     } catch (error) {
       console.error('Error submitting decision:', error);
     } finally {
       setSubmitting(false);
+      setTimeRemaining(null);
     }
   };
 
+  // Get next scenario (for quick drill)
+  const getNextScenario = () => {
+    const currentIndex = scenarios.findIndex(s => s.id === selectedScenario?.id);
+    const nextScenario = scenarios[currentIndex + 1] || scenarios[0];
+    if (nextScenario) {
+      selectScenario(nextScenario.id);
+    }
+  };
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  // Helper functions
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
       case 'beginner': return 'success';
@@ -202,13 +404,103 @@ export default function PracticePage() {
     }
   };
 
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'reversal': return <RefreshCw className="w-4 h-4" />;
-      case 'breakout': return <TrendingUp className="w-4 h-4" />;
-      case 'continuation': return <ChevronRight className="w-4 h-4" />;
+  const getFocusIcon = (focus: string) => {
+    switch (focus) {
+      case 'level': return <Target className="w-4 h-4" />;
+      case 'trend': return <TrendingUp className="w-4 h-4" />;
+      case 'patience': return <Clock className="w-4 h-4" />;
       default: return <BarChart3 className="w-4 h-4" />;
     }
+  };
+
+  // Render feedback content
+  const renderFeedback = (feedback: CoachingFeedback | string) => {
+    if (typeof feedback === 'string') {
+      return <p className="text-sm text-[var(--text-secondary)]">{feedback}</p>;
+    }
+
+    return (
+      <div className="space-y-4">
+        {/* Summary */}
+        <p className="text-[var(--text-primary)] font-medium">{feedback.summary}</p>
+
+        {/* Detailed Feedback */}
+        <p className="text-sm text-[var(--text-secondary)]">{feedback.detailedFeedback}</p>
+
+        {/* What You Missed */}
+        {feedback.whatYouMissed && (
+          <div className="p-3 bg-[var(--error)]/10 border border-[var(--error)]/30 rounded">
+            <p className="text-sm text-[var(--error)]">
+              <strong>What you missed:</strong> {feedback.whatYouMissed}
+            </p>
+          </div>
+        )}
+
+        {/* LTP Breakdown (expandable) */}
+        <button
+          className="flex items-center gap-2 text-sm text-[var(--accent-primary)] hover:underline"
+          onClick={() => setShowFeedbackDetails(!showFeedbackDetails)}
+        >
+          {showFeedbackDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          {showFeedbackDetails ? 'Hide' : 'Show'} LTP Breakdown
+        </button>
+
+        {showFeedbackDetails && (
+          <div className="grid grid-cols-1 gap-3 p-4 bg-[var(--bg-tertiary)] rounded">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Target className="w-4 h-4 text-[var(--accent-primary)]" />
+                <span className="text-xs font-semibold text-[var(--text-tertiary)] uppercase">Level</span>
+              </div>
+              <p className="text-sm text-[var(--text-secondary)]">{feedback.ltpBreakdown.level}</p>
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <TrendingUp className="w-4 h-4 text-[var(--accent-primary)]" />
+                <span className="text-xs font-semibold text-[var(--text-tertiary)] uppercase">Trend</span>
+              </div>
+              <p className="text-sm text-[var(--text-secondary)]">{feedback.ltpBreakdown.trend}</p>
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Clock className="w-4 h-4 text-[var(--accent-primary)]" />
+                <span className="text-xs font-semibold text-[var(--text-tertiary)] uppercase">Patience</span>
+              </div>
+              <p className="text-sm text-[var(--text-secondary)]">{feedback.ltpBreakdown.patience}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Encouragement */}
+        <p className="text-sm text-[var(--accent-primary)] italic">{feedback.encouragement}</p>
+
+        {/* Next Steps */}
+        {feedback.nextSteps && feedback.nextSteps.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-2">Next Steps</p>
+            <ul className="space-y-1">
+              {feedback.nextSteps.map((step, i) => (
+                <li key={i} className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                  <ArrowRight className="w-3 h-3 text-[var(--accent-primary)]" />
+                  {step}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Personalized Tip */}
+        {feedback.personalizedTip && (
+          <div className="p-3 bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/30 rounded">
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles className="w-4 h-4 text-[var(--accent-primary)]" />
+              <span className="text-xs font-semibold text-[var(--accent-primary)] uppercase">Personalized Tip</span>
+            </div>
+            <p className="text-sm text-[var(--text-secondary)]">{feedback.personalizedTip}</p>
+          </div>
+        )}
+      </div>
+    );
   };
 
   if (loading) {
@@ -223,22 +515,22 @@ export default function PracticePage() {
     <>
       <Header
         title="Practice Simulator"
-        subtitle="Test your LTP framework skills with real market scenarios"
+        subtitle="Master the LTP framework through interactive scenarios"
         breadcrumbs={[{ label: 'Practice' }]}
       />
 
       <PageShell>
-        {/* User Stats */}
+        {/* Stats Row */}
         <PageSection>
-          <StatGrid columns={4}>
-            <Card padding="md">
+          <StatGrid columns={6}>
+            <Card padding="sm">
               <Stat
-                label="Total Attempts"
+                label="Attempts"
                 value={userStats?.totalAttempts || 0}
                 icon={<Target className="w-4 h-4" />}
               />
             </Card>
-            <Card padding="md">
+            <Card padding="sm">
               <Stat
                 label="Correct"
                 value={userStats?.correctAttempts || 0}
@@ -246,33 +538,103 @@ export default function PracticePage() {
                 valueColor="profit"
               />
             </Card>
-            <Card padding="md">
+            <Card padding="sm">
               <Stat
                 label="Accuracy"
-                value={`${userStats?.accuracyPercent || 0}%`}
+                value={`${userStats?.accuracyPercent?.toFixed(1) || 0}%`}
                 icon={<Trophy className="w-4 h-4" />}
               />
             </Card>
-            <Card padding="md">
+            <Card padding="sm">
               <Stat
-                label="Scenarios Tried"
-                value={userStats?.uniqueScenarios || 0}
+                label="Current Streak"
+                value={userStats?.currentStreak || 0}
+                icon={<Flame className="w-4 h-4" />}
+                valueColor={userStats?.currentStreak && userStats.currentStreak >= 5 ? 'profit' : undefined}
+              />
+            </Card>
+            <Card padding="sm">
+              <Stat
+                label="Best Streak"
+                value={userStats?.bestStreak || 0}
+                icon={<Award className="w-4 h-4" />}
+              />
+            </Card>
+            <Card padding="sm">
+              <Stat
+                label="Days Practiced"
+                value={userStats?.daysPracticed || 0}
                 icon={<BarChart3 className="w-4 h-4" />}
               />
             </Card>
           </StatGrid>
         </PageSection>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Practice Mode Selector */}
+        <PageSection>
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            {PRACTICE_MODES.map((mode) => {
+              const Icon = mode.icon;
+              const isActive = practiceMode === mode.id;
+              return (
+                <button
+                  key={mode.id}
+                  onClick={() => {
+                    setPracticeMode(mode.id);
+                    setSelectedScenario(null);
+                    setResult(null);
+                  }}
+                  className={cn(
+                    'flex items-center gap-3 px-4 py-3 border transition-all min-w-[200px]',
+                    isActive
+                      ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                      : 'bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50'
+                  )}
+                >
+                  <Icon className={cn('w-5 h-5', isActive ? 'text-[var(--accent-primary)]' : '')} />
+                  <div className="text-left">
+                    <div className={cn('font-semibold', isActive ? 'text-[var(--accent-primary)]' : 'text-[var(--text-primary)]')}>
+                      {mode.name}
+                    </div>
+                    <div className="text-xs opacity-70">{mode.description}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </PageSection>
+
+        {/* Session Stats (if in session) */}
+        {sessionId && sessionStats.attempted > 0 && (
+          <PageSection>
+            <div className="flex items-center gap-4 px-4 py-2 bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
+              <span className="text-sm text-[var(--text-tertiary)]">Session:</span>
+              <span className="text-sm font-mono text-[var(--text-primary)]">
+                {sessionStats.correct}/{sessionStats.attempted}
+              </span>
+              <span className="text-sm text-[var(--text-tertiary)]">
+                ({((sessionStats.correct / sessionStats.attempted) * 100).toFixed(0)}%)
+              </span>
+              {sessionStats.correct >= 5 && (
+                <Badge variant="success" size="sm">
+                  <Flame className="w-3 h-3 mr-1" />
+                  On Fire!
+                </Badge>
+              )}
+            </div>
+          </PageSection>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Scenario List */}
           <PageSection className="lg:col-span-1">
             <Card>
               <CardHeader
                 title="Scenarios"
                 action={
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2">
                     <select
-                      className="text-xs bg-[var(--bg-tertiary)] border border-[var(--border-primary)] rounded px-2 py-1"
+                      className="text-xs bg-[var(--bg-tertiary)] border border-[var(--border-primary)] px-2 py-1"
                       value={difficultyFilter}
                       onChange={(e) => setDifficultyFilter(e.target.value)}
                     >
@@ -281,11 +643,21 @@ export default function PracticePage() {
                       <option value="intermediate">Intermediate</option>
                       <option value="advanced">Advanced</option>
                     </select>
+                    <select
+                      className="text-xs bg-[var(--bg-tertiary)] border border-[var(--border-primary)] px-2 py-1"
+                      value={focusFilter}
+                      onChange={(e) => setFocusFilter(e.target.value)}
+                    >
+                      <option value="">All Focus Areas</option>
+                      <option value="level">Level</option>
+                      <option value="trend">Trend</option>
+                      <option value="patience">Patience</option>
+                    </select>
                   </div>
                 }
               />
               <CardContent className="p-0">
-                <div className="divide-y divide-[var(--border-primary)] max-h-[500px] overflow-y-auto">
+                <div className="divide-y divide-[var(--border-primary)] max-h-[600px] overflow-y-auto">
                   {scenarios.length === 0 ? (
                     <div className="p-6 text-center text-[var(--text-tertiary)]">
                       No scenarios available yet.
@@ -294,15 +666,16 @@ export default function PracticePage() {
                     scenarios.map((scenario) => (
                       <button
                         key={scenario.id}
-                        className={`w-full p-4 text-left hover:bg-[var(--bg-tertiary)] transition-colors ${
-                          selectedScenario?.id === scenario.id ? 'bg-[var(--bg-tertiary)]' : ''
-                        }`}
+                        className={cn(
+                          'w-full p-4 text-left hover:bg-[var(--bg-tertiary)] transition-colors',
+                          selectedScenario?.id === scenario.id && 'bg-[var(--bg-tertiary)] border-l-2 border-l-[var(--accent-primary)]'
+                        )}
                         onClick={() => selectScenario(scenario.id)}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
-                              {getTypeIcon(scenario.scenario_type)}
+                              {getFocusIcon(scenario.focus_area)}
                               <span className="font-medium text-[var(--text-primary)]">
                                 {scenario.symbol}
                               </span>
@@ -313,12 +686,18 @@ export default function PracticePage() {
                             <p className="text-sm text-[var(--text-secondary)] line-clamp-1">
                               {scenario.title}
                             </p>
+                            {scenario.community_attempts > 0 && (
+                              <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                                Community: {scenario.community_accuracy?.toFixed(0)}% accuracy
+                              </p>
+                            )}
                           </div>
                           {scenario.userAttempts > 0 && (
                             <div className="text-right">
-                              <span className={`text-xs ${
+                              <span className={cn(
+                                'text-xs font-mono',
                                 scenario.userCorrect > 0 ? 'text-[var(--profit)]' : 'text-[var(--text-tertiary)]'
-                              }`}>
+                              )}>
                                 {scenario.userCorrect}/{scenario.userAttempts}
                               </span>
                             </div>
@@ -333,7 +712,7 @@ export default function PracticePage() {
           </PageSection>
 
           {/* Scenario Detail / Practice Area */}
-          <PageSection className="lg:col-span-2">
+          <PageSection className="lg:col-span-3">
             <Card>
               {scenarioLoading ? (
                 <CardContent className="py-20 text-center">
@@ -344,44 +723,112 @@ export default function PracticePage() {
                   <CardHeader
                     title={selectedScenario.title}
                     subtitle={selectedScenario.description}
+                    action={
+                      timeRemaining !== null && (
+                        <div className={cn(
+                          'flex items-center gap-2 px-3 py-1 font-mono text-lg',
+                          timeRemaining <= 10 ? 'bg-[var(--error)]/20 text-[var(--error)]' : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
+                        )}>
+                          <Timer className="w-5 h-5" />
+                          {timeRemaining}s
+                        </div>
+                      )
+                    }
                   />
                   <CardContent>
-                    {/* Chart Placeholder - In a real implementation, render actual chart */}
-                    <div className="bg-[var(--bg-tertiary)] rounded-lg p-6 mb-6">
-                      <div className="aspect-video bg-[var(--bg-primary)] rounded border border-[var(--border-primary)] flex items-center justify-center">
-                        <div className="text-center text-[var(--text-tertiary)]">
-                          <BarChart3 className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                          <p>Chart visualization would render here</p>
-                          <p className="text-sm mt-1">
-                            {selectedScenario.chartData?.length || 0} bars |
-                            {selectedScenario.keyLevels?.length || 0} key levels
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Key Levels */}
-                      {selectedScenario.keyLevels && selectedScenario.keyLevels.length > 0 && (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {selectedScenario.keyLevels.map((level, i) => (
-                            <Badge
-                              key={i}
-                              variant={level.type === 'support' ? 'success' : 'error'}
-                              size="sm"
-                            >
-                              {level.type}: ${level.price.toFixed(2)}
-                            </Badge>
-                          ))}
+                    {/* Chart */}
+                    <div className="mb-6">
+                      {selectedScenario.chartData?.candles?.length > 0 ? (
+                        <PracticeChart
+                          chartData={selectedScenario.chartData}
+                          keyLevels={selectedScenario.keyLevels || []}
+                          decisionPoint={selectedScenario.decisionPoint}
+                          outcomeData={selectedScenario.outcomeData}
+                          symbol={selectedScenario.symbol}
+                          timeframe={selectedScenario.chartTimeframe || '5m'}
+                          showOutcome={showOutcome}
+                          replayMode={practiceMode === 'replay'}
+                          onDecisionPointReached={() => setDecisionReached(true)}
+                          className="h-[400px]"
+                        />
+                      ) : (
+                        <div className="bg-[var(--bg-tertiary)] p-6">
+                          <div className="aspect-video bg-[var(--bg-primary)] border border-[var(--border-primary)] flex items-center justify-center">
+                            <div className="text-center text-[var(--text-tertiary)]">
+                              <BarChart3 className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                              <p>Chart data loading...</p>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
 
+                    {/* LTP Checklist (Deep Analysis Mode) */}
+                    {practiceMode === 'deep_analysis' && !result && (
+                      <div className="mb-6 p-4 bg-[var(--bg-tertiary)] border border-[var(--border-primary)]">
+                        <h4 className="text-sm font-semibold text-[var(--text-primary)] mb-4 flex items-center gap-2">
+                          <Brain className="w-4 h-4 text-[var(--accent-primary)]" />
+                          Your LTP Assessment
+                        </h4>
+                        <div className="grid grid-cols-3 gap-4 mb-4">
+                          <div>
+                            <label className="text-xs text-[var(--text-tertiary)] mb-1 block">
+                              Level Score: {ltpChecklist.levelScore}%
+                            </label>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={ltpChecklist.levelScore}
+                              onChange={(e) => setLtpChecklist(prev => ({ ...prev, levelScore: parseInt(e.target.value) }))}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-[var(--text-tertiary)] mb-1 block">
+                              Trend Score: {ltpChecklist.trendScore}%
+                            </label>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={ltpChecklist.trendScore}
+                              onChange={(e) => setLtpChecklist(prev => ({ ...prev, trendScore: parseInt(e.target.value) }))}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-[var(--text-tertiary)] mb-1 block">
+                              Patience Score: {ltpChecklist.patienceScore}%
+                            </label>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={ltpChecklist.patienceScore}
+                              onChange={(e) => setLtpChecklist(prev => ({ ...prev, patienceScore: parseInt(e.target.value) }))}
+                              className="w-full"
+                            />
+                          </div>
+                        </div>
+                        <textarea
+                          placeholder="Your analysis notes (optional)..."
+                          value={ltpChecklist.notes}
+                          onChange={(e) => setLtpChecklist(prev => ({ ...prev, notes: e.target.value }))}
+                          className="w-full px-3 py-2 text-sm bg-[var(--bg-primary)] border border-[var(--border-primary)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)]"
+                          rows={2}
+                        />
+                      </div>
+                    )}
+
                     {/* Decision Buttons or Result */}
                     {result ? (
-                      <div className={`p-6 rounded-lg ${
+                      <div className={cn(
+                        'p-6 rounded-lg',
                         result.isCorrect
                           ? 'bg-[var(--profit)]/10 border border-[var(--profit)]'
                           : 'bg-[var(--loss)]/10 border border-[var(--loss)]'
-                      }`}>
+                      )}>
                         <div className="flex items-center gap-3 mb-4">
                           {result.isCorrect ? (
                             <CheckCircle className="w-8 h-8 text-[var(--profit)]" />
@@ -389,19 +836,27 @@ export default function PracticePage() {
                             <XCircle className="w-8 h-8 text-[var(--loss)]" />
                           )}
                           <div>
-                            <h3 className={`text-lg font-bold ${
+                            <h3 className={cn(
+                              'text-lg font-bold',
                               result.isCorrect ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
-                            }`}>
+                            )}>
                               {result.isCorrect ? 'Correct!' : 'Incorrect'}
                             </h3>
                             <p className="text-sm text-[var(--text-secondary)]">
                               Correct action: <span className="font-semibold uppercase">{result.correctAction}</span>
                             </p>
                           </div>
+                          {userStats?.currentStreak && userStats.currentStreak >= 3 && result.isCorrect && (
+                            <Badge variant="warning" className="ml-auto">
+                              <Flame className="w-3 h-3 mr-1" />
+                              {userStats.currentStreak} Streak!
+                            </Badge>
+                          )}
                         </div>
 
-                        <div className="text-sm text-[var(--text-secondary)] whitespace-pre-line">
-                          {result.feedback}
+                        {/* Feedback */}
+                        <div className="mb-4">
+                          {renderFeedback(result.feedback)}
                         </div>
 
                         {/* LTP Analysis */}
@@ -410,44 +865,90 @@ export default function PracticePage() {
                             <div>
                               <p className="text-xs text-[var(--text-tertiary)] mb-1">Level Score</p>
                               <ProgressBar
-                                value={selectedScenario.ltpAnalysis.levelScore}
+                                value={selectedScenario.ltpAnalysis.level.score}
                                 max={100}
                                 size="sm"
                               />
+                              <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                                {selectedScenario.ltpAnalysis.level.score}%
+                              </p>
                             </div>
                             <div>
                               <p className="text-xs text-[var(--text-tertiary)] mb-1">Trend Score</p>
                               <ProgressBar
-                                value={selectedScenario.ltpAnalysis.trendScore}
+                                value={selectedScenario.ltpAnalysis.trend.score}
                                 max={100}
                                 size="sm"
                               />
+                              <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                                {selectedScenario.ltpAnalysis.trend.score}%
+                              </p>
                             </div>
                             <div>
                               <p className="text-xs text-[var(--text-tertiary)] mb-1">Patience Score</p>
                               <ProgressBar
-                                value={selectedScenario.ltpAnalysis.patienceScore}
+                                value={selectedScenario.ltpAnalysis.patience.score}
                                 max={100}
                                 size="sm"
                               />
+                              <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                                {selectedScenario.ltpAnalysis.patience.score}%
+                              </p>
                             </div>
                           </div>
                         )}
 
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          className="mt-4"
-                          onClick={() => {
-                            setSelectedScenario(null);
-                            setResult(null);
-                          }}
-                        >
-                          Try Another
-                        </Button>
+                        {/* Actions */}
+                        <div className="flex gap-3 mt-6">
+                          {practiceMode === 'quick_drill' ? (
+                            <Button
+                              variant="primary"
+                              onClick={getNextScenario}
+                              icon={<ChevronRight className="w-4 h-4" />}
+                            >
+                              Next Scenario
+                            </Button>
+                          ) : (
+                            <>
+                              <Button
+                                variant="secondary"
+                                onClick={() => {
+                                  setSelectedScenario(null);
+                                  setResult(null);
+                                }}
+                              >
+                                Try Another
+                              </Button>
+                              {selectedScenario.relatedLessonSlug && (
+                                <Button
+                                  variant="ghost"
+                                  icon={<BookOpen className="w-4 h-4" />}
+                                >
+                                  Related Lesson
+                                </Button>
+                              )}
+                              {result.isCorrect && userStats?.currentStreak && userStats.currentStreak >= 5 && (
+                                <Button
+                                  variant="ghost"
+                                  icon={<Share2 className="w-4 h-4" />}
+                                >
+                                  Share Win
+                                </Button>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </div>
                     ) : (
                       <div className="space-y-4">
+                        {/* Context for replay mode */}
+                        {practiceMode === 'replay' && selectedScenario.decisionPoint && (
+                          <div className="p-3 bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-sm text-[var(--text-secondary)]">
+                            <MessageSquare className="w-4 h-4 inline mr-2 text-[var(--accent-primary)]" />
+                            {selectedScenario.decisionPoint.context}
+                          </div>
+                        )}
+
                         <p className="text-center text-[var(--text-secondary)] mb-6">
                           Based on the LTP framework, what is the best action?
                         </p>
@@ -458,7 +959,7 @@ export default function PracticePage() {
                             size="lg"
                             className="flex-col py-6 hover:bg-[var(--profit)]/20 hover:border-[var(--profit)]"
                             onClick={() => submitDecision('long')}
-                            disabled={submitting}
+                            disabled={submitting || (practiceMode === 'replay' && !decisionReached)}
                           >
                             <TrendingUp className="w-8 h-8 mb-2 text-[var(--profit)]" />
                             <span className="text-lg font-bold">LONG</span>
@@ -469,7 +970,7 @@ export default function PracticePage() {
                             size="lg"
                             className="flex-col py-6 hover:bg-[var(--warning)]/20 hover:border-[var(--warning)]"
                             onClick={() => submitDecision('wait')}
-                            disabled={submitting}
+                            disabled={submitting || (practiceMode === 'replay' && !decisionReached)}
                           >
                             <Pause className="w-8 h-8 mb-2 text-[var(--warning)]" />
                             <span className="text-lg font-bold">WAIT</span>
@@ -480,7 +981,7 @@ export default function PracticePage() {
                             size="lg"
                             className="flex-col py-6 hover:bg-[var(--loss)]/20 hover:border-[var(--loss)]"
                             onClick={() => submitDecision('short')}
-                            disabled={submitting}
+                            disabled={submitting || (practiceMode === 'replay' && !decisionReached)}
                           >
                             <TrendingDown className="w-8 h-8 mb-2 text-[var(--loss)]" />
                             <span className="text-lg font-bold">SHORT</span>
@@ -490,7 +991,14 @@ export default function PracticePage() {
                         {submitting && (
                           <div className="text-center py-4">
                             <Loader2 className="w-6 h-6 animate-spin text-[var(--accent-primary)] mx-auto" />
+                            <p className="text-sm text-[var(--text-tertiary)] mt-2">Analyzing your decision...</p>
                           </div>
+                        )}
+
+                        {practiceMode === 'replay' && !decisionReached && (
+                          <p className="text-center text-sm text-[var(--text-tertiary)]">
+                            Wait for the chart to reach the decision point...
+                          </p>
                         )}
                       </div>
                     )}
@@ -502,8 +1010,11 @@ export default function PracticePage() {
                   <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">
                     Select a Scenario
                   </h3>
-                  <p className="text-[var(--text-tertiary)]">
+                  <p className="text-[var(--text-tertiary)] mb-4">
                     Choose a practice scenario from the list to test your LTP skills.
+                  </p>
+                  <p className="text-sm text-[var(--text-tertiary)]">
+                    Current mode: <span className="text-[var(--accent-primary)] font-semibold">{PRACTICE_MODES.find(m => m.id === practiceMode)?.name}</span>
                   </p>
                 </CardContent>
               )}
