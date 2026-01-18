@@ -16,7 +16,8 @@ BEGIN
   END IF;
 END $$;
 
--- Update get_latest_briefing function to include earnings
+-- Drop and recreate get_latest_briefing function to include earnings
+DROP FUNCTION IF EXISTS get_latest_briefing(TEXT);
 CREATE OR REPLACE FUNCTION get_latest_briefing(p_type TEXT DEFAULT 'morning')
 RETURNS TABLE (
   id UUID,
