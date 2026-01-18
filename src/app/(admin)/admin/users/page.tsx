@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Header } from '@/components/layout/header';
 import { PageShell, PageSection } from '@/components/layout/page-shell';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -31,6 +31,20 @@ import {
   Shield,
   Trash2,
 } from 'lucide-react';
+
+interface User {
+  id: string;
+  username: string;
+  discord_id: string;
+  email: string;
+  experience_level: string;
+  total_questions_asked: number;
+  total_quizzes_taken: number;
+  current_streak: number;
+  joined_at: string;
+  last_active: string;
+  is_admin: boolean;
+}
 
 // Mock user data
 const mockUsers = [
@@ -78,11 +92,93 @@ const mockUsers = [
 export default function UsersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [users, setUsers] = useState<User[]>(mockUsers);
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
 
-  const filteredUsers = mockUsers.filter((user) =>
+  const filteredUsers = users.filter((user) =>
     user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
     user.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Export users to CSV
+  const handleExport = useCallback(() => {
+    const headers = ['Username', 'Email', 'Level', 'Questions', 'Quizzes', 'Streak', 'Joined', 'Last Active'];
+    const rows = filteredUsers.map(user => [
+      user.username,
+      user.email,
+      user.experience_level,
+      user.total_questions_asked.toString(),
+      user.total_quizzes_taken.toString(),
+      user.current_streak.toString(),
+      new Date(user.joined_at).toLocaleDateString(),
+      new Date(user.last_active).toLocaleDateString(),
+    ]);
+
+    const csv = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `users-export-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [filteredUsers]);
+
+  // Send message to user (opens mailto)
+  const handleSendMail = useCallback((user: User) => {
+    window.location.href = `mailto:${user.email}?subject=KCU Coach - Message for ${user.username}`;
+  }, []);
+
+  // Toggle admin status
+  const handleToggleAdmin = useCallback(async (user: User) => {
+    const newAdminStatus = !user.is_admin;
+    const action = newAdminStatus ? 'grant admin privileges to' : 'revoke admin privileges from';
+
+    if (!confirm(`Are you sure you want to ${action} ${user.username}?`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_admin: newAdminStatus }),
+      });
+
+      if (res.ok) {
+        setUsers(prev => prev.map(u =>
+          u.id === user.id ? { ...u, is_admin: newAdminStatus } : u
+        ));
+      } else {
+        alert('Failed to update user permissions');
+      }
+    } catch (error) {
+      console.error('Error updating user:', error);
+      alert('Failed to update user permissions');
+    }
+  }, []);
+
+  // Delete user
+  const handleDeleteUser = useCallback(async (user: User) => {
+    if (!confirm(`Are you sure you want to delete ${user.username}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        setUsers(prev => prev.filter(u => u.id !== user.id));
+      } else {
+        alert('Failed to delete user');
+      }
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      alert('Failed to delete user');
+    }
+  }, []);
 
   return (
     <>
@@ -91,7 +187,12 @@ export default function UsersPage() {
         subtitle="Manage Discord users and their progress"
         breadcrumbs={[{ label: 'Admin' }, { label: 'Users' }]}
         actions={
-          <Button variant="primary" size="sm" icon={<Download className="w-4 h-4" />}>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Download className="w-4 h-4" />}
+            onClick={handleExport}
+          >
             Export
           </Button>
         }
@@ -148,7 +249,12 @@ export default function UsersPage() {
                       leftIcon={<Search className="w-4 h-4" />}
                     />
                   </div>
-                  <Button variant="ghost" size="sm" icon={<Filter className="w-4 h-4" />}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<Filter className="w-4 h-4" />}
+                    onClick={() => setShowFilterMenu(!showFilterMenu)}
+                  >
                     Filter
                   </Button>
                 </div>
@@ -214,13 +320,29 @@ export default function UsersPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
-                        <button className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
+                        <button
+                          className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                          onClick={() => handleSendMail(user)}
+                          title={`Send email to ${user.username}`}
+                        >
                           <Mail className="w-4 h-4" />
                         </button>
-                        <button className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--accent-primary)]">
+                        <button
+                          className={`p-1.5 hover:text-[var(--accent-primary)] ${
+                            user.is_admin
+                              ? 'text-[var(--accent-primary)]'
+                              : 'text-[var(--text-tertiary)]'
+                          }`}
+                          onClick={() => handleToggleAdmin(user)}
+                          title={user.is_admin ? 'Revoke admin' : 'Grant admin'}
+                        >
                           <Shield className="w-4 h-4" />
                         </button>
-                        <button className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--error)]">
+                        <button
+                          className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--error)]"
+                          onClick={() => handleDeleteUser(user)}
+                          title={`Delete ${user.username}`}
+                        >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>

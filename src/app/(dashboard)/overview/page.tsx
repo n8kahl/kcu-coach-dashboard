@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/header';
 import { PageShell, PageSection, Grid } from '@/components/layout/page-shell';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -65,6 +66,7 @@ interface DashboardData {
 }
 
 export default function OverviewPage() {
+  const router = useRouter();
   const [data, setData] = useState<DashboardData>({
     user: null,
     stats: emptyStats,
@@ -181,7 +183,12 @@ export default function OverviewPage() {
         subtitle={`Welcome back, ${username}`}
         breadcrumbs={[{ label: 'Dashboard' }, { label: 'Overview' }]}
         actions={
-          <Button variant="primary" size="sm" icon={<Share2 className="w-4 h-4" />}>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Share2 className="w-4 h-4" />}
+            onClick={() => router.push('/win-cards')}
+          >
             Share Progress
           </Button>
         }
@@ -304,7 +311,11 @@ export default function OverviewPage() {
                 ) : (
                   <div className="text-center py-6">
                     <p className="text-[var(--text-tertiary)] mb-4">Start your learning journey</p>
-                    <Button variant="primary" icon={<BookOpen className="w-4 h-4" />}>
+                    <Button
+                      variant="primary"
+                      icon={<BookOpen className="w-4 h-4" />}
+                      onClick={() => router.push('/learning')}
+                    >
                       Begin Learning
                     </Button>
                   </div>
@@ -326,13 +337,28 @@ export default function OverviewPage() {
               <CardHeader title="Quick Actions" />
               <CardContent>
                 <div className="space-y-2">
-                  <Button variant="secondary" className="w-full justify-start" icon={<BookOpen className="w-4 h-4" />}>
+                  <Button
+                    variant="secondary"
+                    className="w-full justify-start"
+                    icon={<BookOpen className="w-4 h-4" />}
+                    onClick={() => router.push('/journal')}
+                  >
                     Log a Trade
                   </Button>
-                  <Button variant="secondary" className="w-full justify-start" icon={<Target className="w-4 h-4" />}>
+                  <Button
+                    variant="secondary"
+                    className="w-full justify-start"
+                    icon={<Target className="w-4 h-4" />}
+                    onClick={() => router.push('/learning')}
+                  >
                     Take a Quiz
                   </Button>
-                  <Button variant="secondary" className="w-full justify-start" icon={<Share2 className="w-4 h-4" />}>
+                  <Button
+                    variant="secondary"
+                    className="w-full justify-start"
+                    icon={<Share2 className="w-4 h-4" />}
+                    onClick={() => router.push('/win-cards')}
+                  >
                     Create Win Card
                   </Button>
                 </div>

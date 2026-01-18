@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -27,6 +27,18 @@ import {
 } from 'lucide-react';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+
+// Logout handler
+async function handleLogout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
+  } catch (error) {
+    console.error('Logout failed:', error);
+    // Force redirect even on error
+    window.location.href = '/login';
+  }
+}
 
 interface NavItem {
   label: string;
@@ -231,7 +243,11 @@ export function Sidebar({ user }: SidebarProps) {
             </div>
           )}
           {!isCollapsed && (
-            <button className="p-2 text-[var(--text-tertiary)] hover:text-[var(--error)] transition-colors">
+            <button
+              onClick={handleLogout}
+              className="p-2 text-[var(--text-tertiary)] hover:text-[var(--error)] transition-colors"
+              title="Log out"
+            >
               <LogOut className="w-4 h-4" />
             </button>
           )}
@@ -374,7 +390,11 @@ export function MobileSidebar({ user }: SidebarProps) {
                     {user?.is_admin ? 'Admin' : 'Member'}
                   </p>
                 </div>
-                <button className="p-2 text-[var(--text-tertiary)] hover:text-[var(--error)] transition-colors">
+                <button
+                  onClick={handleLogout}
+                  className="p-2 text-[var(--text-tertiary)] hover:text-[var(--error)] transition-colors"
+                  title="Log out"
+                >
                   <LogOut className="w-4 h-4" />
                 </button>
               </div>

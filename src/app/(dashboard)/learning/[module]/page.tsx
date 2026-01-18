@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/header';
 import { PageShell } from '@/components/layout/page-shell';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -67,6 +67,7 @@ function formatDuration(seconds: number): string {
 }
 
 export default function ModulePage() {
+  const router = useRouter();
   const params = useParams();
   const moduleSlug = params.module as string;
   const module = getModuleBySlug(moduleSlug);
@@ -382,6 +383,11 @@ export default function ModulePage() {
                     variant={progressPercent === 100 ? 'primary' : 'secondary'}
                     fullWidth
                     disabled={progressPercent < 100}
+                    onClick={() => {
+                      if (progressPercent === 100) {
+                        router.push(`/learning/${module.slug}/quiz`);
+                      }
+                    }}
                   >
                     {progressPercent === 100 ? 'Take Quiz' : 'Complete All Lessons First'}
                   </Button>
