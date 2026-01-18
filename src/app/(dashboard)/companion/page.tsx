@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { useCompanionStream, type CompanionEvent } from '@/hooks/useCompanionStream';
 import { Button } from '@/components/ui/button';
+import { CompanionSessionReport } from '@/components/companion/session-report';
 import {
   Plus,
   X,
@@ -24,6 +25,10 @@ import {
   ChevronDown,
   ChevronUp,
   Activity,
+  MessageSquare,
+  Play,
+  Sparkles,
+  Send,
 } from 'lucide-react';
 
 interface WatchlistSymbol {
@@ -83,6 +88,14 @@ interface MarketStatus {
   timeToClose: string;
 }
 
+interface CompanionMessage {
+  id: string;
+  message_type: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
 export default function CompanionPage() {
   const [watchlist, setWatchlist] = useState<WatchlistSymbol[]>([]);
   const [setups, setSetups] = useState<DetectedSetup[]>([]);
@@ -91,6 +104,12 @@ export default function CompanionPage() {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<CompanionMessage[]>([]);
+  const [showMessages, setShowMessages] = useState(false);
+  const [userQuestion, setUserQuestion] = useState('');
+  const [askingQuestion, setAskingQuestion] = useState(false);
+  const sessionStartTime = useRef<Date | null>(null);
 
   // Handle real-time SSE events
   const handleStreamEvent = useCallback((event: CompanionEvent) => {
@@ -149,6 +168,40 @@ export default function CompanionPage() {
     onEvent: handleStreamEvent,
   });
 
+  // Start/end session tracking
+  useEffect(() => {
+    const startSession = async () => {
+      try {
+        const res = await fetch('/api/companion/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setSessionId(data.sessionId);
+          sessionStartTime.current = new Date();
+        }
+      } catch (error) {
+        console.error('Error starting companion session:', error);
+      }
+    };
+
+    startSession();
+    fetchMessages();
+
+    // End session on unmount
+    return () => {
+      if (sessionId) {
+        fetch('/api/companion/session', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, action: 'end' })
+        }).catch(() => {});
+      }
+    };
+  }, []);
+
   useEffect(() => {
     fetchWatchlist();
     fetchSetups();
@@ -157,6 +210,7 @@ export default function CompanionPage() {
     const interval = setInterval(() => {
       fetchSetups();
       fetchMarketStatus();
+      fetchMessages();
     }, streamConnected ? 60000 : 30000);
 
     return () => clearInterval(interval);
@@ -193,6 +247,87 @@ export default function CompanionPage() {
       }
     } catch (error) {
       // Silently fail - market status is optional
+    }
+  };
+
+  const fetchMessages = async () => {
+    try {
+      const res = await fetch('/api/companion/messages?limit=20');
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(data.messages || []);
+      }
+    } catch (error) {
+      console.error('Error fetching messages:', error);
+    }
+  };
+
+  const askCompanionQuestion = async () => {
+    if (!userQuestion.trim()) return;
+    setAskingQuestion(true);
+    try {
+      const context = {
+        currentSetups: setups.slice(0, 5).map(s => ({
+          symbol: s.symbol,
+          direction: s.direction,
+          confluence: s.confluence_score,
+          stage: s.setup_stage
+        })),
+        watchlist: watchlist.map(w => w.symbol),
+        marketOpen: marketStatus?.isOpen
+      };
+
+      const res = await fetch('/api/companion/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: userQuestion,
+          context
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(prev => [data.message, ...prev]);
+        setUserQuestion('');
+      }
+    } catch (error) {
+      console.error('Error asking question:', error);
+    } finally {
+      setAskingQuestion(false);
+    }
+  };
+
+  const createPracticeFromSetup = async (setup: DetectedSetup) => {
+    try {
+      const res = await fetch('/api/companion/practice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          setupId: setup.id,
+          symbol: setup.symbol,
+          direction: setup.direction,
+          confluenceScore: setup.confluence_score,
+          levelScore: setup.level_score,
+          trendScore: setup.trend_score,
+          patienceScore: setup.patience_score,
+          primaryLevelType: setup.primary_level_type,
+          primaryLevelPrice: setup.primary_level_price,
+          suggestedEntry: setup.suggested_entry,
+          suggestedStop: setup.suggested_stop,
+          target1: setup.target_1,
+          target2: setup.target_2,
+          coachNote: setup.coach_note
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        // Navigate to practice with the new scenario
+        window.location.href = `/practice?scenario=${data.scenario.id}`;
+      }
+    } catch (error) {
+      console.error('Error creating practice scenario:', error);
     }
   };
 
@@ -286,7 +421,7 @@ export default function CompanionPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {readySetups.map((setup) => (
-                  <SetupCard key={setup.id} setup={setup} variant="ready" />
+                  <SetupCard key={setup.id} setup={setup} variant="ready" onPractice={() => createPracticeFromSetup(setup)} />
                 ))}
               </div>
             </section>
@@ -303,7 +438,7 @@ export default function CompanionPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {formingSetups.map((setup) => (
-                  <SetupCard key={setup.id} setup={setup} variant="forming" />
+                  <SetupCard key={setup.id} setup={setup} variant="forming" onPractice={() => createPracticeFromSetup(setup)} />
                 ))}
               </div>
             </section>
@@ -331,6 +466,80 @@ export default function CompanionPage() {
           )}
         </div>
       </div>
+
+      {/* AI Companion Chat Panel */}
+      <div className="bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
+        <div
+          className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-[var(--bg-tertiary)]"
+          onClick={() => setShowMessages(!showMessages)}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-[var(--accent-primary)]/10 flex items-center justify-center">
+              <Sparkles className="w-4 h-4 text-[var(--accent-primary)]" />
+            </div>
+            <div>
+              <span className="font-semibold text-[var(--text-primary)]">AI Companion</span>
+              <span className="text-xs text-[var(--text-tertiary)] ml-2">Ask about setups, LTP analysis, or trading guidance</span>
+            </div>
+            {messages.length > 0 && (
+              <span className="px-2 py-0.5 bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] text-xs font-medium">
+                {messages.length} messages
+              </span>
+            )}
+          </div>
+          {showMessages ? <ChevronUp className="w-4 h-4 text-[var(--text-tertiary)]" /> : <ChevronDown className="w-4 h-4 text-[var(--text-tertiary)]" />}
+        </div>
+
+        {showMessages && (
+          <div className="border-t border-[var(--border-primary)]">
+            {/* Question Input */}
+            <div className="p-4 bg-[var(--bg-tertiary)]">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Ask about a setup, LTP analysis, or trading question..."
+                  value={userQuestion}
+                  onChange={(e) => setUserQuestion(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && askCompanionQuestion()}
+                  disabled={askingQuestion}
+                  className="flex-1 px-4 py-2 text-sm bg-[var(--bg-primary)] border border-[var(--border-primary)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:border-[var(--accent-primary)] focus:outline-none disabled:opacity-50"
+                />
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={askCompanionQuestion}
+                  disabled={askingQuestion || !userQuestion.trim()}
+                  icon={askingQuestion ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                >
+                  {askingQuestion ? 'Thinking...' : 'Ask'}
+                </Button>
+              </div>
+            </div>
+
+            {/* Messages List */}
+            <div className="max-h-80 overflow-y-auto">
+              {messages.length > 0 ? (
+                <div className="divide-y divide-[var(--border-primary)]">
+                  {messages.map((msg) => (
+                    <CompanionMessageCard key={msg.id} message={msg} />
+                  ))}
+                </div>
+              ) : (
+                <div className="p-8 text-center">
+                  <MessageSquare className="w-10 h-10 mx-auto mb-2 text-[var(--text-tertiary)] opacity-30" />
+                  <p className="text-sm text-[var(--text-tertiary)]">No messages yet</p>
+                  <p className="text-xs text-[var(--text-tertiary)] opacity-70 mt-1">
+                    Ask about your setups or get LTP guidance
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Session Report */}
+      <CompanionSessionReport />
     </div>
   );
 }
@@ -679,9 +888,54 @@ function ScoreBarMini({ scores }: { scores: number[] }) {
 }
 
 // ============================================================================
+// COMPANION MESSAGE CARD
+// ============================================================================
+function CompanionMessageCard({ message }: { message: CompanionMessage }) {
+  const getMessageIcon = (type: string) => {
+    switch (type) {
+      case 'setup_alert': return <Target className="w-4 h-4" />;
+      case 'coaching': return <Sparkles className="w-4 h-4" />;
+      case 'market_context': return <BarChart3 className="w-4 h-4" />;
+      case 'answer': return <MessageSquare className="w-4 h-4" />;
+      default: return <MessageSquare className="w-4 h-4" />;
+    }
+  };
+
+  const getMessageStyle = (type: string) => {
+    switch (type) {
+      case 'setup_alert': return 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]';
+      case 'coaching': return 'bg-[var(--success)]/10 text-[var(--success)]';
+      case 'market_context': return 'bg-[var(--warning)]/10 text-[var(--warning)]';
+      default: return 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]';
+    }
+  };
+
+  return (
+    <div className="p-4 hover:bg-[var(--bg-tertiary)]/50 transition-colors">
+      <div className="flex items-start gap-3">
+        <div className={cn('p-2 rounded', getMessageStyle(message.message_type))}>
+          {getMessageIcon(message.message_type)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-[var(--text-primary)] whitespace-pre-wrap">{message.content}</p>
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-xs text-[var(--text-tertiary)]">
+              {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+            <span className="text-xs text-[var(--text-tertiary)] capitalize">
+              {message.message_type.replace('_', ' ')}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // SETUP CARD
 // ============================================================================
-function SetupCard({ setup, variant }: { setup: DetectedSetup; variant: 'ready' | 'forming' }) {
+function SetupCard({ setup, variant, onPractice }: { setup: DetectedSetup; variant: 'ready' | 'forming'; onPractice?: () => void }) {
   const isReady = variant === 'ready';
   const isBullish = setup.direction === 'bullish';
 
@@ -793,6 +1047,16 @@ function SetupCard({ setup, variant }: { setup: DetectedSetup; variant: 'ready' 
           <Bell className="w-4 h-4" />
           {isReady ? 'Alert Entry' : 'Watch'}
         </button>
+        {onPractice && (
+          <button
+            onClick={onPractice}
+            className="px-3 py-2 bg-[var(--success)]/10 text-[var(--success)] hover:bg-[var(--success)]/20 transition-colors flex items-center gap-1"
+            title="Practice this setup"
+          >
+            <Play className="w-4 h-4" />
+            <span className="text-xs font-medium">Practice</span>
+          </button>
+        )}
         <button
           onClick={() => {
             const tvSymbol = setup.symbol.includes(':') ? setup.symbol : `NASDAQ:${setup.symbol}`;
