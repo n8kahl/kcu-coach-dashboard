@@ -22,26 +22,28 @@ export async function GET(request: NextRequest) {
     // Exchange code for Discord user info
     const discordUser = await exchangeDiscordCode(code);
 
-    // Check if user exists in our database
+    // Check if user exists in our database (using user_profiles table)
     let { data: user } = await supabaseAdmin
-      .from('users')
+      .from('user_profiles')
       .select('*')
       .eq('discord_id', discordUser.id)
       .single();
 
     if (!user) {
-      // Create new user
+      // Create new user in user_profiles table
       const { data: newUser, error: createError } = await supabaseAdmin
-        .from('users')
+        .from('user_profiles')
         .insert({
           discord_id: discordUser.id,
-          email: discordUser.email,
-          username: discordUser.username,
-          avatar: discordUser.avatar
+          discord_username: discordUser.username,
+          avatar_url: discordUser.avatar
             ? `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`
             : null,
-          subscription_tier: 'free',
+          experience_level: 'beginner',
           is_admin: false,
+          streak_days: 0,
+          total_quizzes: 0,
+          current_module: 1,
         })
         .select()
         .single();
@@ -55,11 +57,10 @@ export async function GET(request: NextRequest) {
     } else {
       // Update existing user info
       await supabaseAdmin
-        .from('users')
+        .from('user_profiles')
         .update({
-          email: discordUser.email,
-          username: discordUser.username,
-          avatar: discordUser.avatar
+          discord_username: discordUser.username,
+          avatar_url: discordUser.avatar
             ? `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`
             : null,
           updated_at: new Date().toISOString(),
@@ -67,13 +68,13 @@ export async function GET(request: NextRequest) {
         .eq('id', user.id);
     }
 
-    // Set session cookie
+    // Set session cookie (map user_profiles fields to session fields)
     await setSessionCookie({
       userId: user.id,
       discordId: user.discord_id,
-      username: user.username,
-      avatar: user.avatar,
-      isAdmin: user.is_admin,
+      username: user.discord_username,
+      avatar: user.avatar_url,
+      isAdmin: user.is_admin || false,
     });
 
     // Redirect to dashboard
