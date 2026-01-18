@@ -11,9 +11,8 @@ export default function LoginPage() {
   const router = useRouter();
 
   const handleLogin = () => {
-    // For now, redirect directly to dashboard
-    // In production, this would trigger Discord OAuth
-    router.push('/overview');
+    // Trigger Discord OAuth flow
+    window.location.href = '/api/auth/discord';
   };
 
   return (
