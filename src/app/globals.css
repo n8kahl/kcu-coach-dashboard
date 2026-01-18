@@ -1,4 +1,6 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* KCU Coach Design System
  * Matches v0-kcu.vercel.app aesthetic:
@@ -77,20 +79,7 @@
   --duration-slow: 400ms;
 }
 
-@theme inline {
-  --color-background: var(--bg-primary);
-  --color-foreground: var(--text-primary);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
-
-  /* Custom color palette for Tailwind */
-  --color-kcu-gold: #f59e0b;
-  --color-kcu-gold-dark: #d97706;
-  --color-kcu-gold-muted: #92400e;
-  --color-kcu-dark: #0d0d0d;
-  --color-kcu-card: #161616;
-  --color-kcu-border: #2a2a2a;
-}
+/* Custom color palette available via CSS variables above */
 
 /* Base styles */
 html {
