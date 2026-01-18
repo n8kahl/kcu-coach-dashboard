@@ -24,6 +24,8 @@ import {
   Palette,
   GraduationCap,
   Target,
+  Dumbbell,
+  MessageSquare,
 } from 'lucide-react';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -51,7 +53,9 @@ interface NavItem {
 const userNavItems: NavItem[] = [
   { label: 'Overview', href: '/overview', icon: LayoutDashboard },
   { label: 'Companion', href: '/companion', icon: Target },
-  { label: 'Learning', href: '/learning', icon: GraduationCap, badge: 'New' },
+  { label: 'Practice', href: '/practice', icon: Dumbbell, badge: 'New' },
+  { label: 'AI Coach', href: '/coach', icon: MessageSquare },
+  { label: 'Learning', href: '/learning', icon: GraduationCap },
   { label: 'Progress', href: '/progress', icon: TrendingUp },
   { label: 'Trade Journal', href: '/journal', icon: BookOpen },
   { label: 'Achievements', href: '/achievements', icon: Trophy },

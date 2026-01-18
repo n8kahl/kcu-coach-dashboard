@@ -10,7 +10,9 @@
       "Bash(xargs:*)",
       "Bash(npm install:*)",
       "Bash(npx supabase:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(wc:*)"
     ]
   }
 }
