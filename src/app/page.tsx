@@ -1,170 +1,208 @@
 'use client';
 
+import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { ArrowRight, Bot, BookOpen, LineChart, Target, Zap, Shield } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import {
+  TrendingUp,
+  BookOpen,
+  Trophy,
+  Share2,
+  Users,
+  Bot,
+  ChevronRight,
+  Zap,
+  Target,
+  Flame,
+} from 'lucide-react';
 
-export default function LandingPage() {
+export default function HomePage() {
   return (
-    <div className="min-h-screen bg-dark-bg">
+    <div className="min-h-screen bg-[var(--bg-primary)] bg-hex-pattern">
       {/* Hero Section */}
-      <div className="relative overflow-hidden">
-        {/* Background gradient */}
-        <div className="absolute inset-0 bg-gradient-to-br from-primary-900/20 via-dark-bg to-accent-900/20" />
-        <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10" />
+      <header className="relative overflow-hidden">
+        {/* Gradient overlay */}
+        <div className="absolute inset-0 bg-gradient-to-b from-[var(--accent-primary)]/10 via-transparent to-transparent" />
 
-        {/* Navigation */}
-        <nav className="relative z-10 flex items-center justify-between px-6 py-4 lg:px-12">
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center">
-              <Bot className="w-6 h-6 text-white" />
+        <div className="max-w-6xl mx-auto px-6 py-8">
+          {/* Nav */}
+          <nav className="flex items-center justify-between mb-16">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl font-bold text-[var(--accent-primary)]">KCU</span>
+              <span className="text-lg font-medium text-[var(--text-secondary)]">COACH</span>
             </div>
-            <span className="text-xl font-bold text-white">KCU Coach</span>
-          </div>
-          <Link
-            href="/login"
-            className="btn-primary flex items-center gap-2"
-          >
-            Login with Discord
-            <ArrowRight className="w-4 h-4" />
-          </Link>
-        </nav>
-
-        {/* Hero Content */}
-        <div className="relative z-10 max-w-7xl mx-auto px-6 pt-20 pb-32 lg:px-12">
-          <div className="text-center max-w-4xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-500/10 border border-primary-500/20 text-primary-400 text-sm mb-8">
-              <Zap className="w-4 h-4" />
-              Powered by AI & KCU Methodology
-            </div>
-
-            <h1 className="text-5xl lg:text-7xl font-bold text-white mb-6 leading-tight">
-              Your AI Trading{' '}
-              <span className="text-gradient">Companion</span>
-            </h1>
-
-            <p className="text-xl text-gray-400 mb-10 max-w-2xl mx-auto">
-              Master the LTP framework with real-time AI coaching, automated setup detection,
-              and intelligent trade journaling. Trade with confidence, learn faster.
-            </p>
-
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <div className="flex items-center gap-4">
               <Link
-                href="/login"
-                className="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-primary-600 to-accent-600 hover:from-primary-500 hover:to-accent-500 text-white font-semibold rounded-xl transition-all duration-200 flex items-center justify-center gap-2 shadow-lg shadow-primary-500/25"
+                href="/overview"
+                className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
               >
-                Start Trading Smarter
-                <ArrowRight className="w-5 h-5" />
+                Dashboard
               </Link>
-              <a
-                href="https://discord.gg/kingcartel"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full sm:w-auto px-8 py-4 bg-dark-card hover:bg-dark-border text-white font-semibold rounded-xl border border-dark-border transition-all duration-200 flex items-center justify-center gap-2"
-              >
-                Join Discord
-              </a>
+              <Link href="/login">
+                <Button variant="primary" size="sm">
+                  Login with Discord
+                </Button>
+              </Link>
             </div>
+          </nav>
+
+          {/* Hero Content */}
+          <div className="text-center max-w-4xl mx-auto">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+            >
+              <Badge variant="gold" size="md" className="mb-6">
+                KAY CAPITALS UNIVERSITY
+              </Badge>
+            </motion.div>
+
+            <motion.h1
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.1 }}
+              className="text-5xl md:text-7xl font-bold text-[var(--text-primary)] mb-6"
+            >
+              STOP LOSING.
+              <br />
+              <span className="text-[var(--accent-primary)] glow-text-gold">START PRINTING.</span>
+            </motion.h1>
+
+            <motion.p
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+              className="text-lg text-[var(--text-secondary)] mb-8 max-w-2xl mx-auto"
+            >
+              Master the LTP Framework with AI-powered coaching. Track your progress,
+              log your trades, and share your wins with the community.
+            </motion.p>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.3 }}
+              className="flex items-center justify-center gap-4"
+            >
+              <a href="https://discord.gg/kaycapitals" target="_blank" rel="noopener noreferrer">
+                <Button variant="primary" size="lg" icon={<Bot className="w-5 h-5" />}>
+                  Join Discord
+                </Button>
+              </a>
+              <Link href="/overview">
+                <Button variant="secondary" size="lg" icon={<ChevronRight className="w-5 h-5" />} iconPosition="right">
+                  View Dashboard
+                </Button>
+              </Link>
+            </motion.div>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Features Section */}
-      <section className="py-24 px-6 lg:px-12">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
-              Everything You Need to Trade Better
-            </h2>
-            <p className="text-gray-400 max-w-2xl mx-auto">
-              Built by traders, for traders. Every feature designed to help you master the KCU methodology.
-            </p>
-          </div>
+      {/* Features Grid */}
+      <section className="max-w-6xl mx-auto px-6 py-20">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold text-[var(--text-primary)] mb-4">
+            LEVELS • TRENDS • PATIENCE CANDLES
+          </h2>
+          <p className="text-[var(--text-tertiary)]">
+            Everything you need to master day trading
+          </p>
+        </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <FeatureCard
-              icon={<Target className="w-6 h-6" />}
-              title="Companion Mode"
-              description="Real-time setup detection with LTP scoring. Get alerted when high-confluence setups are forming on your watchlist."
-              href="/companion"
-              gradient="from-green-500 to-emerald-500"
-            />
-            <FeatureCard
-              icon={<Bot className="w-6 h-6" />}
-              title="AI Coach"
-              description="Your personal trading mentor powered by AI. Get guidance during trades, review your performance, and learn from mistakes."
-              href="/coach"
-              gradient="from-primary-500 to-blue-500"
-            />
-            <FeatureCard
-              icon={<LineChart className="w-6 h-6" />}
-              title="Trade Journal"
-              description="Automatic journaling from followed alerts. Track emotions, mistakes, and lessons with detailed analytics."
-              href="/journal"
-              gradient="from-accent-500 to-pink-500"
-            />
-            <FeatureCard
-              icon={<BookOpen className="w-6 h-6" />}
-              title="Learning Center"
-              description="Master the LTP framework, ORB breakouts, and order flow. Interactive lessons with quizzes and progress tracking."
-              href="/progress"
-              gradient="from-yellow-500 to-orange-500"
-            />
-            <FeatureCard
-              icon={<Zap className="w-6 h-6" />}
-              title="Live Alerts"
-              description="Follow admin calls in real-time. Loading, Entering, Adding, TP, Exit - never miss an opportunity."
-              href="/alerts"
-              gradient="from-red-500 to-rose-500"
-            />
-            <FeatureCard
-              icon={<Shield className="w-6 h-6" />}
-              title="Risk Management"
-              description="Position sizing calculator, stop loss guidance, and portfolio heat tracking to protect your capital."
-              href="/risk"
-              gradient="from-cyan-500 to-teal-500"
-            />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <FeatureCard
+            icon={<Bot className="w-6 h-6" />}
+            title="AI Trading Coach"
+            description="Get instant answers to your trading questions powered by Claude AI and KCU knowledge base"
+            badge="Discord Bot"
+            href="/overview"
+          />
+          <FeatureCard
+            icon={<BookOpen className="w-6 h-6" />}
+            title="Learning Progress"
+            description="Track your journey through the LTP framework with quizzes and interactive lessons"
+            href="/progress"
+          />
+          <FeatureCard
+            icon={<TrendingUp className="w-6 h-6" />}
+            title="Trade Journal"
+            description="Log your trades, track LTP compliance, and get AI-powered insights on your performance"
+            href="/journal"
+          />
+          <FeatureCard
+            icon={<Trophy className="w-6 h-6" />}
+            title="Achievements"
+            description="Earn badges and track milestones as you develop discipline and consistency"
+            href="/achievements"
+          />
+          <FeatureCard
+            icon={<Users className="w-6 h-6" />}
+            title="Leaderboard"
+            description="Compete with other traders and climb the weekly rankings"
+            href="/leaderboard"
+          />
+          <FeatureCard
+            icon={<Share2 className="w-6 h-6" />}
+            title="Win Cards"
+            description="Create and share beautiful branded cards celebrating your trading wins"
+            badge="New"
+            href="/win-cards"
+          />
+        </div>
+      </section>
+
+      {/* Stats Section */}
+      <section className="bg-[var(--bg-secondary)] border-y border-[var(--border-primary)] py-16">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
+            <StatItem value="1,200+" label="Active Traders" />
+            <StatItem value="50,000+" label="Questions Answered" />
+            <StatItem value="15,000+" label="Trades Logged" />
+            <StatItem value="85%" label="Avg LTP Compliance" />
           </div>
         </div>
       </section>
 
       {/* CTA Section */}
-      <section className="py-24 px-6 lg:px-12">
-        <div className="max-w-4xl mx-auto">
-          <div className="glass-card p-12 text-center gradient-border">
-            <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
-              Ready to Level Up Your Trading?
+      <section className="max-w-6xl mx-auto px-6 py-20">
+        <Card variant="glow" className="text-center py-12 px-8">
+          <CardContent>
+            <Flame className="w-12 h-12 text-[var(--accent-primary)] mx-auto mb-4" />
+            <h2 className="text-3xl font-bold text-[var(--text-primary)] mb-4">
+              Ready to Start Printing?
             </h2>
-            <p className="text-gray-400 mb-8 max-w-xl mx-auto">
-              Join traders who are using AI-powered tools to trade smarter, learn faster, and achieve consistency.
+            <p className="text-[var(--text-secondary)] mb-8 max-w-xl mx-auto">
+              Join the KCU Discord server and start your journey to becoming a disciplined,
+              profitable day trader with the LTP framework.
             </p>
-            <Link
-              href="/login"
-              className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-primary-600 to-accent-600 hover:from-primary-500 hover:to-accent-500 text-white font-semibold rounded-xl transition-all duration-200 shadow-lg shadow-primary-500/25"
-            >
-              Get Started Free
-              <ArrowRight className="w-5 h-5" />
-            </Link>
-          </div>
-        </div>
+            <a href="https://discord.gg/kaycapitals" target="_blank" rel="noopener noreferrer">
+              <Button variant="primary" size="lg" icon={<Bot className="w-5 h-5" />}>
+                Join KCU Discord
+              </Button>
+            </a>
+          </CardContent>
+        </Card>
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-dark-border py-12 px-6 lg:px-12">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      <footer className="border-t border-[var(--border-primary)] py-8">
+        <div className="max-w-6xl mx-auto px-6 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center">
-              <Bot className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-semibold text-white">KCU Coach</span>
+            <span className="text-lg font-bold text-[var(--accent-primary)]">KCU</span>
+            <span className="text-sm text-[var(--text-tertiary)]">COACH</span>
           </div>
-          <p className="text-gray-500 text-sm">
-            © {new Date().getFullYear()} KCU Coach. Not financial advice.
+          <p className="text-xs text-[var(--text-muted)]">
+            © 2024 Kay Capitals University. All rights reserved.
           </p>
-          <div className="flex items-center gap-6 text-sm text-gray-400">
-            <a href="https://discord.gg/kingcartel" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">
+          <div className="flex items-center gap-4">
+            <a href="https://discord.gg/kaycapitals" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
               Discord
             </a>
-            <a href="https://twitter.com/kingcartel" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">
+            <a href="https://twitter.com/kaycapitals" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
               Twitter
             </a>
           </div>
@@ -178,24 +216,52 @@ function FeatureCard({
   icon,
   title,
   description,
+  badge,
   href,
-  gradient,
 }: {
   icon: React.ReactNode;
   title: string;
   description: string;
-  href: string;
-  gradient: string;
+  badge?: string;
+  href?: string;
 }) {
-  return (
-    <Link href={href} className="block">
-      <div className="glass-card-hover p-6 h-full">
-        <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center text-white mb-4`}>
-          {icon}
+  const content = (
+    <Card hoverable className="h-full cursor-pointer">
+      <CardContent>
+        <div className="flex items-start justify-between mb-4">
+          <div className="w-12 h-12 bg-[var(--accent-primary-glow)] flex items-center justify-center text-[var(--accent-primary)]">
+            {icon}
+          </div>
+          {badge && <Badge variant="gold" size="sm">{badge}</Badge>}
         </div>
-        <h3 className="text-lg font-semibold text-white mb-2">{title}</h3>
-        <p className="text-gray-400 text-sm">{description}</p>
-      </div>
-    </Link>
+        <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">{title}</h3>
+        <p className="text-sm text-[var(--text-tertiary)]">{description}</p>
+      </CardContent>
+    </Card>
+  );
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      transition={{ duration: 0.5 }}
+    >
+      {href ? <Link href={href}>{content}</Link> : content}
+    </motion.div>
+  );
+}
+
+function StatItem({ value, label }: { value: string; label: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      whileInView={{ opacity: 1, scale: 1 }}
+      viewport={{ once: true }}
+      transition={{ duration: 0.5 }}
+    >
+      <p className="text-4xl font-bold text-[var(--accent-primary)] mb-2">{value}</p>
+      <p className="text-sm text-[var(--text-tertiary)]">{label}</p>
+    </motion.div>
   );
 }

@@ -2,34 +2,55 @@
 
 import { forwardRef } from 'react';
 import { cn } from '@/lib/utils';
+import { motion, type HTMLMotionProps } from 'framer-motion';
 
-export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps extends Omit<HTMLMotionProps<'button'>, 'ref'> {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'success';
   size?: 'sm' | 'md' | 'lg';
   loading?: boolean;
+  icon?: React.ReactNode;
+  iconPosition?: 'left' | 'right';
 }
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = 'primary', size = 'md', loading, disabled, children, ...props }, ref) => {
+  (
+    {
+      className,
+      variant = 'primary',
+      size = 'md',
+      loading = false,
+      icon,
+      iconPosition = 'left',
+      children,
+      disabled,
+      ...props
+    },
+    ref
+  ) => {
     const variants = {
-      primary: 'bg-primary-600 hover:bg-primary-500 text-white',
-      secondary: 'bg-dark-card hover:bg-dark-border text-gray-200 border border-dark-border',
-      ghost: 'hover:bg-dark-card text-gray-300 hover:text-white',
-      danger: 'bg-red-600 hover:bg-red-500 text-white',
-      success: 'bg-green-600 hover:bg-green-500 text-white',
+      primary: 'bg-[var(--accent-primary)] text-[var(--bg-primary)] border-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] hover:border-[var(--accent-primary-hover)] hover:shadow-[var(--shadow-glow)]',
+      secondary: 'bg-transparent text-[var(--text-primary)] border-[var(--border-secondary)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)]',
+      ghost: 'bg-transparent text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]',
+      danger: 'bg-[var(--error)] text-white border-[var(--error)] hover:bg-[var(--error-muted)]',
+      success: 'bg-[var(--success)] text-white border-[var(--success)] hover:bg-[var(--success-muted)]',
     };
 
     const sizes = {
-      sm: 'px-3 py-1.5 text-sm',
-      md: 'px-4 py-2',
-      lg: 'px-6 py-3 text-lg',
+      sm: 'px-3 py-1.5 text-xs',
+      md: 'px-4 py-2 text-sm',
+      lg: 'px-6 py-3 text-base',
     };
 
     return (
-      <button
+      <motion.button
         ref={ref}
+        whileHover={{ scale: disabled || loading ? 1 : 1.02 }}
+        whileTap={{ scale: disabled || loading ? 1 : 0.98 }}
         className={cn(
-          'inline-flex items-center justify-center gap-2 font-medium rounded-lg transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none',
+          'inline-flex items-center justify-center gap-2',
+          'font-semibold uppercase tracking-wide',
+          'border transition-all duration-150',
+          'disabled:opacity-50 disabled:cursor-not-allowed',
           variants[variant],
           sizes[size],
           className
@@ -37,26 +58,16 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={disabled || loading}
         {...props}
       >
-        {loading && (
-          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-              fill="none"
-            />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            />
-          </svg>
+        {loading ? (
+          <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent animate-spin" />
+        ) : (
+          <>
+            {icon && iconPosition === 'left' && <span className="flex-shrink-0">{icon}</span>}
+            {children}
+            {icon && iconPosition === 'right' && <span className="flex-shrink-0">{icon}</span>}
+          </>
         )}
-        {children}
-      </button>
+      </motion.button>
     );
   }
 );
