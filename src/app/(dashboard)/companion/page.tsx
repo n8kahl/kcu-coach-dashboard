@@ -16,7 +16,8 @@ import {
   Clock,
   BarChart3,
   Layers,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 
 interface WatchlistSymbol {
@@ -75,6 +76,8 @@ export default function CompanionPage() {
   const [newSymbol, setNewSymbol] = useState('');
   const [loading, setLoading] = useState(true);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
 
   useEffect(() => {
     fetchWatchlist();
@@ -140,6 +143,35 @@ export default function CompanionPage() {
     }
   };
 
+  const refreshLevels = async () => {
+    setRefreshing(true);
+    setRefreshStatus('Refreshing market data...');
+    try {
+      const res = await fetch('/api/companion/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshAll: true })
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setRefreshStatus(`Refreshed ${data.refreshed}/${data.total} symbols (${data.totalLevels} levels)`);
+        // Refresh watchlist to get updated levels
+        fetchWatchlist();
+        fetchSetups();
+      } else {
+        setRefreshStatus(data.detail || data.error || 'Refresh failed');
+      }
+    } catch (error) {
+      console.error('Error refreshing levels:', error);
+      setRefreshStatus('Error refreshing levels');
+    } finally {
+      setRefreshing(false);
+      // Clear status after 5 seconds
+      setTimeout(() => setRefreshStatus(null), 5000);
+    }
+  };
+
   const readySetups = setups.filter(s => s.setup_stage === 'ready');
   const formingSetups = setups.filter(s => s.setup_stage === 'forming');
   const sharedSymbols = watchlist.filter(s => s.is_shared);
@@ -156,10 +188,24 @@ export default function CompanionPage() {
           <p className="text-[var(--text-secondary)]">
             Real-time LTP setup detection powered by Kay Capitals methodology
           </p>
+          {refreshStatus && (
+            <p className="text-sm text-[var(--accent-primary)] mt-1">{refreshStatus}</p>
+          )}
         </div>
-        <div className="badge badge-gold flex items-center gap-2">
-          <Activity className="w-3 h-3" />
-          <span className="pulse-dot">LIVE</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={refreshLevels}
+            disabled={refreshing || watchlist.length === 0}
+            className="btn btn-secondary flex items-center gap-2"
+            title="Refresh key levels for all watchlist symbols"
+          >
+            <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
+            {refreshing ? 'Refreshing...' : 'Refresh Levels'}
+          </button>
+          <div className="badge badge-gold flex items-center gap-2">
+            <Activity className="w-3 h-3" />
+            <span className="pulse-dot">LIVE</span>
+          </div>
         </div>
       </div>
 
