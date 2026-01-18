@@ -52,7 +52,10 @@ export async function GET(request: NextRequest) {
     }
 
     if (!user) {
-      // No user_profile found - check if user exists in 'users' table (might be orphaned)
+      // No user_profile found - we need to ensure user exists in 'users' table first
+      // (due to foreign key constraint user_profiles_id_fkey)
+
+      // Check if user exists in users table by discord_id
       const { data: existingUser } = await supabaseAdmin
         .from('users')
         .select('id')
@@ -62,11 +65,44 @@ export async function GET(request: NextRequest) {
       let userId: string;
 
       if (existingUser) {
-        // User exists in users table but not in user_profiles - use existing ID
-        userId = existingUser.id;
-        console.log('Found existing user in users table, creating profile with id:', userId);
+        // User exists in users table - verify it's actually there (not a stale reference)
+        const { data: verifyUser } = await supabaseAdmin
+          .from('users')
+          .select('id')
+          .eq('id', existingUser.id)
+          .single();
+
+        if (verifyUser) {
+          // User truly exists, use this ID
+          userId = existingUser.id;
+          console.log('Found existing user in users table, creating profile with id:', userId);
+        } else {
+          // User entry is stale/corrupted - create fresh
+          userId = randomUUID();
+          console.log('Stale user entry found, creating fresh user with id:', userId);
+
+          // Delete the stale discord_id reference if it exists
+          await supabaseAdmin
+            .from('users')
+            .delete()
+            .eq('discord_id', discordUser.id);
+
+          const { error: usersInsertError } = await supabaseAdmin
+            .from('users')
+            .insert({
+              id: userId,
+              discord_id: discordUser.id,
+              username: discordUser.username,
+              email: discordUser.email || null,
+            });
+
+          if (usersInsertError) {
+            console.error('Error creating user in users table:', usersInsertError);
+            return NextResponse.redirect(`${baseUrl}/login?error=create_failed`);
+          }
+        }
       } else {
-        // Create new user in users table
+        // No user exists - create new user in users table
         userId = randomUUID();
         console.log('Creating new user with id:', userId);
 
