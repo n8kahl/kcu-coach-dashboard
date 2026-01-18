@@ -376,7 +376,9 @@ export type RichContent =
   | LessonLinkContent
   | ChartWidgetContent
   | SetupVisualizationContent
-  | QuizPromptContent;
+  | QuizPromptContent
+  | VideoTimestampContent
+  | ThinkificLinkContent;
 
 export interface LessonLinkContent {
   type: 'lesson_link';
@@ -425,6 +427,27 @@ export interface QuizPromptContent {
   moduleId: string;
   title: string;
   description: string;
+}
+
+export interface VideoTimestampContent {
+  type: 'video_timestamp';
+  videoId: string;
+  startMs: number;
+  endMs: number;
+  title: string;
+  description?: string;
+  source: 'youtube';
+  thumbnailUrl?: string;
+}
+
+export interface ThinkificLinkContent {
+  type: 'thinkific_link';
+  courseSlug: string;
+  lessonSlug: string;
+  title: string;
+  timestampSeconds?: number;
+  description?: string;
+  source: 'thinkific';
 }
 
 export interface CoachingSession {

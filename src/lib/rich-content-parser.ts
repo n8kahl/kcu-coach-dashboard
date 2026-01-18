@@ -9,6 +9,8 @@
  * - [[CHART:SYMBOL|interval|indicators]]
  * - [[SETUP:SYMBOL|direction|entry|stop|target|level%|trend%|patience%]]
  * - [[QUIZ:module-slug|title]]
+ * - [[VIDEO:videoId|startMs|endMs|Title]] - YouTube video with timestamp
+ * - [[THINKIFIC:courseSlug|lessonSlug|timestampSeconds|Title]] - Thinkific lesson link
  */
 
 import type {
@@ -17,6 +19,8 @@ import type {
   ChartWidgetContent,
   SetupVisualizationContent,
   QuizPromptContent,
+  VideoTimestampContent,
+  ThinkificLinkContent,
 } from '@/types';
 import { getLessonBySlug } from './curriculum-context';
 
@@ -25,6 +29,10 @@ const LESSON_PATTERN = /\[\[LESSON:([^|]+)\|([^|]+)\|([^\]]+)\]\]/g;
 const CHART_PATTERN = /\[\[CHART:([^|]+)\|([^|]+)(?:\|([^\]]+))?\]\]/g;
 const SETUP_PATTERN = /\[\[SETUP:([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^\]]+)\]\]/g;
 const QUIZ_PATTERN = /\[\[QUIZ:([^|]+)\|([^\]]+)\]\]/g;
+// Video timestamp: [[VIDEO:videoId|startMs|endMs|Title]]
+const VIDEO_PATTERN = /\[\[VIDEO:([^|]+)\|(\d+)\|(\d+)\|([^\]]+)\]\]/g;
+// Thinkific link: [[THINKIFIC:courseSlug|lessonSlug|timestampSeconds|Title]]
+const THINKIFIC_PATTERN = /\[\[THINKIFIC:([^|]+)\|([^|]+)\|(\d+)\|([^\]]+)\]\]/g;
 
 /**
  * Calculate LTP grade from total score
@@ -155,6 +163,59 @@ function parseQuizMarkers(text: string): QuizPromptContent[] {
 }
 
 /**
+ * Parse video timestamp markers from text (YouTube)
+ * Format: [[VIDEO:videoId|startMs|endMs|Title]]
+ */
+function parseVideoMarkers(text: string): VideoTimestampContent[] {
+  const videos: VideoTimestampContent[] = [];
+  let match;
+
+  VIDEO_PATTERN.lastIndex = 0;
+
+  while ((match = VIDEO_PATTERN.exec(text)) !== null) {
+    const [, videoId, startMs, endMs, title] = match;
+
+    videos.push({
+      type: 'video_timestamp',
+      videoId: videoId.trim(),
+      startMs: parseInt(startMs, 10),
+      endMs: parseInt(endMs, 10),
+      title: title.trim(),
+      source: 'youtube',
+      thumbnailUrl: `https://img.youtube.com/vi/${videoId.trim()}/mqdefault.jpg`,
+    });
+  }
+
+  return videos;
+}
+
+/**
+ * Parse Thinkific link markers from text
+ * Format: [[THINKIFIC:courseSlug|lessonSlug|timestampSeconds|Title]]
+ */
+function parseThinkificMarkers(text: string): ThinkificLinkContent[] {
+  const links: ThinkificLinkContent[] = [];
+  let match;
+
+  THINKIFIC_PATTERN.lastIndex = 0;
+
+  while ((match = THINKIFIC_PATTERN.exec(text)) !== null) {
+    const [, courseSlug, lessonSlug, timestampSeconds, title] = match;
+
+    links.push({
+      type: 'thinkific_link',
+      courseSlug: courseSlug.trim(),
+      lessonSlug: lessonSlug.trim(),
+      timestampSeconds: parseInt(timestampSeconds, 10),
+      title: title.trim(),
+      source: 'thinkific',
+    });
+  }
+
+  return links;
+}
+
+/**
  * Remove all rich content markers from text
  */
 export function stripRichContentMarkers(text: string): string {
@@ -163,6 +224,8 @@ export function stripRichContentMarkers(text: string): string {
     .replace(CHART_PATTERN, '')
     .replace(SETUP_PATTERN, '')
     .replace(QUIZ_PATTERN, '')
+    .replace(VIDEO_PATTERN, '')
+    .replace(THINKIFIC_PATTERN, '')
     .replace(/\n{3,}/g, '\n\n') // Clean up extra newlines
     .trim();
 }
@@ -178,6 +241,8 @@ export function parseRichContent(text: string): RichContent[] {
   richContent.push(...parseChartMarkers(text));
   richContent.push(...parseSetupMarkers(text));
   richContent.push(...parseQuizMarkers(text));
+  richContent.push(...parseVideoMarkers(text));
+  richContent.push(...parseThinkificMarkers(text));
 
   return richContent;
 }
@@ -199,10 +264,43 @@ export function parseAIResponse(text: string): {
  * Check if text contains any rich content markers
  */
 export function hasRichContent(text: string): boolean {
+  // Reset all regex patterns
+  LESSON_PATTERN.lastIndex = 0;
+  CHART_PATTERN.lastIndex = 0;
+  SETUP_PATTERN.lastIndex = 0;
+  QUIZ_PATTERN.lastIndex = 0;
+  VIDEO_PATTERN.lastIndex = 0;
+  THINKIFIC_PATTERN.lastIndex = 0;
+
   return (
     LESSON_PATTERN.test(text) ||
     CHART_PATTERN.test(text) ||
     SETUP_PATTERN.test(text) ||
-    QUIZ_PATTERN.test(text)
+    QUIZ_PATTERN.test(text) ||
+    VIDEO_PATTERN.test(text) ||
+    THINKIFIC_PATTERN.test(text)
   );
+}
+
+/**
+ * Format milliseconds to display time string (MM:SS or HH:MM:SS)
+ */
+export function formatTimestamp(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Generate YouTube URL with timestamp
+ */
+export function generateYouTubeUrl(videoId: string, startMs: number): string {
+  const startSeconds = Math.floor(startMs / 1000);
+  return `https://www.youtube.com/watch?v=${videoId}&t=${startSeconds}s`;
 }
