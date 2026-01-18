@@ -116,6 +116,24 @@ export async function GET(request: NextRequest) {
 
       console.log('User created successfully in users table:', userId);
 
+      // Double-check user exists RIGHT before user_profiles insert
+      const { data: checkUser, error: checkError } = await supabaseAdmin
+        .from('users')
+        .select('id, discord_id')
+        .eq('id', userId)
+        .single();
+
+      console.log('Pre-insert verification:', {
+        userExists: !!checkUser,
+        userId: checkUser?.id,
+        checkError: checkError?.message
+      });
+
+      if (!checkUser) {
+        console.error('CRITICAL: User disappeared after creation! This suggests a trigger or RLS policy is deleting rows.');
+        return NextResponse.redirect(`${baseUrl}/login?error=user_disappeared`);
+      }
+
       // Create user_profiles entry
       const { data: newUser, error: createError } = await supabaseAdmin
         .from('user_profiles')
