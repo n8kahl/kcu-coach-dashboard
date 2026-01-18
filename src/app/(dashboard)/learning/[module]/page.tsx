@@ -35,6 +35,8 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
+  Youtube,
+  ExternalLink,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -100,6 +102,15 @@ interface CourseData {
   source: 'thinkific' | 'local';
 }
 
+interface RelatedVideo {
+  id: string;
+  video_id: string;
+  title: string;
+  thumbnail_url: string;
+  category: string | null;
+  ltp_relevance: number | null;
+}
+
 function formatDuration(seconds: number): string {
   if (!seconds || seconds === 0) return '';
   const mins = Math.floor(seconds / 60);
@@ -120,6 +131,7 @@ export default function ModulePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedChapters, setExpandedChapters] = useState<Set<number>>(new Set());
+  const [relatedVideos, setRelatedVideos] = useState<RelatedVideo[]>([]);
 
   // Fetch course data
   useEffect(() => {
@@ -155,6 +167,53 @@ export default function ModulePage() {
 
     fetchCourse();
   }, [moduleSlug]);
+
+  // Fetch related YouTube videos based on course title
+  useEffect(() => {
+    async function fetchRelatedVideos() {
+      if (!courseData?.course?.title) return;
+
+      try {
+        // Use category search - map course title to likely categories
+        const title = courseData.course.title.toLowerCase();
+        let category = '';
+
+        if (title.includes('ltp') || title.includes('level') || title.includes('trend') || title.includes('patience')) {
+          category = 'LTP Framework';
+        } else if (title.includes('price action') || title.includes('candle')) {
+          category = 'Price Action';
+        } else if (title.includes('psychol') || title.includes('mindset') || title.includes('discipline')) {
+          category = 'Psychology';
+        } else if (title.includes('risk') || title.includes('stop') || title.includes('position')) {
+          category = 'Risk Management';
+        } else if (title.includes('indicator') || title.includes('ema') || title.includes('vwap')) {
+          category = 'Indicators';
+        } else if (title.includes('strategy') || title.includes('setup') || title.includes('orb')) {
+          category = 'Strategies';
+        }
+
+        const params = new URLSearchParams({
+          limit: '5',
+          sortBy: 'ltp_relevance',
+          sortOrder: 'desc',
+        });
+
+        if (category) {
+          params.set('category', category);
+        }
+
+        const response = await fetch(`/api/youtube/videos?${params}`);
+        if (response.ok) {
+          const data = await response.json();
+          setRelatedVideos(data.videos || []);
+        }
+      } catch (err) {
+        console.error('Error fetching related videos:', err);
+      }
+    }
+
+    fetchRelatedVideos();
+  }, [courseData?.course?.title]);
 
   const toggleChapter = (chapterId: number) => {
     setExpandedChapters((prev) => {
@@ -496,6 +555,74 @@ export default function ModulePage() {
                 </CardContent>
               </Card>
             </motion.div>
+
+            {/* Related YouTube Videos */}
+            {relatedVideos.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+              >
+                <Card>
+                  <CardHeader
+                    title="Related Videos"
+                    action={
+                      <Link href="/resources">
+                        <Badge variant="default" size="sm" className="cursor-pointer hover:bg-[var(--bg-tertiary)]">
+                          <Youtube className="w-3 h-3 mr-1 text-red-500" />
+                          View All
+                        </Badge>
+                      </Link>
+                    }
+                  />
+                  <CardContent>
+                    <div className="space-y-3">
+                      {relatedVideos.slice(0, 4).map((video) => (
+                        <a
+                          key={video.id}
+                          href={`https://www.youtube.com/watch?v=${video.video_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-start gap-3 p-2 rounded-lg hover:bg-[var(--bg-secondary)] transition-colors group"
+                        >
+                          {/* Thumbnail */}
+                          <div className="relative w-20 h-12 flex-shrink-0 rounded overflow-hidden bg-[var(--bg-tertiary)]">
+                            {video.thumbnail_url ? (
+                              <img
+                                src={video.thumbnail_url}
+                                alt={video.title}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <Youtube className="w-5 h-5 text-[var(--text-tertiary)]" />
+                              </div>
+                            )}
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Play className="w-4 h-4 text-white" fill="currentColor" />
+                            </div>
+                          </div>
+
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-xs font-medium text-[var(--text-primary)] line-clamp-2 group-hover:text-[var(--accent-primary)] transition-colors">
+                              {video.title}
+                            </h4>
+                            {video.category && (
+                              <span className="text-[10px] text-[var(--text-muted)]">
+                                {video.category}
+                              </span>
+                            )}
+                          </div>
+
+                          <ExternalLink className="w-3 h-3 text-[var(--text-muted)] flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </a>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )}
           </div>
         </div>
       </PageShell>

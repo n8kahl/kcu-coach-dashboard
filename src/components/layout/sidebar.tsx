@@ -26,6 +26,7 @@ import {
   Target,
   Dumbbell,
   MessageSquare,
+  Youtube,
 } from 'lucide-react';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -56,6 +57,7 @@ const userNavItems: NavItem[] = [
   { label: 'Practice', href: '/practice', icon: Dumbbell, badge: 'New' },
   { label: 'AI Coach', href: '/coach', icon: MessageSquare },
   { label: 'Learning', href: '/learning', icon: GraduationCap },
+  { label: 'Resources', href: '/resources', icon: Youtube },
   { label: 'Progress', href: '/progress', icon: TrendingUp },
   { label: 'Trade Journal', href: '/journal', icon: BookOpen },
   { label: 'Achievements', href: '/achievements', icon: Trophy },
