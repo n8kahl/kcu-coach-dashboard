@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';
 
 // Routes that don't require authentication
-const publicRoutes = ['/login', '/api/auth', '/api/health'];
+const publicRoutes = ['/login', '/api/auth', '/api/health', '/api/economic'];
 
 // Check if a path is public (doesn't require auth)
 function isPublicRoute(pathname: string): boolean {

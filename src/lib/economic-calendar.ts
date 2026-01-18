@@ -41,29 +41,156 @@ const KEY_EVENTS = [
 ];
 
 /**
- * Fetch events from a public API
- * Note: This is a placeholder - you'd integrate with a real API like Finnhub, Alpha Vantage, etc.
+ * Fetch events from Finnhub API
+ * Requires FINNHUB_API_KEY environment variable
  */
 export async function fetchEconomicEvents(
   startDate: Date,
   endDate: Date
 ): Promise<EconomicEvent[]> {
   try {
-    // In production, you would call a real API here
-    // For example, Finnhub's economic calendar: https://finnhub.io/docs/api/economic-calendar
+    const apiKey = process.env.FINNHUB_API_KEY;
 
-    // For now, we'll return empty array - events would be added manually or via API integration
-    logger.info('Economic calendar fetch placeholder', {
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-    });
+    if (!apiKey) {
+      logger.warn('FINNHUB_API_KEY not configured, using fallback data');
+      return getFallbackEvents(startDate, endDate);
+    }
 
-    return [];
+    const fromDate = startDate.toISOString().split('T')[0];
+    const toDate = endDate.toISOString().split('T')[0];
+
+    const url = `https://finnhub.io/api/v1/calendar/economic?from=${fromDate}&to=${toDate}&token=${apiKey}`;
+
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      logger.error('Finnhub API error', { status: res.status });
+      return getFallbackEvents(startDate, endDate);
+    }
+
+    const data = await res.json();
+
+    if (!data.economicCalendar || !Array.isArray(data.economicCalendar)) {
+      logger.warn('No economic calendar data returned');
+      return [];
+    }
+
+    // Filter to US events and map to our format
+    const events: EconomicEvent[] = data.economicCalendar
+      .filter((e: FinnhubEvent) => e.country === 'US')
+      .map((e: FinnhubEvent) => ({
+        eventDate: e.date,
+        eventTime: e.time || undefined,
+        eventName: e.event,
+        country: e.country,
+        impact: mapImpact(e.impact, e.event),
+        previousValue: e.prev?.toString(),
+        forecastValue: e.estimate?.toString(),
+        actualValue: e.actual?.toString(),
+        description: e.unit ? `Unit: ${e.unit}` : undefined,
+      }));
+
+    logger.info('Fetched economic events from Finnhub', { count: events.length });
+    return events;
 
   } catch (error) {
     logger.error('Error fetching economic events', error instanceof Error ? error : { message: String(error) });
-    return [];
+    return getFallbackEvents(startDate, endDate);
   }
+}
+
+// Finnhub event structure
+interface FinnhubEvent {
+  date: string;
+  time?: string;
+  event: string;
+  country: string;
+  impact: string;
+  prev?: number;
+  estimate?: number;
+  actual?: number;
+  unit?: string;
+}
+
+/**
+ * Map Finnhub impact to our impact levels
+ */
+function mapImpact(finnhubImpact: string, eventName: string): 'low' | 'medium' | 'high' {
+  // Finnhub uses 'low', 'medium', 'high' but sometimes the field is missing
+  if (finnhubImpact === 'high') return 'high';
+  if (finnhubImpact === 'medium') return 'medium';
+  if (finnhubImpact === 'low') return 'low';
+
+  // Fallback: check if it's a key event
+  const highImpactKeywords = ['FOMC', 'CPI', 'NFP', 'Non-Farm', 'GDP', 'PCE', 'Fed Chair', 'Interest Rate'];
+  const mediumImpactKeywords = ['Retail Sales', 'Jobless Claims', 'ISM', 'Consumer Confidence'];
+
+  const upperEvent = eventName.toUpperCase();
+  if (highImpactKeywords.some(k => upperEvent.includes(k.toUpperCase()))) return 'high';
+  if (mediumImpactKeywords.some(k => upperEvent.includes(k.toUpperCase()))) return 'medium';
+
+  return 'low';
+}
+
+/**
+ * Fallback events when API is unavailable
+ * Returns recurring high-impact events based on typical schedule
+ */
+function getFallbackEvents(startDate: Date, endDate: Date): EconomicEvent[] {
+  const events: EconomicEvent[] = [];
+  const current = new Date(startDate);
+
+  while (current <= endDate) {
+    const dayOfWeek = current.getDay();
+    const dayOfMonth = current.getDate();
+    const dateStr = current.toISOString().split('T')[0];
+
+    // Weekly Initial Jobless Claims (Thursdays)
+    if (dayOfWeek === 4) {
+      events.push({
+        eventDate: dateStr,
+        eventTime: '08:30',
+        eventName: 'Initial Jobless Claims',
+        country: 'US',
+        impact: 'medium',
+      });
+    }
+
+    // First Friday - Non-Farm Payrolls
+    if (dayOfWeek === 5 && dayOfMonth <= 7) {
+      events.push({
+        eventDate: dateStr,
+        eventTime: '08:30',
+        eventName: 'Non-Farm Payrolls',
+        country: 'US',
+        impact: 'high',
+      });
+      events.push({
+        eventDate: dateStr,
+        eventTime: '08:30',
+        eventName: 'Unemployment Rate',
+        country: 'US',
+        impact: 'high',
+      });
+    }
+
+    // Mid-month CPI (usually around 13th)
+    if (dayOfMonth >= 10 && dayOfMonth <= 15 && dayOfWeek !== 0 && dayOfWeek !== 6) {
+      if (dayOfMonth === 13) {
+        events.push({
+          eventDate: dateStr,
+          eventTime: '08:30',
+          eventName: 'CPI (Consumer Price Index)',
+          country: 'US',
+          impact: 'high',
+        });
+      }
+    }
+
+    current.setDate(current.getDate() + 1);
+  }
+
+  return events;
 }
 
 /**
@@ -187,6 +314,38 @@ export async function upsertEconomicEvents(events: EconomicEvent[]): Promise<{ s
 export async function hasHighImpactEventsToday(): Promise<boolean> {
   const events = await getTodayEvents();
   return events.some(e => e.impact === 'high');
+}
+
+/**
+ * Sync economic events for the next N days
+ * Fetches from API (or fallback) and stores in database
+ */
+export async function syncEconomicEvents(days = 14): Promise<{ success: boolean; count: number }> {
+  try {
+    const startDate = new Date();
+    const endDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+
+    logger.info('Syncing economic events', {
+      from: startDate.toISOString().split('T')[0],
+      to: endDate.toISOString().split('T')[0],
+    });
+
+    const events = await fetchEconomicEvents(startDate, endDate);
+
+    if (events.length === 0) {
+      logger.info('No events to sync');
+      return { success: true, count: 0 };
+    }
+
+    const result = await upsertEconomicEvents(events);
+
+    logger.info('Economic events synced', { count: result.count });
+    return result;
+
+  } catch (error) {
+    logger.error('Error syncing economic events', error instanceof Error ? error : { message: String(error) });
+    return { success: false, count: 0 };
+  }
 }
 
 /**
