@@ -540,7 +540,7 @@ export default function CompanionPage() {
       </div>
 
       {/* Session Report */}
-      <CompanionSessionReport />
+      <CompanionSessionReport sessionId={sessionId} />
     </div>
   );
 }

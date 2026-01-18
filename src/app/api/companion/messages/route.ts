@@ -300,7 +300,7 @@ async function generateRiskWarning(context?: Record<string, unknown>): Promise<s
 /**
  * Generate intelligent AI companion message using Claude
  */
-export async function generateAICompanionMessage(
+async function generateAICompanionMessage(
   userId: string,
   context: {
     symbol?: string;
