@@ -49,7 +49,7 @@ export async function GET() {
       .eq('is_admin_watchlist', true);
 
     // Combine all symbols
-    const personalSymbols = watchlist.symbols || [];
+    const personalSymbols = watchlist?.symbols || [];
     const sharedSymbols = sharedWatchlists?.flatMap(w => w.symbols || []) || [];
 
     // Create combined list with source info
