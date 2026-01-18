@@ -74,14 +74,25 @@ export default function KnowledgePage() {
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [videos, setVideos] = useState<YouTubeVideo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [newVideoUrl, setNewVideoUrl] = useState('');
   const [addingVideo, setAddingVideo] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
+      setError(null);
+
       // Fetch stats
       const statsRes = await fetch('/api/admin/knowledge?action=stats');
+      if (statsRes.status === 403) {
+        setError('Access denied. Admin privileges required.');
+        return;
+      }
+      if (statsRes.status === 401) {
+        setError('Please log in to access this page.');
+        return;
+      }
       if (statsRes.ok) {
         const statsData = await statsRes.json();
         setStats(statsData);
@@ -96,6 +107,7 @@ export default function KnowledgePage() {
       }
     } catch (error) {
       console.error('Error fetching knowledge data:', error);
+      setError('Failed to load knowledge base data.');
     } finally {
       setLoading(false);
     }
@@ -220,6 +232,38 @@ export default function KnowledgePage() {
       <div className="flex items-center justify-center min-h-screen">
         <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-primary)]" />
       </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <>
+        <Header
+          title="Knowledge Base"
+          subtitle="Manage RAG knowledge base and video transcripts"
+          breadcrumbs={[{ label: 'Admin' }, { label: 'Knowledge' }]}
+        />
+        <PageShell>
+          <PageSection>
+            <Card className="border-[var(--error)] bg-[var(--error)]/10">
+              <CardContent className="py-8">
+                <div className="flex flex-col items-center gap-4 text-center">
+                  <AlertCircle className="w-12 h-12 text-[var(--error)]" />
+                  <div>
+                    <p className="font-medium text-[var(--text-primary)]">{error}</p>
+                    <p className="text-sm text-[var(--text-tertiary)] mt-1">
+                      Contact an administrator if you believe this is an error.
+                    </p>
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={fetchData}>
+                    Try Again
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </PageSection>
+        </PageShell>
+      </>
     );
   }
 
