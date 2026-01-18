@@ -5,7 +5,44 @@
  * Uses Redis caching when available, falls back to in-memory.
  */
 
-import { getCache, setCache } from './redis';
+// Redis is imported dynamically to avoid bundling issues in edge runtime
+// Define types inline to avoid static import analysis
+interface CacheOptions {
+  ttl?: number;
+  prefix?: string;
+}
+interface RedisModule {
+  getCache: <T>(key: string, prefix?: string) => Promise<T | null>;
+  setCache: <T>(key: string, value: T, options?: CacheOptions) => Promise<boolean>;
+}
+let redisModule: RedisModule | null = null;
+
+async function getRedis() {
+  if (!redisModule && typeof window === 'undefined') {
+    try {
+      // Use webpackIgnore to prevent bundling ioredis in edge runtime
+      redisModule = await import(/* webpackIgnore: true */ './redis');
+    } catch {
+      // Redis not available
+    }
+  }
+  return redisModule;
+}
+
+async function getCacheValue<T>(key: string): Promise<T | null> {
+  const redis = await getRedis();
+  if (redis) {
+    return redis.getCache<T>(key, 'market');
+  }
+  return null;
+}
+
+async function setCacheValue<T>(key: string, value: T, ttl?: number): Promise<void> {
+  const redis = await getRedis();
+  if (redis) {
+    await redis.setCache(key, value, { ttl, prefix: 'market' });
+  }
+}
 
 // Types
 export interface Quote {
@@ -146,8 +183,9 @@ class MarketDataService {
     ttlSeconds: number,
     fetchFn: () => Promise<T | null>
   ): Promise<T | null> {
-    // Try Redis cache first
-    const redisData = await getCache<T>(key, 'market');
+    // Try Redis cache first (dynamic import)
+    // Note: getCacheValue already uses 'market' prefix
+    const redisData = await getCacheValue<T>(key);
     if (redisData) {
       return redisData;
     }
@@ -162,7 +200,7 @@ class MarketDataService {
     const data = await fetchFn();
     if (data) {
       // Store in both caches
-      await setCache(key, data, { ttl: ttlSeconds, prefix: 'market' });
+      await setCacheValue(key, data, ttlSeconds);
       memoryCache.set(key, { data, timestamp: Date.now() });
     }
 

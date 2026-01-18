@@ -142,6 +142,136 @@ export function calculateVWAP(bars: Bar[]): number {
 }
 
 /**
+ * Identify key support and resistance levels from bar data
+ */
+export function identifyKeyLevels(bars: Bar[]): KeyLevel[] {
+  if (bars.length < 10) return [];
+
+  const levels: KeyLevel[] = [];
+  const pricePoints: { price: number; type: 'high' | 'low'; index: number }[] = [];
+
+  // Find swing highs and lows
+  for (let i = 2; i < bars.length - 2; i++) {
+    const bar = bars[i];
+    const isSwingHigh =
+      bar.h > bars[i - 1].h &&
+      bar.h > bars[i - 2].h &&
+      bar.h > bars[i + 1].h &&
+      bar.h > bars[i + 2].h;
+    const isSwingLow =
+      bar.l < bars[i - 1].l &&
+      bar.l < bars[i - 2].l &&
+      bar.l < bars[i + 1].l &&
+      bar.l < bars[i + 2].l;
+
+    if (isSwingHigh) {
+      pricePoints.push({ price: bar.h, type: 'high', index: i });
+    }
+    if (isSwingLow) {
+      pricePoints.push({ price: bar.l, type: 'low', index: i });
+    }
+  }
+
+  // Cluster nearby prices into levels
+  const clustered: { price: number; type: 'support' | 'resistance'; count: number }[] = [];
+  const tolerance = 0.005; // 0.5% price tolerance
+
+  for (const point of pricePoints) {
+    const existingCluster = clustered.find(
+      c => Math.abs(c.price - point.price) / point.price < tolerance
+    );
+
+    if (existingCluster) {
+      existingCluster.count++;
+      existingCluster.price = (existingCluster.price + point.price) / 2;
+    } else {
+      clustered.push({
+        price: point.price,
+        type: point.type === 'high' ? 'resistance' : 'support',
+        count: 1,
+      });
+    }
+  }
+
+  // Convert to KeyLevel format
+  for (const cluster of clustered) {
+    if (cluster.count >= 2) {
+      levels.push({
+        price: Math.round(cluster.price * 100) / 100,
+        type: cluster.type,
+        timeframe: '5m', // Default timeframe for identified levels
+        strength: Math.min(cluster.count * 25, 100),
+      });
+    }
+  }
+
+  // Sort by strength
+  levels.sort((a, b) => b.strength - a.strength);
+
+  return levels.slice(0, 10); // Return top 10 levels
+}
+
+/**
+ * Determine overall trend from bar data
+ */
+export function determineTrend(bars: Bar[]): 'uptrend' | 'downtrend' | 'range' | null {
+  if (bars.length < 5) return null;
+
+  const closes = bars.map(b => b.c);
+  const highs = bars.map(b => b.h);
+  const lows = bars.map(b => b.l);
+
+  // Check for higher highs and higher lows (uptrend)
+  let higherHighs = 0;
+  let higherLows = 0;
+  let lowerHighs = 0;
+  let lowerLows = 0;
+
+  for (let i = 1; i < bars.length; i++) {
+    if (highs[i] > highs[i - 1]) higherHighs++;
+    if (lows[i] > lows[i - 1]) higherLows++;
+    if (highs[i] < highs[i - 1]) lowerHighs++;
+    if (lows[i] < lows[i - 1]) lowerLows++;
+  }
+
+  const threshold = bars.length * 0.5;
+
+  if (higherHighs >= threshold && higherLows >= threshold) {
+    return 'uptrend';
+  } else if (lowerHighs >= threshold && lowerLows >= threshold) {
+    return 'downtrend';
+  }
+
+  return 'range';
+}
+
+/**
+ * Identify patience candle patterns in recent bars
+ */
+export function identifyPatienceCandles(bars: Bar[]): Bar[] {
+  if (bars.length < 2) return [];
+
+  const patienceCandles: Bar[] = [];
+  const avgSize = bars.reduce((sum, b) => sum + Math.abs(b.c - b.o), 0) / bars.length;
+
+  for (let i = 1; i < bars.length; i++) {
+    const bar = bars[i];
+    const prevBar = bars[i - 1];
+    const barSize = Math.abs(bar.c - bar.o);
+
+    // Small body relative to average
+    if (barSize < avgSize * 0.5) {
+      // Inside bar or small range
+      if (bar.h <= prevBar.h && bar.l >= prevBar.l) {
+        patienceCandles.push(bar);
+      }
+    }
+  }
+
+  return patienceCandles;
+}
+
+/**
  * Detect patience candles near a price level
  */
 export function detectPatienceCandle(

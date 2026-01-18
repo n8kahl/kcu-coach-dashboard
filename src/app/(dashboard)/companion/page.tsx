@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
+import { useCompanionStream, type CompanionEvent } from '@/hooks/useCompanionStream';
 import {
   Plus,
   X,
@@ -17,7 +18,9 @@ import {
   BarChart3,
   Layers,
   AlertTriangle,
-  RefreshCw
+  RefreshCw,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 
 interface WatchlistSymbol {
@@ -79,17 +82,77 @@ export default function CompanionPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
 
+  // Handle real-time SSE events
+  const handleStreamEvent = useCallback((event: CompanionEvent) => {
+    if (event.type === 'setup_forming' || event.type === 'setup_ready') {
+      // Update setups with real-time data
+      setSetups(prev => {
+        const existing = prev.findIndex(s => s.symbol === event.data.symbol);
+        const newSetup: DetectedSetup = {
+          id: event.data.id,
+          symbol: event.data.symbol,
+          direction: event.data.direction,
+          setup_stage: event.type === 'setup_ready' ? 'ready' : 'forming',
+          confluence_score: event.data.confluenceScore,
+          level_score: (event.data as any).levelScore || 0,
+          trend_score: (event.data as any).trendScore || 0,
+          patience_score: (event.data as any).patienceScore || 0,
+          mtf_score: (event.data as any).mtfScore || 0,
+          primary_level_type: (event.data as any).primaryLevelType || '',
+          primary_level_price: (event.data as any).primaryLevelPrice || 0,
+          patience_candles: (event.data as any).patienceCandles || 0,
+          coach_note: event.data.coachNote,
+          suggested_entry: event.data.suggestedEntry || 0,
+          suggested_stop: event.data.suggestedStop || 0,
+          target_1: event.data.target1 || 0,
+          target_2: event.data.target2 || 0,
+          target_3: (event.data as any).target3 || 0,
+          risk_reward: (event.data as any).riskReward || 0,
+          detected_at: new Date().toISOString(),
+        };
+
+        if (existing >= 0) {
+          const updated = [...prev];
+          updated[existing] = newSetup;
+          return updated;
+        }
+        return [newSetup, ...prev];
+      });
+    } else if (event.type === 'price_update') {
+      // Update watchlist prices in real-time
+      setWatchlist(prev => prev.map(item => {
+        if (item.symbol === event.data.symbol) {
+          return {
+            ...item,
+            quote: {
+              ...item.quote!,
+              last_price: event.data.price,
+              change_percent: event.data.changePercent,
+              volume: event.data.volume,
+            }
+          };
+        }
+        return item;
+      }));
+    }
+  }, []);
+
+  // Connect to SSE stream for real-time updates
+  const { connected: streamConnected, error: streamError } = useCompanionStream({
+    onEvent: handleStreamEvent,
+  });
+
   useEffect(() => {
     fetchWatchlist();
     fetchSetups();
 
-    // Poll for updates every 30 seconds
+    // Fallback: Poll for updates every 60 seconds if SSE is connected, 30 seconds if not
     const interval = setInterval(() => {
       fetchSetups();
-    }, 30000);
+    }, streamConnected ? 60000 : 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [streamConnected]);
 
   const fetchWatchlist = async () => {
     try {
@@ -202,9 +265,21 @@ export default function CompanionPage() {
             <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
             {refreshing ? 'Refreshing...' : 'Refresh Levels'}
           </button>
-          <div className="badge badge-gold flex items-center gap-2">
-            <Activity className="w-3 h-3" />
-            <span className="pulse-dot">LIVE</span>
+          <div className={cn(
+            'badge flex items-center gap-2',
+            streamConnected ? 'badge-gold' : 'badge-neutral'
+          )} title={streamError || (streamConnected ? 'Real-time updates active' : 'Connecting...')}>
+            {streamConnected ? (
+              <>
+                <Wifi className="w-3 h-3" />
+                <span className="pulse-dot">LIVE</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="w-3 h-3" />
+                <span>OFFLINE</span>
+              </>
+            )}
           </div>
         </div>
       </div>

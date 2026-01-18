@@ -10,6 +10,7 @@ const nextConfig = {
   },
   experimental: {
     serverComponentsExternalPackages: ['@anthropic-ai/sdk'],
+    instrumentationHook: true,
   },
 };
 

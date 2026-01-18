@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getSession } from '@/lib/auth';
+import logger from '@/lib/logger';
 
 // GET - Fetch detected setups
 export async function GET(request: Request) {
@@ -17,22 +18,22 @@ export async function GET(request: Request) {
     const stage = searchParams.get('stage'); // forming, ready, triggered
     const minConfluence = parseInt(searchParams.get('minConfluence') || '0');
 
-    // Get user's watchlist symbols - try owner_id first, then user_id
+    // Get user's watchlist symbols - try user_id first, then owner_id for compatibility
     let { data: watchlist } = await supabaseAdmin
       .from('watchlists')
       .select('symbols')
-      .eq('owner_id', userId)
+      .eq('user_id', userId)
       .eq('is_shared', false)
       .single();
 
     if (!watchlist) {
-      const { data: watchlistByUserId } = await supabaseAdmin
+      const { data: watchlistByOwnerId } = await supabaseAdmin
         .from('watchlists')
         .select('symbols')
-        .eq('user_id', userId)
+        .eq('owner_id', userId)
         .eq('is_shared', false)
         .single();
-      watchlist = watchlistByUserId;
+      watchlist = watchlistByOwnerId;
     }
 
     // Get shared watchlist symbols
@@ -76,7 +77,7 @@ export async function GET(request: Request) {
     const { data: setups, error } = await query;
 
     if (error) {
-      console.error('Error fetching setups:', error);
+      logger.error('Error fetching setups:', error);
       return NextResponse.json({ error: 'Failed to fetch setups' }, { status: 500 });
     }
 
@@ -93,7 +94,7 @@ export async function GET(request: Request) {
       total: setups?.length || 0
     });
   } catch (error) {
-    console.error('Error in setups GET:', error);
+    logger.error('Error in setups GET', error instanceof Error ? error : { message: String(error) });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -138,13 +139,13 @@ export async function POST(request: Request) {
       });
 
     if (subscribeError) {
-      console.error('Error subscribing to setup:', subscribeError);
+      logger.error('Error subscribing to setup:', subscribeError);
       return NextResponse.json({ error: 'Failed to subscribe' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, subscribed: true });
   } catch (error) {
-    console.error('Error in setups POST:', error);
+    logger.error('Error in setups POST', error instanceof Error ? error : { message: String(error) });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -172,13 +173,13 @@ export async function DELETE(request: Request) {
       .eq('setup_id', setupId);
 
     if (error) {
-      console.error('Error unsubscribing from setup:', error);
+      logger.error('Error unsubscribing from setup:', error);
       return NextResponse.json({ error: 'Failed to unsubscribe' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Error in setups DELETE:', error);
+    logger.error('Error in setups DELETE', error instanceof Error ? error : { message: String(error) });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

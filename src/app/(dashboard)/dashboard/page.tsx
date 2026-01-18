@@ -13,6 +13,7 @@ import {
   Award,
   AlertTriangle,
 } from 'lucide-react';
+import { DailyBriefing } from '@/components/dashboard/daily-briefing';
 
 export default function DashboardPage() {
   // Mock data - would come from API in production
@@ -52,6 +53,9 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {/* Daily Briefing */}
+      <DailyBriefing className="mb-2" />
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
