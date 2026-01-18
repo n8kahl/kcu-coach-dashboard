@@ -23,36 +23,40 @@ import type { TradeStats, LeaderboardEntry, Achievement } from '@/types';
 
 // Mock data
 const mockStats: TradeStats = {
-  totalTrades: 142,
-  winningTrades: 89,
-  losingTrades: 53,
-  winRate: 62.7,
-  totalPnL: 4823.50,
-  avgWin: 127.30,
-  avgLoss: -78.45,
-  profitFactor: 1.82,
-  largestWin: 892.00,
-  largestLoss: -345.00,
-  currentStreak: 5,
-  bestStreak: 12,
-  avgLTPGrade: 'B+',
+  total_trades: 142,
+  winning_trades: 89,
+  losing_trades: 53,
+  win_rate: 62.7,
+  total_pnl: 4823.50,
+  average_win: 127.30,
+  average_loss: -78.45,
+  profit_factor: 1.82,
+  largest_win: 892.00,
+  largest_loss: -345.00,
+  average_hold_time: 120,
+  best_setup: 'PDH Bounce',
+  worst_setup: 'FOMO Entry',
 };
 
 const mockLeaderboard: LeaderboardEntry[] = [
-  { rank: 1, user_id: '1', username: 'PrinterKing', score: 12450, wins: 45, pnl: 8923.50, streak: 8 },
-  { rank: 2, user_id: '2', username: 'LTPMaster', score: 10230, wins: 38, pnl: 6543.20, streak: 5 },
-  { rank: 3, user_id: '3', username: 'PatienceCandle', score: 9870, wins: 36, pnl: 5234.00, streak: 6 },
-  { rank: 4, user_id: 'current', username: 'TraderJoe', score: 8650, wins: 32, pnl: 4823.50, streak: 5 },
-  { rank: 5, user_id: '5', username: 'LevelSniper', score: 7890, wins: 29, pnl: 3456.80, streak: 3 },
+  { rank: 1, user_id: '1', username: 'PrinterKing', score: 12450, win_rate: 75.2, total_trades: 60, streak: 8, badges: ['top-10'], change: 'up' },
+  { rank: 2, user_id: '2', username: 'LTPMaster', score: 10230, win_rate: 71.4, total_trades: 53, streak: 5, badges: [], change: 'same' },
+  { rank: 3, user_id: '3', username: 'PatienceCandle', score: 9870, win_rate: 69.2, total_trades: 52, streak: 6, badges: [], change: 'up' },
+  { rank: 4, user_id: 'current', username: 'TraderJoe', score: 8650, win_rate: 62.7, total_trades: 51, streak: 5, badges: [], change: 'up' },
+  { rank: 5, user_id: '5', username: 'LevelSniper', score: 7890, win_rate: 60.4, total_trades: 48, streak: 3, badges: [], change: 'down' },
 ];
 
 const mockAchievement: Achievement = {
   id: '1',
-  type: 'seven_day_streak',
-  name: '7-Day Streak',
+  slug: 'seven-day-streak',
+  title: '7-Day Streak',
   description: 'Trade for 7 consecutive days',
-  emoji: '🔥',
-  earned_at: '2024-01-15T10:30:00Z',
+  icon: '🔥',
+  category: 'consistency',
+  requirement: { type: 'streak', target: 7, current: 7 },
+  xp_reward: 100,
+  unlocked: true,
+  unlocked_at: '2024-01-15T10:30:00Z',
 };
 
 export default function OverviewPage() {

@@ -15,6 +15,9 @@ export interface SessionUser {
 
 export interface Session {
   user: SessionUser | null;
+  // Convenience properties for backward compatibility with API routes
+  userId?: string;
+  isAdmin?: boolean;
 }
 
 // Discord OAuth configuration
@@ -112,6 +115,9 @@ export async function getSession(): Promise<Session> {
         image: userData.avatar,
         isAdmin: userData.isAdmin,
       },
+      // Convenience properties for API routes
+      userId: userData.userId,
+      isAdmin: userData.isAdmin,
     };
   } catch {
     return { user: null };

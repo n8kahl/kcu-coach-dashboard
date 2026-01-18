@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   variant?: 'default' | 'gold' | 'success' | 'error' | 'warning' | 'info';
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'lg';
   dot?: boolean;
   pulse?: boolean;
 }
@@ -24,9 +24,10 @@ const Badge = forwardRef<HTMLSpanElement, BadgeProps>(
     const sizes = {
       sm: 'px-2 py-0.5 text-[10px]',
       md: 'px-3 py-1 text-xs',
+      lg: 'px-4 py-1.5 text-sm',
     };
 
-    const dotColors = {
+    const dotColors: Record<string, string> = {
       default: 'bg-[var(--text-secondary)]',
       gold: 'bg-[var(--accent-primary)]',
       success: 'bg-[var(--success)]',

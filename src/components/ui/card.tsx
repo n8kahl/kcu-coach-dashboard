@@ -47,27 +47,31 @@ const Card = forwardRef<HTMLDivElement, CardProps>(
 
 Card.displayName = 'Card';
 
-interface CardHeaderProps extends React.HTMLAttributes<HTMLDivElement> {
+export interface CardHeaderProps extends React.HTMLAttributes<HTMLDivElement> {
   title: string;
   subtitle?: string;
   action?: React.ReactNode;
+  icon?: React.ReactNode;
 }
 
 const CardHeader = forwardRef<HTMLDivElement, CardHeaderProps>(
-  ({ className, title, subtitle, action, ...props }, ref) => {
+  ({ className, title, subtitle, action, icon, ...props }, ref) => {
     return (
       <div
         ref={ref}
         className={cn('flex items-center justify-between mb-4', className)}
         {...props}
       >
-        <div>
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-primary)]">
-            {title}
-          </h3>
-          {subtitle && (
-            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{subtitle}</p>
-          )}
+        <div className="flex items-center gap-2">
+          {icon && <span className="text-[var(--accent-primary)]">{icon}</span>}
+          <div>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-primary)]">
+              {title}
+            </h3>
+            {subtitle && (
+              <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{subtitle}</p>
+            )}
+          </div>
         </div>
         {action && <div>{action}</div>}
       </div>

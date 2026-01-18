@@ -26,15 +26,13 @@ const mockTrades: TradeEntry[] = [
     exit_time: '2024-01-16T14:15:00Z',
     pnl: 295.00,
     pnl_percent: 3.31,
-    had_level: true,
-    had_trend: true,
-    had_patience_candle: true,
-    ltp_grade: 'A',
-    is_options: false,
-    setup_notes: 'Bounced off PDH with strong volume',
-    exit_notes: 'Took profit at resistance',
-    emotions: 'Confident, disciplined',
+    setup_type: 'PDH Bounce',
+    notes: 'Bounced off PDH with strong volume',
+    emotions: ['Confident', 'Disciplined'],
+    ltp_score: { level: 9, trend: 8, patience: 9, overall: 8.7 },
+    status: 'closed',
     created_at: '2024-01-16T14:15:00Z',
+    updated_at: '2024-01-16T14:15:00Z',
   },
   {
     id: '2',
@@ -44,21 +42,20 @@ const mockTrades: TradeEntry[] = [
     entry_price: 462.30,
     exit_price: 458.50,
     quantity: 50,
+    contract_type: 'put',
+    strike_price: 460,
+    expiration_date: '2024-01-19',
     entry_time: '2024-01-15T09:45:00Z',
     exit_time: '2024-01-15T11:30:00Z',
     pnl: 190.00,
     pnl_percent: 0.82,
-    had_level: true,
-    had_trend: false,
-    had_patience_candle: true,
-    ltp_grade: 'B',
-    is_options: true,
-    option_type: 'put',
-    strike_price: 460,
-    expiration: '2024-01-19',
-    setup_notes: 'Rejection at VWAP',
-    emotions: 'Slightly anxious at entry',
+    setup_type: 'VWAP Rejection',
+    notes: 'Rejection at VWAP',
+    emotions: ['Slightly anxious'],
+    ltp_score: { level: 8, trend: 6, patience: 8, overall: 7.3 },
+    status: 'closed',
     created_at: '2024-01-15T11:30:00Z',
+    updated_at: '2024-01-15T11:30:00Z',
   },
   {
     id: '3',
@@ -72,32 +69,31 @@ const mockTrades: TradeEntry[] = [
     exit_time: '2024-01-14T15:45:00Z',
     pnl: -90.00,
     pnl_percent: -2.09,
-    had_level: false,
-    had_trend: true,
-    had_patience_candle: false,
-    ltp_grade: 'D',
-    is_options: false,
-    setup_notes: 'FOMO entry, no clear level',
-    exit_notes: 'Cut loss at stop',
-    emotions: 'Frustrated, chased the move',
+    setup_type: 'FOMO Entry',
+    notes: 'FOMO entry, no clear level',
+    emotions: ['Frustrated'],
+    mistakes: ['Chased the move', 'No patience candle'],
+    ltp_score: { level: 4, trend: 7, patience: 3, overall: 4.7 },
+    status: 'closed',
     created_at: '2024-01-14T15:45:00Z',
+    updated_at: '2024-01-14T15:45:00Z',
   },
 ];
 
 const mockStats: TradeStats = {
-  totalTrades: 142,
-  winningTrades: 89,
-  losingTrades: 53,
-  winRate: 62.7,
-  totalPnL: 4823.50,
-  avgWin: 127.30,
-  avgLoss: -78.45,
-  profitFactor: 1.82,
-  largestWin: 892.00,
-  largestLoss: -345.00,
-  currentStreak: 5,
-  bestStreak: 12,
-  avgLTPGrade: 'B+',
+  total_trades: 142,
+  winning_trades: 89,
+  losing_trades: 53,
+  win_rate: 62.7,
+  total_pnl: 4823.50,
+  average_win: 127.30,
+  average_loss: -78.45,
+  profit_factor: 1.82,
+  largest_win: 892.00,
+  largest_loss: -345.00,
+  average_hold_time: 120,
+  best_setup: 'PDH Bounce',
+  worst_setup: 'FOMO Entry',
 };
 
 export default function JournalPage() {
@@ -203,7 +199,7 @@ export default function JournalPage() {
         </Tabs>
 
         {/* Win Card Modal */}
-        {showWinCard && selectedTrade && selectedTrade.pnl > 0 && (
+        {showWinCard && selectedTrade && (selectedTrade.pnl ?? 0) > 0 && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
             <div className="relative">
               <button
@@ -216,10 +212,10 @@ export default function JournalPage() {
                 symbol={selectedTrade.symbol}
                 direction={selectedTrade.direction}
                 entryPrice={selectedTrade.entry_price}
-                exitPrice={selectedTrade.exit_price}
-                pnl={selectedTrade.pnl}
-                pnlPercent={selectedTrade.pnl_percent}
-                ltpGrade={selectedTrade.ltp_grade}
+                exitPrice={selectedTrade.exit_price ?? selectedTrade.entry_price}
+                pnl={selectedTrade.pnl ?? 0}
+                pnlPercent={selectedTrade.pnl_percent ?? 0}
+                ltpGrade={selectedTrade.ltp_score ? (selectedTrade.ltp_score.overall >= 8 ? 'A' : selectedTrade.ltp_score.overall >= 6 ? 'B' : 'C') : 'N/A'}
                 username="TraderJoe"
               />
             </div>

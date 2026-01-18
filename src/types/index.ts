@@ -243,22 +243,35 @@ export interface LeaderboardEntry {
 // Win Card Types
 // ============================================
 
+export interface WinCardStat {
+  label: string;
+  value: string;
+  color?: 'profit' | 'loss' | 'gold' | 'default';
+  highlight?: boolean;
+}
+
 export interface WinCard {
   id: string;
   user_id: string;
-  trade_id: string;
-  symbol: string;
-  direction: 'long' | 'short';
-  pnl: number;
-  pnl_percent: number;
-  entry_price: number;
-  exit_price: number;
-  setup_type: string;
+  type: 'trade' | 'streak' | 'milestone' | 'achievement';
+  title: string;
+  subtitle?: string;
+  stats: WinCardStat[];
+  created_at: string;
+  shared_count: number;
+  // Legacy fields for database storage
+  trade_id?: string;
+  symbol?: string;
+  direction?: 'long' | 'short';
+  pnl?: number;
+  pnl_percent?: number;
+  entry_price?: number;
+  exit_price?: number;
+  setup_type?: string;
   notes?: string;
   screenshot?: string;
-  shared: boolean;
-  likes: number;
-  created_at: string;
+  shared?: boolean;
+  likes?: number;
 }
 
 // ============================================

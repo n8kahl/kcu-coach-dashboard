@@ -1,8 +1,9 @@
 'use client';
 
-import { SessionProvider as NextAuthSessionProvider } from 'next-auth/react';
 import { ReactNode } from 'react';
 
+// Custom session provider - no external auth library needed
+// Session is managed via HTTP-only cookies set by /api/auth/callback
 export function SessionProvider({ children }: { children: ReactNode }) {
-  return <NextAuthSessionProvider>{children}</NextAuthSessionProvider>;
+  return <>{children}</>;
 }

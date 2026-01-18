@@ -29,9 +29,9 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
         <Card variant="default" padding="md">
           <Stat
             label="Total P&L"
-            value={formatCurrency(stats.totalPnL)}
+            value={formatCurrency(stats.total_pnl)}
             icon={<DollarSign className="w-4 h-4" />}
-            valueColor={stats.totalPnL >= 0 ? 'profit' : 'loss'}
+            valueColor={stats.total_pnl >= 0 ? 'profit' : 'loss'}
             variant="default"
           />
         </Card>
@@ -39,24 +39,24 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
         <Card variant="default" padding="md">
           <Stat
             label="Win Rate"
-            value={`${stats.winRate.toFixed(1)}%`}
+            value={`${stats.win_rate.toFixed(1)}%`}
             icon={<Percent className="w-4 h-4" />}
-            valueColor={stats.winRate >= 50 ? 'profit' : 'loss'}
+            valueColor={stats.win_rate >= 50 ? 'profit' : 'loss'}
           />
         </Card>
 
         <Card variant="default" padding="md">
           <Stat
             label="Total Trades"
-            value={formatNumber(stats.totalTrades)}
+            value={formatNumber(stats.total_trades)}
             icon={<BarChart2 className="w-4 h-4" />}
           />
         </Card>
 
         <Card variant="default" padding="md">
           <Stat
-            label="Current Streak"
-            value={`${stats.currentStreak} days`}
+            label="Best Setup"
+            value={stats.best_setup}
             icon={<Flame className="w-4 h-4" />}
             valueColor="gold"
           />
@@ -76,7 +76,7 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-[var(--profit)]">
-                    {stats.winningTrades}
+                    {stats.winning_trades}
                   </p>
                   <p className="text-xs text-[var(--text-tertiary)] uppercase">Winners</p>
                 </div>
@@ -87,7 +87,7 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-[var(--loss)]">
-                    {stats.losingTrades}
+                    {stats.losing_trades}
                   </p>
                   <p className="text-xs text-[var(--text-tertiary)] uppercase">Losers</p>
                 </div>
@@ -97,13 +97,13 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
             <div className="h-2 bg-[var(--bg-elevated)] flex overflow-hidden">
               <motion.div
                 initial={{ width: 0 }}
-                animate={{ width: `${stats.winRate}%` }}
+                animate={{ width: `${stats.win_rate}%` }}
                 transition={{ duration: 0.5 }}
                 className="bg-[var(--profit)]"
               />
               <motion.div
                 initial={{ width: 0 }}
-                animate={{ width: `${100 - stats.winRate}%` }}
+                animate={{ width: `${100 - stats.win_rate}%` }}
                 transition={{ duration: 0.5 }}
                 className="bg-[var(--loss)]"
               />
@@ -117,24 +117,24 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
           <CardContent>
             <div className="flex items-center justify-center py-4">
               <CircularProgress
-                value={Math.min(stats.profitFactor * 50, 100)}
+                value={Math.min(stats.profit_factor * 50, 100)}
                 size={100}
                 strokeWidth={10}
                 showValue={false}
-                variant={stats.profitFactor >= 1.5 ? 'gold' : stats.profitFactor >= 1 ? 'success' : 'error'}
+                variant={stats.profit_factor >= 1.5 ? 'gold' : stats.profit_factor >= 1 ? 'success' : 'error'}
               />
               <div className="absolute">
                 <p
                   className={cn(
                     'text-3xl font-bold',
-                    stats.profitFactor >= 1.5
+                    stats.profit_factor >= 1.5
                       ? 'text-[var(--accent-primary)]'
-                      : stats.profitFactor >= 1
+                      : stats.profit_factor >= 1
                       ? 'text-[var(--profit)]'
                       : 'text-[var(--loss)]'
                   )}
                 >
-                  {stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)}
+                  {stats.profit_factor === Infinity ? '∞' : stats.profit_factor.toFixed(2)}
                 </p>
               </div>
             </div>
@@ -142,18 +142,18 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
               <span
                 className={cn(
                   'text-xs font-medium',
-                  stats.profitFactor >= 1.5
+                  stats.profit_factor >= 1.5
                     ? 'text-[var(--accent-primary)]'
-                    : stats.profitFactor >= 1
+                    : stats.profit_factor >= 1
                     ? 'text-[var(--profit)]'
                     : 'text-[var(--loss)]'
                 )}
               >
-                {stats.profitFactor >= 2
+                {stats.profit_factor >= 2
                   ? 'Excellent'
-                  : stats.profitFactor >= 1.5
+                  : stats.profit_factor >= 1.5
                   ? 'Good'
-                  : stats.profitFactor >= 1
+                  : stats.profit_factor >= 1
                   ? 'Break Even'
                   : 'Needs Work'}
               </span>
@@ -169,13 +169,13 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
               <div className="flex items-center justify-between">
                 <span className="text-xs uppercase text-[var(--text-tertiary)]">Avg Win</span>
                 <span className="text-lg font-bold text-[var(--profit)]">
-                  {formatCurrency(stats.avgWin)}
+                  {formatCurrency(stats.average_win)}
                 </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs uppercase text-[var(--text-tertiary)]">Avg Loss</span>
                 <span className="text-lg font-bold text-[var(--loss)]">
-                  {formatCurrency(Math.abs(stats.avgLoss))}
+                  {formatCurrency(Math.abs(stats.average_loss))}
                 </span>
               </div>
               <div className="pt-2 border-t border-[var(--border-primary)]">
@@ -184,12 +184,12 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
                   <span
                     className={cn(
                       'text-lg font-bold',
-                      stats.avgWin / Math.abs(stats.avgLoss) >= 1.5
+                      stats.average_win / Math.abs(stats.average_loss) >= 1.5
                         ? 'text-[var(--accent-primary)]'
                         : 'text-[var(--text-primary)]'
                     )}
                   >
-                    {(stats.avgWin / Math.abs(stats.avgLoss || 1)).toFixed(2)}:1
+                    {(stats.average_win / Math.abs(stats.average_loss || 1)).toFixed(2)}:1
                   </span>
                 </div>
               </div>
@@ -210,7 +210,7 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-[var(--profit)]">
-                    {formatCurrency(stats.largestWin)}
+                    {formatCurrency(stats.largest_win)}
                   </p>
                   <p className="text-xs text-[var(--text-tertiary)]">Personal Best</p>
                 </div>
@@ -229,7 +229,7 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-[var(--loss)]">
-                    {formatCurrency(stats.largestLoss)}
+                    {formatCurrency(stats.largest_loss)}
                   </p>
                   <p className="text-xs text-[var(--text-tertiary)]">Max Drawdown</p>
                 </div>
@@ -239,14 +239,14 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
         </Card>
       </div>
 
-      {/* LTP Grade */}
+      {/* LTP Compliance */}
       <Card variant="glow">
         <CardHeader title="LTP Compliance" subtitle="Following Levels • Trends • Patience Candles" />
         <CardContent>
           <div className="flex items-center justify-center py-6">
             <div className="text-center">
               <p className="text-6xl font-bold text-[var(--accent-primary)] glow-text-gold mb-2">
-                {stats.avgLTPGrade}
+                {stats.best_setup ? 'A' : 'N/A'}
               </p>
               <p className="text-sm text-[var(--text-secondary)]">Average Grade</p>
             </div>

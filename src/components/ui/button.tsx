@@ -10,6 +10,7 @@ export interface ButtonProps extends Omit<HTMLMotionProps<'button'>, 'ref'> {
   loading?: boolean;
   icon?: React.ReactNode;
   iconPosition?: 'left' | 'right';
+  fullWidth?: boolean;
 }
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
@@ -21,6 +22,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       loading = false,
       icon,
       iconPosition = 'left',
+      fullWidth = false,
       children,
       disabled,
       ...props
@@ -53,6 +55,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           'disabled:opacity-50 disabled:cursor-not-allowed',
           variants[variant],
           sizes[size],
+          fullWidth && 'w-full',
           className
         )}
         disabled={disabled || loading}
