@@ -43,7 +43,8 @@ export function broadcastToUser(userId: string, eventType: string, data: any) {
   const encodedMessage = new TextEncoder().encode(message);
 
   let sent = 0;
-  for (const controller of userConnections) {
+  const controllers = Array.from(userConnections);
+  for (const controller of controllers) {
     try {
       controller.enqueue(encodedMessage);
       sent++;
@@ -64,8 +65,10 @@ export function broadcastToAll(eventType: string, data: any) {
   const encodedMessage = new TextEncoder().encode(message);
 
   let totalSent = 0;
-  for (const [userId, userConnections] of connections) {
-    for (const controller of userConnections) {
+  const entries = Array.from(connections.entries());
+  for (const [userId, userConnections] of entries) {
+    const controllers = Array.from(userConnections);
+    for (const controller of controllers) {
       try {
         controller.enqueue(encodedMessage);
         totalSent++;
@@ -85,7 +88,8 @@ export function broadcastToAll(eventType: string, data: any) {
  */
 export function getConnectionCount(): number {
   let total = 0;
-  for (const userConnections of connections.values()) {
+  const allConnections = Array.from(connections.values());
+  for (const userConnections of allConnections) {
     total += userConnections.size;
   }
   return total;

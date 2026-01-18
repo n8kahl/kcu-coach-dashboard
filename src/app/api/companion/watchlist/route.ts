@@ -34,12 +34,15 @@ export async function GET() {
         .select()
         .single();
 
-      if (createError) {
+      if (createError || !newWatchlist) {
         console.error('Error creating watchlist:', createError);
         return NextResponse.json({ error: 'Failed to create watchlist' }, { status: 500 });
       }
       watchlist = newWatchlist;
     }
+
+    // At this point watchlist is guaranteed to exist
+    const currentWatchlist = watchlist!;
 
     // Get shared admin watchlist(s)
     const { data: sharedWatchlists } = await supabaseAdmin
@@ -49,7 +52,7 @@ export async function GET() {
       .eq('is_admin_watchlist', true);
 
     // Combine all symbols
-    const personalSymbols = watchlist?.symbols || [];
+    const personalSymbols = currentWatchlist.symbols || [];
     const sharedSymbols = sharedWatchlists?.flatMap(w => w.symbols || []) || [];
 
     // Create combined list with source info
@@ -79,7 +82,7 @@ export async function GET() {
 
     // Combine data
     const symbols = allSymbols.map((item: { symbol: string; is_shared: boolean }, index: number) => ({
-      id: `${watchlist.id}-${index}`,
+      id: `${currentWatchlist.id}-${index}`,
       symbol: item.symbol,
       is_shared: item.is_shared,
       added_at: new Date().toISOString(),
@@ -88,7 +91,7 @@ export async function GET() {
     }));
 
     return NextResponse.json({
-      watchlist_id: watchlist.id,
+      watchlist_id: currentWatchlist.id,
       symbols
     });
   } catch (error) {
