@@ -16,7 +16,7 @@ export async function GET() {
     let { data: watchlist, error: watchlistError } = await supabaseAdmin
       .from('watchlists')
       .select('id, name, is_shared, is_admin_watchlist, symbols')
-      .eq('owner_id', userId)
+      .eq('user_id', userId)
       .eq('is_shared', false)
       .single();
 
@@ -25,7 +25,7 @@ export async function GET() {
       const { data: newWatchlist, error: createError } = await supabaseAdmin
         .from('watchlists')
         .insert({
-          owner_id: userId,
+          user_id: userId,
           name: 'My Watchlist',
           is_shared: false,
           is_admin_watchlist: false,
@@ -121,7 +121,7 @@ export async function POST(request: Request) {
     const { data: watchlist, error: watchlistError } = await supabaseAdmin
       .from('watchlists')
       .select('id, symbols')
-      .eq('owner_id', userId)
+      .eq('user_id', userId)
       .eq('is_shared', false)
       .single();
 
@@ -130,7 +130,7 @@ export async function POST(request: Request) {
       const { error: createError } = await supabaseAdmin
         .from('watchlists')
         .insert({
-          owner_id: userId,
+          user_id: userId,
           name: 'My Watchlist',
           is_shared: false,
           is_admin_watchlist: false,
@@ -189,7 +189,7 @@ export async function DELETE(request: Request) {
     const { data: watchlist, error: watchlistError } = await supabaseAdmin
       .from('watchlists')
       .select('id, symbols')
-      .eq('owner_id', userId)
+      .eq('user_id', userId)
       .eq('is_shared', false)
       .single();
 

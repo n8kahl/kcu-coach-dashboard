@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     const { data: watchlist } = await supabaseAdmin
       .from('watchlists')
       .select('symbols')
-      .eq('owner_id', userId)
+      .eq('user_id', userId)
       .eq('is_shared', false)
       .single();
 
