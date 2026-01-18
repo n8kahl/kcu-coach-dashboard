@@ -10,11 +10,27 @@ function isPublicRoute(pathname: string): boolean {
   return publicRoutes.some(route => pathname.startsWith(route));
 }
 
-// Verify JWT token
+// Verify JWT token - must use same secret as jwt.ts (SESSION_SECRET)
 async function verifyToken(token: string): Promise<boolean> {
   try {
-    const secret = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-secret-key');
-    await jwtVerify(token, secret);
+    const secret = process.env.SESSION_SECRET;
+    if (!secret) {
+      // In development, use the same default as jwt.ts
+      if (process.env.NODE_ENV === 'development') {
+        const devSecret = new TextEncoder().encode('development-secret-key-change-in-production-32chars');
+        await jwtVerify(token, devSecret);
+        return true;
+      }
+      console.error('SESSION_SECRET environment variable is required');
+      return false;
+    }
+
+    if (secret.length < 32) {
+      console.error('SESSION_SECRET must be at least 32 characters');
+      return false;
+    }
+
+    await jwtVerify(token, new TextEncoder().encode(secret));
     return true;
   } catch {
     return false;
@@ -90,22 +106,37 @@ if (typeof setInterval !== 'undefined') {
 
 /**
  * Add security headers to response
+ *
+ * CSP Notes:
+ * - Next.js App Router requires 'unsafe-inline' for styles due to CSS-in-JS
+ * - 'unsafe-eval' is needed for development hot reload, but should be removed in production
+ * - For stricter CSP, consider implementing nonce-based script loading
+ * - See: https://nextjs.org/docs/app/building-your-application/configuring/content-security-policy
  */
 function addSecurityHeaders(response: NextResponse): NextResponse {
-  // Content Security Policy
-  response.headers.set(
-    'Content-Security-Policy',
-    [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // Next.js requires these
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: https: blob:",
-      "font-src 'self' data:",
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://discord.com https://api.anthropic.com",
-      "frame-src 'self' https://www.youtube.com https://player.vimeo.com",
-      "media-src 'self' https:",
-    ].join('; ')
-  );
+  const isDev = process.env.NODE_ENV === 'development';
+
+  // Content Security Policy - stricter in production
+  const cspDirectives = [
+    "default-src 'self'",
+    // Scripts: 'unsafe-eval' only in dev for hot reload
+    isDev
+      ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+      : "script-src 'self' 'unsafe-inline'", // TODO: Implement nonce-based CSP for stricter policy
+    "style-src 'self' 'unsafe-inline'", // Required for CSS-in-JS / Tailwind
+    "img-src 'self' data: https: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://discord.com https://api.anthropic.com https://cdn.discordapp.com",
+    "frame-src 'self' https://www.youtube.com https://player.vimeo.com",
+    "media-src 'self' https:",
+    "object-src 'none'", // Prevent Flash/plugin exploits
+    "base-uri 'self'", // Prevent base tag hijacking
+    "form-action 'self'", // Restrict form submissions
+    "frame-ancestors 'self'", // Prevent clickjacking (supplement to X-Frame-Options)
+    isDev ? '' : "upgrade-insecure-requests", // Force HTTPS in production
+  ].filter(Boolean).join('; ');
+
+  response.headers.set('Content-Security-Policy', cspDirectives);
 
   // Prevent clickjacking
   response.headers.set('X-Frame-Options', 'SAMEORIGIN');

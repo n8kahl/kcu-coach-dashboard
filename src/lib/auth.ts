@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { createHmac } from 'crypto';
 import { supabaseAdmin } from './supabase';
 import {
   createSessionToken,
@@ -7,6 +8,55 @@ import {
   refreshSessionToken,
   type SessionPayload,
 } from './jwt';
+
+// Get signing secret for OAuth state
+function getStateSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'development') {
+      return 'development-secret-key-change-in-production-32chars';
+    }
+    throw new Error('SESSION_SECRET is required for OAuth state signing');
+  }
+  return secret;
+}
+
+// Create signed OAuth state
+function createSignedState(data: Record<string, string>): string {
+  const payload = JSON.stringify(data);
+  const signature = createHmac('sha256', getStateSecret())
+    .update(payload)
+    .digest('hex')
+    .slice(0, 16); // Use first 16 chars of signature
+  return Buffer.from(`${signature}:${payload}`).toString('base64');
+}
+
+// Verify and parse signed OAuth state
+export function verifySignedState(state: string): Record<string, string> | null {
+  try {
+    const decoded = Buffer.from(state, 'base64').toString('utf-8');
+    const colonIndex = decoded.indexOf(':');
+    if (colonIndex === -1) return null;
+
+    const signature = decoded.slice(0, colonIndex);
+    const payload = decoded.slice(colonIndex + 1);
+
+    const expectedSignature = createHmac('sha256', getStateSecret())
+      .update(payload)
+      .digest('hex')
+      .slice(0, 16);
+
+    if (signature !== expectedSignature) {
+      console.error('OAuth state signature mismatch - possible tampering');
+      return null;
+    }
+
+    return JSON.parse(payload);
+  } catch (error) {
+    console.error('Failed to verify OAuth state:', error);
+    return null;
+  }
+}
 
 // Extended session user type
 export interface SessionUser {
@@ -31,14 +81,14 @@ const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID!;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET!;
 const DISCORD_REDIRECT_URI = process.env.NEXT_PUBLIC_DISCORD_REDIRECT_URI || process.env.DISCORD_REDIRECT_URI || `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback`;
 
-// Get Discord OAuth URL
+// Get Discord OAuth URL with cryptographically signed state
 export function getDiscordOAuthUrl(redirectTo: string = '/dashboard'): string {
   const params = new URLSearchParams({
     client_id: DISCORD_CLIENT_ID,
     redirect_uri: DISCORD_REDIRECT_URI,
     response_type: 'code',
     scope: 'identify email guilds',
-    state: Buffer.from(JSON.stringify({ redirect: redirectTo })).toString('base64'),
+    state: createSignedState({ redirect: redirectTo }),
   });
   return `https://discord.com/api/oauth2/authorize?${params.toString()}`;
 }

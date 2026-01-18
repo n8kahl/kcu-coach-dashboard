@@ -35,16 +35,21 @@ export const supabaseAdmin = new Proxy({} as SupabaseClient, {
   get(_, prop) {
     if (!_supabaseAdmin) {
       const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      _supabaseAdmin = createClient(
-        getSupabaseUrl(),
-        serviceKey || getSupabaseAnonKey(),
-        {
-          auth: {
-            autoRefreshToken: false,
-            persistSession: false,
-          },
+      if (!serviceKey) {
+        // In development, warn but allow anon key for basic testing
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('⚠️ SUPABASE_SERVICE_ROLE_KEY not set. Admin operations will fail.');
+          _supabaseAdmin = createClient(getSupabaseUrl(), getSupabaseAnonKey(), {
+            auth: { autoRefreshToken: false, persistSession: false },
+          });
+        } else {
+          throw new Error('SUPABASE_SERVICE_ROLE_KEY is required in production');
         }
-      );
+      } else {
+        _supabaseAdmin = createClient(getSupabaseUrl(), serviceKey, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        });
+      }
     }
     return (_supabaseAdmin as unknown as Record<string | symbol, unknown>)[prop];
   },

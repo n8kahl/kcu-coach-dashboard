@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { exchangeDiscordCode, setSessionCookie } from '@/lib/auth';
+import { exchangeDiscordCode, setSessionCookie, verifySignedState } from '@/lib/auth';
 import { randomUUID } from 'crypto';
 
 export async function GET(request: NextRequest) {
@@ -11,16 +11,16 @@ export async function GET(request: NextRequest) {
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
-  // Parse redirect from state parameter
+  // Verify and parse signed state parameter (prevents tampering)
   let redirectTo = '/dashboard';
   if (state) {
-    try {
-      const stateData = JSON.parse(Buffer.from(state, 'base64').toString());
-      if (stateData.redirect && stateData.redirect.startsWith('/')) {
-        redirectTo = stateData.redirect;
-      }
-    } catch {
-      // Invalid state, use default redirect
+    const stateData = verifySignedState(state);
+    if (stateData && stateData.redirect && stateData.redirect.startsWith('/')) {
+      redirectTo = stateData.redirect;
+    } else if (!stateData) {
+      // State signature invalid - possible CSRF attack
+      console.warn('OAuth callback received invalid state signature');
+      return NextResponse.redirect(`${baseUrl}/login?error=invalid_state`);
     }
   }
 
