@@ -3,6 +3,9 @@
 -- ============================================
 -- Now returns the most recent briefing and includes earnings column
 
+-- Drop existing function to change return type
+DROP FUNCTION IF EXISTS get_latest_briefing(TEXT);
+
 CREATE OR REPLACE FUNCTION get_latest_briefing(p_type TEXT DEFAULT 'morning')
 RETURNS TABLE (
   id UUID,

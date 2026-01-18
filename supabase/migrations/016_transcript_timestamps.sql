@@ -26,7 +26,7 @@ COMMENT ON COLUMN knowledge_chunks.segment_indices IS 'Array of original transcr
 -- Granular storage of individual transcript segments
 -- ============================================
 CREATE TABLE IF NOT EXISTS transcript_segments (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     video_id VARCHAR(100) NOT NULL,
     lesson_id UUID REFERENCES lessons(id) ON DELETE SET NULL,
     segment_index INTEGER NOT NULL,
@@ -62,7 +62,7 @@ COMMENT ON TABLE transcript_segments IS 'Individual transcript segments with pre
 -- Maps quiz questions to relevant video timestamps
 -- ============================================
 CREATE TABLE IF NOT EXISTS quiz_remediation_links (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     quiz_id UUID REFERENCES quizzes(id) ON DELETE CASCADE,
     question_id VARCHAR(100) NOT NULL, -- ID within quiz JSON
     video_id VARCHAR(100) NOT NULL,
@@ -89,7 +89,7 @@ COMMENT ON TABLE quiz_remediation_links IS 'Links quiz questions to relevant vid
 -- Track processing status for each video
 -- ============================================
 CREATE TABLE IF NOT EXISTS transcript_processing_status (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     video_id VARCHAR(100) UNIQUE NOT NULL,
     lesson_id UUID REFERENCES lessons(id) ON DELETE SET NULL,
     status VARCHAR(50) DEFAULT 'pending', -- pending, processing, completed, failed

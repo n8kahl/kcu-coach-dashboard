@@ -8,7 +8,7 @@
 -- Stores Thinkific user data for reference
 -- ============================================
 CREATE TABLE IF NOT EXISTS thinkific_users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     thinkific_id INTEGER UNIQUE NOT NULL,
     email VARCHAR(255) NOT NULL,
     first_name VARCHAR(100),
@@ -27,7 +27,7 @@ CREATE INDEX idx_thinkific_users_email ON thinkific_users(email);
 -- Tracks user enrollments and progress in courses
 -- ============================================
 CREATE TABLE IF NOT EXISTS thinkific_enrollments (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     thinkific_enrollment_id INTEGER UNIQUE NOT NULL,
     thinkific_user_id INTEGER NOT NULL,
     user_email VARCHAR(255) NOT NULL,
@@ -54,7 +54,7 @@ CREATE INDEX idx_thinkific_enrollments_completed ON thinkific_enrollments(comple
 -- Tracks individual lesson completions
 -- ============================================
 CREATE TABLE IF NOT EXISTS thinkific_lesson_completions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     thinkific_user_id INTEGER NOT NULL,
     user_email VARCHAR(255) NOT NULL,
     course_id INTEGER NOT NULL,
@@ -80,7 +80,7 @@ CREATE INDEX idx_thinkific_lessons_type ON thinkific_lesson_completions(content_
 -- For debugging and audit trail
 -- ============================================
 CREATE TABLE IF NOT EXISTS thinkific_webhook_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_type VARCHAR(100) NOT NULL,
     payload JSONB NOT NULL,
     received_at TIMESTAMPTZ DEFAULT NOW(),
@@ -284,7 +284,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Create XP transactions table if not exists
 CREATE TABLE IF NOT EXISTS xp_transactions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES user_profiles(id) ON DELETE CASCADE,
     amount INTEGER NOT NULL,
     source VARCHAR(100) NOT NULL,

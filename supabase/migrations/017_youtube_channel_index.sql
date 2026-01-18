@@ -5,10 +5,31 @@
 -- and supplementary learning content outside Thinkific
 
 -- ============================================
+-- Add missing columns to youtube_videos if table exists
+-- ============================================
+DO $$
+BEGIN
+    -- Add missing columns if table exists but columns don't
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'youtube_videos') THEN
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS category VARCHAR(100);
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS topics TEXT[];
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS ltp_relevance FLOAT DEFAULT 0.0;
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS transcript_status VARCHAR(20) DEFAULT 'pending';
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS segments_count INTEGER DEFAULT 0;
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS chunks_count INTEGER DEFAULT 0;
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS error_message TEXT;
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS last_indexed_at TIMESTAMPTZ;
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS tags TEXT[];
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS playlist_id VARCHAR(50);
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS playlist_title VARCHAR(200);
+    END IF;
+END $$;
+
+-- ============================================
 -- YouTube Videos Table
 -- ============================================
 CREATE TABLE IF NOT EXISTS youtube_videos (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     video_id VARCHAR(20) UNIQUE NOT NULL,
     title TEXT NOT NULL,
     description TEXT,
@@ -66,7 +87,7 @@ COMMENT ON TABLE youtube_videos IS 'Indexed YouTube videos from KayCapitals chan
 -- YouTube Channel Sync Status
 -- ============================================
 CREATE TABLE IF NOT EXISTS youtube_channel_sync (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     channel_id VARCHAR(50) UNIQUE NOT NULL,
     channel_name VARCHAR(200),
     last_sync_at TIMESTAMPTZ,
@@ -85,7 +106,7 @@ COMMENT ON TABLE youtube_channel_sync IS 'Tracks YouTube channel synchronization
 -- YouTube Playlists Table
 -- ============================================
 CREATE TABLE IF NOT EXISTS youtube_playlists (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     playlist_id VARCHAR(50) UNIQUE NOT NULL,
     title VARCHAR(200) NOT NULL,
     description TEXT,
