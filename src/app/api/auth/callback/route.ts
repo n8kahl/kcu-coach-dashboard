@@ -34,6 +34,12 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Log environment info for debugging
+    console.log('Auth callback - environment check:', {
+      hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      nodeEnv: process.env.NODE_ENV,
+    });
+
     // Exchange code for Discord user info
     console.log('Exchanging Discord code for user info...');
     const discordUser = await exchangeDiscordCode(code);
@@ -75,19 +81,40 @@ export async function GET(request: NextRequest) {
       const userId = randomUUID();
       console.log('Creating fresh user with id:', userId);
 
-      const { error: usersInsertError } = await supabaseAdmin
+      const { data: insertedUser, error: usersInsertError } = await supabaseAdmin
         .from('users')
         .insert({
           id: userId,
           discord_id: discordUser.id,
           username: discordUser.username,
           email: discordUser.email || null,
-        });
+        })
+        .select()
+        .single();
 
       if (usersInsertError) {
         console.error('Error creating user in users table:', usersInsertError);
         return NextResponse.redirect(`${baseUrl}/login?error=create_failed`);
       }
+
+      // Verify the user was actually created (RLS might silently block inserts)
+      if (!insertedUser) {
+        console.error('User insert returned no data - RLS may be blocking. Checking if user exists...');
+        const { data: verifyUser, error: verifyError } = await supabaseAdmin
+          .from('users')
+          .select('id')
+          .eq('id', userId)
+          .single();
+
+        if (verifyError || !verifyUser) {
+          console.error('User verification failed:', verifyError);
+          console.error('This may indicate RLS policies are blocking service role inserts.');
+          console.error('Please check that SUPABASE_SERVICE_ROLE_KEY is set correctly.');
+          return NextResponse.redirect(`${baseUrl}/login?error=user_creation_blocked`);
+        }
+      }
+
+      console.log('User created successfully in users table:', userId);
 
       // Create user_profiles entry
       const { data: newUser, error: createError } = await supabaseAdmin
