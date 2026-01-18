@@ -55,70 +55,38 @@ export async function GET(request: NextRequest) {
       // No user_profile found - we need to ensure user exists in 'users' table first
       // (due to foreign key constraint user_profiles_id_fkey)
 
-      // Check if user exists in users table by discord_id
-      const { data: existingUser } = await supabaseAdmin
+      // IMPORTANT: Clean up any stale/corrupted entries first
+      // Delete any existing entries for this discord_id from both tables
+      console.log('Cleaning up any existing entries for discord_id:', discordUser.id);
+
+      // Delete from user_profiles first (child table)
+      await supabaseAdmin
+        .from('user_profiles')
+        .delete()
+        .eq('discord_id', discordUser.id);
+
+      // Delete from users table (parent table)
+      await supabaseAdmin
         .from('users')
-        .select('id')
-        .eq('discord_id', discordUser.id)
-        .single();
+        .delete()
+        .eq('discord_id', discordUser.id);
 
-      let userId: string;
+      // Create fresh user with new UUID
+      const userId = randomUUID();
+      console.log('Creating fresh user with id:', userId);
 
-      if (existingUser) {
-        // User exists in users table - verify it's actually there (not a stale reference)
-        const { data: verifyUser } = await supabaseAdmin
-          .from('users')
-          .select('id')
-          .eq('id', existingUser.id)
-          .single();
+      const { error: usersInsertError } = await supabaseAdmin
+        .from('users')
+        .insert({
+          id: userId,
+          discord_id: discordUser.id,
+          username: discordUser.username,
+          email: discordUser.email || null,
+        });
 
-        if (verifyUser) {
-          // User truly exists, use this ID
-          userId = existingUser.id;
-          console.log('Found existing user in users table, creating profile with id:', userId);
-        } else {
-          // User entry is stale/corrupted - create fresh
-          userId = randomUUID();
-          console.log('Stale user entry found, creating fresh user with id:', userId);
-
-          // Delete the stale discord_id reference if it exists
-          await supabaseAdmin
-            .from('users')
-            .delete()
-            .eq('discord_id', discordUser.id);
-
-          const { error: usersInsertError } = await supabaseAdmin
-            .from('users')
-            .insert({
-              id: userId,
-              discord_id: discordUser.id,
-              username: discordUser.username,
-              email: discordUser.email || null,
-            });
-
-          if (usersInsertError) {
-            console.error('Error creating user in users table:', usersInsertError);
-            return NextResponse.redirect(`${baseUrl}/login?error=create_failed`);
-          }
-        }
-      } else {
-        // No user exists - create new user in users table
-        userId = randomUUID();
-        console.log('Creating new user with id:', userId);
-
-        const { error: usersInsertError } = await supabaseAdmin
-          .from('users')
-          .insert({
-            id: userId,
-            discord_id: discordUser.id,
-            username: discordUser.username,
-            email: discordUser.email || null,
-          });
-
-        if (usersInsertError) {
-          console.error('Error creating user in users table:', usersInsertError);
-          return NextResponse.redirect(`${baseUrl}/login?error=create_failed`);
-        }
+      if (usersInsertError) {
+        console.error('Error creating user in users table:', usersInsertError);
+        return NextResponse.redirect(`${baseUrl}/login?error=create_failed`);
       }
 
       // Create user_profiles entry
@@ -146,10 +114,8 @@ export async function GET(request: NextRequest) {
 
       if (createError) {
         console.error('Error creating user profile:', createError);
-        // Only clean up users table if we created it in this request
-        if (!existingUser) {
-          await supabaseAdmin.from('users').delete().eq('id', userId);
-        }
+        // Clean up the users table entry we just created
+        await supabaseAdmin.from('users').delete().eq('id', userId);
         return NextResponse.redirect(`${baseUrl}/login?error=create_failed`);
       }
 
