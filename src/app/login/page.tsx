@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,11 +8,14 @@ import { Badge } from '@/components/ui/badge';
 import { Bot, Shield, TrendingUp, Users } from 'lucide-react';
 
 export default function LoginPage() {
-  const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get('redirect') || '/dashboard';
 
   const handleLogin = () => {
-    // Trigger Discord OAuth flow
-    window.location.href = '/api/auth/discord';
+    // Trigger Discord OAuth flow with redirect URL
+    const authUrl = new URL('/api/auth/discord', window.location.origin);
+    authUrl.searchParams.set('redirect', redirectTo);
+    window.location.href = authUrl.toString();
   };
 
   return (

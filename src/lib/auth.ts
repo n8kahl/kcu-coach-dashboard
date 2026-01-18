@@ -32,12 +32,13 @@ const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET!;
 const DISCORD_REDIRECT_URI = process.env.NEXT_PUBLIC_DISCORD_REDIRECT_URI || process.env.DISCORD_REDIRECT_URI || `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback`;
 
 // Get Discord OAuth URL
-export function getDiscordOAuthUrl(): string {
+export function getDiscordOAuthUrl(redirectTo: string = '/dashboard'): string {
   const params = new URLSearchParams({
     client_id: DISCORD_CLIENT_ID,
     redirect_uri: DISCORD_REDIRECT_URI,
     response_type: 'code',
     scope: 'identify email guilds',
+    state: Buffer.from(JSON.stringify({ redirect: redirectTo })).toString('base64'),
   });
   return `https://discord.com/api/oauth2/authorize?${params.toString()}`;
 }

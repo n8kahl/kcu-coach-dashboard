@@ -7,8 +7,22 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
   const error = searchParams.get('error');
+  const state = searchParams.get('state');
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
+  // Parse redirect from state parameter
+  let redirectTo = '/dashboard';
+  if (state) {
+    try {
+      const stateData = JSON.parse(Buffer.from(state, 'base64').toString());
+      if (stateData.redirect && stateData.redirect.startsWith('/')) {
+        redirectTo = stateData.redirect;
+      }
+    } catch {
+      // Invalid state, use default redirect
+    }
+  }
 
   if (error) {
     console.error('Discord OAuth error:', error);
@@ -43,7 +57,7 @@ export async function GET(request: NextRequest) {
       const userId = randomUUID();
       console.log('Creating new user with id:', userId);
 
-      // First, insert into the parent 'users' table
+      // First, insert into the parent 'users' table (minimal fields only)
       const { error: usersInsertError } = await supabaseAdmin
         .from('users')
         .insert({
@@ -51,9 +65,6 @@ export async function GET(request: NextRequest) {
           discord_id: discordUser.id,
           username: discordUser.username,
           email: discordUser.email || null,
-          avatar_url: discordUser.avatar
-            ? `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`
-            : null,
         });
 
       if (usersInsertError) {
@@ -116,9 +127,9 @@ export async function GET(request: NextRequest) {
       isAdmin: user.is_admin || false,
     });
 
-    console.log('Login successful, redirecting to dashboard');
-    // Redirect to dashboard
-    return NextResponse.redirect(`${baseUrl}/dashboard`);
+    console.log('Login successful, redirecting to:', redirectTo);
+    // Redirect to original destination or dashboard
+    return NextResponse.redirect(`${baseUrl}${redirectTo}`);
   } catch (error) {
     console.error('Auth callback error:', error);
     // Include more detail in the error for debugging

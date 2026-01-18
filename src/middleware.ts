@@ -1,5 +1,25 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { jwtVerify } from 'jose';
+
+// Routes that don't require authentication
+const publicRoutes = ['/login', '/api/auth', '/api/health'];
+
+// Check if a path is public (doesn't require auth)
+function isPublicRoute(pathname: string): boolean {
+  return publicRoutes.some(route => pathname.startsWith(route));
+}
+
+// Verify JWT token
+async function verifyToken(token: string): Promise<boolean> {
+  try {
+    const secret = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-secret-key');
+    await jwtVerify(token, secret);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Rate limiting store (in-memory for single server, use Redis in production)
 const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
@@ -130,7 +150,7 @@ function getClientIdentifier(request: NextRequest): string {
   return `${ip}:${pathPrefix}`;
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Skip middleware for static files and Next.js internals
@@ -140,6 +160,45 @@ export function middleware(request: NextRequest) {
     pathname.includes('.') // Static files
   ) {
     return NextResponse.next();
+  }
+
+  // Check authentication for protected routes
+  if (!isPublicRoute(pathname)) {
+    const sessionToken = request.cookies.get('kcu_session')?.value;
+
+    if (!sessionToken) {
+      // No session cookie, redirect to login
+      const loginUrl = new URL('/login', request.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+
+    // Verify the token is valid
+    const isValid = await verifyToken(sessionToken);
+    if (!isValid) {
+      // Invalid token, clear cookie and redirect to login
+      const loginUrl = new URL('/login', request.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      const response = NextResponse.redirect(loginUrl);
+      response.cookies.delete('kcu_session');
+      return response;
+    }
+  }
+
+  // If user is logged in and tries to access login page, redirect to dashboard
+  if (pathname === '/login') {
+    const sessionToken = request.cookies.get('kcu_session')?.value;
+    if (sessionToken) {
+      const isValid = await verifyToken(sessionToken);
+      if (isValid) {
+        return NextResponse.redirect(new URL('/dashboard', request.url));
+      }
+    }
+  }
+
+  // Redirect root to dashboard (which will redirect to login if not authenticated)
+  if (pathname === '/') {
+    return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
   // Rate limiting for API routes
