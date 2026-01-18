@@ -1,13 +1,14 @@
 'use client';
 
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Bot, Shield, TrendingUp, Users } from 'lucide-react';
+import { Bot, Shield, TrendingUp, Users, Loader2 } from 'lucide-react';
 
-export default function LoginPage() {
+function LoginContent() {
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') || '/dashboard';
 
@@ -93,6 +94,25 @@ export default function LoginPage() {
         </Card>
       </motion.div>
     </div>
+  );
+}
+
+function LoginFallback() {
+  return (
+    <div className="min-h-screen bg-[var(--bg-primary)] bg-hex-pattern flex items-center justify-center p-6">
+      <div className="flex items-center gap-3">
+        <Loader2 className="w-6 h-6 animate-spin text-[var(--accent-primary)]" />
+        <span className="text-[var(--text-secondary)]">Loading...</span>
+      </div>
+    </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <LoginContent />
+    </Suspense>
   );
 }
 
