@@ -239,6 +239,93 @@ export class ThinkificAPI {
   // ============================================
 
   /**
+   * Sync specific courses by their Thinkific IDs
+   */
+  async syncSpecificCourses(courseIds: number[]): Promise<ThinkificSyncResult> {
+    const errors: string[] = [];
+    let coursesSynced = 0;
+    let chaptersSynced = 0;
+    let contentsSynced = 0;
+
+    try {
+      console.log(`[ThinkificSync] Syncing ${courseIds.length} specific courses...`);
+
+      for (const courseId of courseIds) {
+        try {
+          // Fetch full course details from Thinkific API
+          console.log(`[ThinkificSync] Fetching course ${courseId}...`);
+          const course = await this.getCourse(courseId);
+
+          // Upsert course to database
+          await this.upsertCourse(course);
+          coursesSynced++;
+
+          // Fetch and sync chapters
+          console.log(`[ThinkificSync] Fetching chapters for course ${courseId}: ${course.name}`);
+          const chapters = await this.getChapters(course.id);
+
+          for (const chapter of chapters) {
+            try {
+              await this.upsertChapter(chapter, course.id);
+              chaptersSynced++;
+
+              // Fetch and sync contents
+              const contents = await this.getContents(chapter.id);
+              for (const content of contents) {
+                try {
+                  await this.upsertContent(content, chapter.id, course.id);
+                  contentsSynced++;
+                } catch (contentError) {
+                  const msg = `Failed to sync content ${content.id}: ${contentError}`;
+                  console.error(`[ThinkificSync] ${msg}`);
+                  errors.push(msg);
+                }
+              }
+            } catch (chapterError) {
+              const msg = `Failed to sync chapter ${chapter.id}: ${chapterError}`;
+              console.error(`[ThinkificSync] ${msg}`);
+              errors.push(msg);
+            }
+          }
+
+          // Update course with counts
+          await this.updateCourseCounts(course.id);
+        } catch (courseError) {
+          const msg = `Failed to sync course ${courseId}: ${courseError}`;
+          console.error(`[ThinkificSync] ${msg}`);
+          errors.push(msg);
+        }
+      }
+
+      console.log(
+        `[ThinkificSync] Selective sync complete: ${coursesSynced} courses, ${chaptersSynced} chapters, ${contentsSynced} contents`
+      );
+
+      return {
+        success: errors.length === 0,
+        courses_synced: coursesSynced,
+        chapters_synced: chaptersSynced,
+        contents_synced: contentsSynced,
+        errors,
+        synced_at: new Date().toISOString(),
+      };
+    } catch (error) {
+      console.error('[ThinkificSync] Fatal error in selective sync:', error);
+      return {
+        success: false,
+        courses_synced: coursesSynced,
+        chapters_synced: chaptersSynced,
+        contents_synced: contentsSynced,
+        errors: [
+          ...errors,
+          `Fatal sync error: ${error instanceof Error ? error.message : String(error)}`,
+        ],
+        synced_at: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
    * Sync all courses, chapters, and contents to local database
    */
   async syncAllCourses(): Promise<ThinkificSyncResult> {
@@ -519,6 +606,22 @@ export function isThinkificConfigured(): boolean {
 export async function syncThinkificCourses(): Promise<ThinkificSyncResult> {
   const api = getThinkificAPI();
   return api.syncAllCourses();
+}
+
+/**
+ * Sync specific Thinkific courses by their IDs
+ */
+export async function syncThinkificCoursesByIds(courseIds: number[]): Promise<ThinkificSyncResult> {
+  const api = getThinkificAPI();
+  return api.syncSpecificCourses(courseIds);
+}
+
+/**
+ * Get available courses directly from Thinkific API (for admin course selection)
+ */
+export async function getAvailableThinkificCourses(): Promise<ThinkificCourse[]> {
+  const api = getThinkificAPI();
+  return api.getCourses();
 }
 
 /**

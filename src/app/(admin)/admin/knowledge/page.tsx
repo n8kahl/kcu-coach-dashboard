@@ -142,6 +142,15 @@ export default function KnowledgeCMSPage() {
   // Thinkific State
   const [thinkificStats, setThinkificStats] = useState<ThinkificStats | null>(null);
   const [thinkificSyncing, setThinkificSyncing] = useState(false);
+  const [availableCourses, setAvailableCourses] = useState<Array<{
+    id: number;
+    name: string;
+    slug: string;
+    description: string | null;
+    image_url: string | null;
+  }>>([]);
+  const [selectedCourseIds, setSelectedCourseIds] = useState<Set<number>>(new Set());
+  const [loadingCourses, setLoadingCourses] = useState(false);
 
   // Active tab
   const [activeTab, setActiveTab] = useState('youtube');
@@ -295,6 +304,72 @@ export default function KnowledgeCMSPage() {
     } finally {
       setThinkificSyncing(false);
     }
+  };
+
+  const fetchAvailableCourses = async () => {
+    setLoadingCourses(true);
+    try {
+      const response = await fetch('/api/admin/thinkific/sync?action=available');
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableCourses(data.courses || []);
+      }
+    } catch (err) {
+      console.error('Error fetching available courses:', err);
+    } finally {
+      setLoadingCourses(false);
+    }
+  };
+
+  const handleSyncSelectedCourses = async () => {
+    if (selectedCourseIds.size === 0) {
+      alert('Please select at least one course to sync');
+      return;
+    }
+
+    setThinkificSyncing(true);
+    try {
+      const response = await fetch('/api/admin/thinkific/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ courseIds: Array.from(selectedCourseIds) }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(result.message || `Sync completed: ${result.courses_synced} courses, ${result.chapters_synced} chapters, ${result.contents_synced} contents`);
+        setSelectedCourseIds(new Set());
+        fetchData();
+      } else {
+        const err = await response.json();
+        alert(`Sync failed: ${err.error || err.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Error syncing selected courses:', err);
+      alert('Failed to sync selected courses');
+    } finally {
+      setThinkificSyncing(false);
+    }
+  };
+
+  const toggleCourseSelection = (courseId: number) => {
+    setSelectedCourseIds(prev => {
+      const next = new Set(prev);
+      if (next.has(courseId)) {
+        next.delete(courseId);
+      } else {
+        next.add(courseId);
+      }
+      return next;
+    });
+  };
+
+  const selectAllCourses = () => {
+    setSelectedCourseIds(new Set(availableCourses.map(c => c.id)));
+  };
+
+  const clearCourseSelection = () => {
+    setSelectedCourseIds(new Set());
   };
 
   const handleProcessPending = async () => {
@@ -769,30 +844,115 @@ export default function KnowledgeCMSPage() {
                       </div>
                     )}
 
-                    <Button
-                      onClick={handleThinkificSync}
-                      disabled={thinkificSyncing || !thinkificStats?.configured}
-                      className="w-full"
-                      variant="primary"
-                    >
-                      {thinkificSyncing ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Syncing Thinkific Content...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="w-4 h-4 mr-2" />
-                          Sync All Courses
-                        </>
-                      )}
-                    </Button>
-
-                    <p className="text-xs text-[var(--text-muted)] text-center">
-                      Fetches all courses, chapters, and lessons from Thinkific API
-                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={handleThinkificSync}
+                        disabled={thinkificSyncing || !thinkificStats?.configured}
+                        className="flex-1"
+                        variant="primary"
+                      >
+                        {thinkificSyncing ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Syncing...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Sync All
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        onClick={fetchAvailableCourses}
+                        disabled={loadingCourses || !thinkificStats?.configured}
+                        variant="secondary"
+                      >
+                        {loadingCourses ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          'Select Courses'
+                        )}
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
+
+                {/* Course Selection Card */}
+                {availableCourses.length > 0 && (
+                  <Card>
+                    <CardHeader title="Select Courses to Sync">
+                      <div className="flex items-center gap-2">
+                        <Button size="sm" variant="ghost" onClick={selectAllCourses}>
+                          Select All
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={clearCourseSelection}>
+                          Clear
+                        </Button>
+                        <Badge variant={selectedCourseIds.size > 0 ? 'success' : 'default'} size="sm">
+                          {selectedCourseIds.size} selected
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="max-h-64 overflow-y-auto">
+                      <div className="space-y-2">
+                        {availableCourses.map((course) => (
+                          <div
+                            key={course.id}
+                            onClick={() => toggleCourseSelection(course.id)}
+                            className={cn(
+                              'p-3 rounded-lg cursor-pointer transition-colors flex items-center gap-3',
+                              selectedCourseIds.has(course.id)
+                                ? 'bg-[var(--accent-primary)]/20 border border-[var(--accent-primary)]'
+                                : 'bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] border border-transparent'
+                            )}
+                          >
+                            <div className={cn(
+                              'w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0',
+                              selectedCourseIds.has(course.id)
+                                ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]'
+                                : 'border-[var(--border-secondary)]'
+                            )}>
+                              {selectedCourseIds.has(course.id) && (
+                                <CheckCircle2 className="w-3 h-3 text-white" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-[var(--text-primary)] truncate">
+                                {course.name}
+                              </p>
+                              {course.description && (
+                                <p className="text-xs text-[var(--text-muted)] truncate">
+                                  {course.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                    <div className="p-4 border-t border-[var(--border-primary)]">
+                      <Button
+                        onClick={handleSyncSelectedCourses}
+                        disabled={thinkificSyncing || selectedCourseIds.size === 0}
+                        className="w-full"
+                        variant="primary"
+                      >
+                        {thinkificSyncing ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Syncing Selected Courses...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Sync {selectedCourseIds.size} Selected Course{selectedCourseIds.size !== 1 ? 's' : ''}
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </Card>
+                )}
 
                 {/* Webhook Info Card */}
                 <Card>

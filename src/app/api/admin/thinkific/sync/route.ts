@@ -10,9 +10,11 @@ import { getSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import {
   syncThinkificCourses,
+  syncThinkificCoursesByIds,
   getThinkificSyncStatus,
   isThinkificConfigured,
   getThinkificCoursesForLearning,
+  getAvailableThinkificCourses,
 } from '@/lib/thinkific-api';
 import logger from '@/lib/logger';
 
@@ -61,13 +63,37 @@ export async function GET(request: Request) {
       });
     }
 
-    // Return courses for preview
+    // Return courses from local DB for preview
     if (action === 'courses') {
       const courses = await getThinkificCoursesForLearning();
       return NextResponse.json({
         configured: true,
         courses,
       });
+    }
+
+    // Return available courses from Thinkific API (for admin selection)
+    if (action === 'available') {
+      try {
+        const courses = await getAvailableThinkificCourses();
+        return NextResponse.json({
+          configured: true,
+          courses: courses.map((c) => ({
+            id: c.id,
+            name: c.name,
+            slug: c.slug,
+            description: c.description,
+            image_url: c.course_card_image_url || c.banner_image_url,
+          })),
+        });
+      } catch (apiError) {
+        logger.error('Error fetching available Thinkific courses', apiError instanceof Error ? apiError : { message: String(apiError) });
+        return NextResponse.json({
+          configured: true,
+          courses: [],
+          error: 'Failed to fetch courses from Thinkific API',
+        });
+      }
     }
 
     // Default: return full status with courses
@@ -120,13 +146,16 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json().catch(() => ({}));
-    const { action = 'full' } = body;
+    const { action = 'full', courseIds = [] } = body;
+
+    // Determine sync type for logging
+    const syncType = courseIds.length > 0 ? 'selective' : action;
 
     // Create sync log entry
     const { data: syncLog, error: logError } = await supabaseAdmin
       .from('thinkific_sync_log')
       .insert({
-        sync_type: action,
+        sync_type: syncType,
         status: 'running',
         started_at: new Date().toISOString(),
       })
@@ -138,14 +167,17 @@ export async function POST(request: Request) {
     }
 
     logger.info('Starting Thinkific sync', {
-      action,
+      action: syncType,
+      courseIds: courseIds.length > 0 ? courseIds : 'all',
       adminId: session.userId,
       syncLogId: syncLog?.id,
     });
 
     try {
-      // Perform sync
-      const result = await syncThinkificCourses();
+      // Perform sync - selective or full
+      const result = courseIds.length > 0
+        ? await syncThinkificCoursesByIds(courseIds)
+        : await syncThinkificCourses();
 
       // Update sync log
       if (syncLog?.id) {
