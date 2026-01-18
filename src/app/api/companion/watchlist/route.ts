@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getSession } from '@/lib/auth';
+import logger from '@/lib/logger';
 
 // GET - Fetch user's watchlist with key levels
 export async function GET() {
@@ -11,6 +12,7 @@ export async function GET() {
     }
 
     const userId = session.userId;
+    logger.debug('Fetching watchlist for user', { userId });
 
     // Get or create user's personal watchlist
     // Try owner_id first, then user_id for schema compatibility
@@ -21,7 +23,22 @@ export async function GET() {
       .eq('is_shared', false)
       .single();
 
-    // Fallback: try user_id if owner_id didn't work
+    logger.debug('Initial watchlist query result', {
+      hasWatchlist: !!watchlist,
+      errorCode: watchlistError?.code,
+      errorMessage: watchlistError?.message
+    });
+
+    // Check if table doesn't exist
+    if (watchlistError && watchlistError.code === '42P01') {
+      logger.error('Watchlists table does not exist in database');
+      return NextResponse.json({
+        error: 'Database not configured',
+        detail: 'The watchlists table has not been created. Please run database migrations.'
+      }, { status: 500 });
+    }
+
+    // Fallback: try user_id if owner_id didn't work (PGRST116 = no rows found)
     if (!watchlist && watchlistError?.code === 'PGRST116') {
       const { data: watchlistByUserId } = await supabaseAdmin
         .from('watchlists')
@@ -72,8 +89,15 @@ export async function GET() {
       }
 
       if (createError || !newWatchlist) {
-        console.error('Error creating watchlist:', createError);
-        return NextResponse.json({ error: 'Failed to create watchlist' }, { status: 500 });
+        logger.error('Error creating watchlist', {
+          errorCode: createError?.code,
+          errorMessage: createError?.message,
+          errorDetails: createError?.details
+        });
+        return NextResponse.json({
+          error: 'Failed to create watchlist',
+          detail: createError?.message || 'Unknown error'
+        }, { status: 500 });
       }
       watchlist = newWatchlist;
     }
@@ -98,24 +122,37 @@ export async function GET() {
       ...personalSymbols.filter((s: string) => !sharedSymbols.includes(s)).map((s: string) => ({ symbol: s, is_shared: false }))
     ];
 
-    // Fetch key levels for all symbols
+    // Fetch key levels for all symbols (gracefully handle missing table)
     const symbolList = Array.from(new Set([...personalSymbols, ...sharedSymbols]));
+    let levels: Array<{ symbol: string; [key: string]: unknown }> | null = null;
+    let marketData: Array<{ symbol: string; [key: string]: unknown }> | null = null;
 
-    const { data: levels } = symbolList.length > 0
-      ? await supabaseAdmin
-          .from('key_levels')
-          .select('*')
-          .in('symbol', symbolList)
-          .gt('expires_at', new Date().toISOString())
-      : { data: [] };
+    if (symbolList.length > 0) {
+      // Try to fetch key levels - table may not exist yet
+      const levelsResult = await supabaseAdmin
+        .from('key_levels')
+        .select('*')
+        .in('symbol', symbolList)
+        .gt('expires_at', new Date().toISOString());
 
-    // Fetch market data cache
-    const { data: marketData } = symbolList.length > 0
-      ? await supabaseAdmin
-          .from('market_data_cache')
-          .select('*')
-          .in('symbol', symbolList)
-      : { data: [] };
+      if (levelsResult.error) {
+        logger.warn('Failed to fetch key_levels (table may not exist)', { error: levelsResult.error.message });
+      } else {
+        levels = levelsResult.data;
+      }
+
+      // Try to fetch market data cache - table may not exist yet
+      const marketResult = await supabaseAdmin
+        .from('market_data_cache')
+        .select('*')
+        .in('symbol', symbolList);
+
+      if (marketResult.error) {
+        logger.warn('Failed to fetch market_data_cache (table may not exist)', { error: marketResult.error.message });
+      } else {
+        marketData = marketResult.data;
+      }
+    }
 
     // Combine data
     const symbols = allSymbols.map((item: { symbol: string; is_shared: boolean }, index: number) => ({
@@ -132,8 +169,11 @@ export async function GET() {
       symbols
     });
   } catch (error) {
-    console.error('Error fetching watchlist:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    logger.error('Error fetching watchlist', error instanceof Error ? error : { message: String(error) });
+    return NextResponse.json({
+      error: 'Internal server error',
+      detail: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }
 
@@ -198,12 +238,12 @@ export async function POST(request: Request) {
           });
 
         if (result2.error) {
-          console.error('Error creating watchlist:', result2.error);
-          return NextResponse.json({ error: 'Failed to add symbol' }, { status: 500 });
+          logger.error('Error creating watchlist (user_id)', { error: result2.error.message });
+          return NextResponse.json({ error: 'Failed to add symbol', detail: result2.error.message }, { status: 500 });
         }
       } else if (result1.error) {
-        console.error('Error creating watchlist:', result1.error);
-        return NextResponse.json({ error: 'Failed to add symbol' }, { status: 500 });
+        logger.error('Error creating watchlist (owner_id)', { error: result1.error.message });
+        return NextResponse.json({ error: 'Failed to add symbol', detail: result1.error.message }, { status: 500 });
       }
     } else {
       // Add symbol if not already present
@@ -215,8 +255,8 @@ export async function POST(request: Request) {
           .eq('id', watchlist.id);
 
         if (updateError) {
-          console.error('Error updating watchlist:', updateError);
-          return NextResponse.json({ error: 'Failed to add symbol' }, { status: 500 });
+          logger.error('Error updating watchlist', { error: updateError.message });
+          return NextResponse.json({ error: 'Failed to add symbol', detail: updateError.message }, { status: 500 });
         }
       }
     }
@@ -226,8 +266,11 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, symbol: normalizedSymbol });
   } catch (error) {
-    console.error('Error adding symbol:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    logger.error('Error adding symbol', error instanceof Error ? error : { message: String(error) });
+    return NextResponse.json({
+      error: 'Internal server error',
+      detail: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }
 
@@ -281,13 +324,16 @@ export async function DELETE(request: Request) {
       .eq('id', watchlist.id);
 
     if (updateError) {
-      console.error('Error updating watchlist:', updateError);
-      return NextResponse.json({ error: 'Failed to remove symbol' }, { status: 500 });
+      logger.error('Error updating watchlist (DELETE)', { error: updateError.message });
+      return NextResponse.json({ error: 'Failed to remove symbol', detail: updateError.message }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Error removing symbol:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    logger.error('Error removing symbol', error instanceof Error ? error : { message: String(error) });
+    return NextResponse.json({
+      error: 'Internal server error',
+      detail: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }
