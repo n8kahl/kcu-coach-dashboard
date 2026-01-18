@@ -5,6 +5,8 @@ import { marketDataService } from '@/lib/market-data';
 import {
   calculateEMA,
   calculateVWAP,
+  identifyKeyLevels,
+  Bar as LTPBar,
 } from '@/lib/ltp-engine';
 import logger from '@/lib/logger';
 
@@ -130,16 +132,23 @@ export async function POST(request: Request) {
 
 /**
  * Calculate key levels for a single symbol
+ * Per KCU methodology:
+ * - Use 4-hour chart for structural levels with multiple touchpoints
+ * - Include premarket high/low
+ * - Weekly high/low for broader context
  */
 async function calculateKeyLevelsForSymbol(symbol: string): Promise<KeyLevelInsert[]> {
   const levels: KeyLevelInsert[] = [];
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
 
-  // Fetch daily and intraday data in parallel
-  const [dailyBars, intradayBars, quote] = await Promise.all([
-    marketDataService.getAggregates(symbol, 'day', 60),
+  // Fetch all required data in parallel
+  const [dailyBars, weeklyBars, fourHourBars, intradayBars, premarketBars, quote] = await Promise.all([
+    marketDataService.getAggregates(symbol, 'day', 200), // Get 200 days for SMA 200
+    marketDataService.getWeeklyBars(symbol, 52), // Get 52 weeks
+    marketDataService.getAggregates(symbol, '240', 100), // 4-hour bars (~2 months)
     marketDataService.getAggregates(symbol, '5', 78), // ~6.5 hours of 5min bars
+    marketDataService.getPremarketBars(symbol), // Premarket data
     marketDataService.getQuote(symbol)
   ]);
 
@@ -150,7 +159,9 @@ async function calculateKeyLevelsForSymbol(symbol: string): Promise<KeyLevelInse
     metadata: {}
   };
 
-  // Previous Day High/Low/Close
+  // ===========================================
+  // PREVIOUS DAY LEVELS (PDH, PDL, PDC)
+  // ===========================================
   if (dailyBars.length >= 2) {
     const prevDay = dailyBars[dailyBars.length - 2];
     const today = dailyBars[dailyBars.length - 1];
@@ -163,10 +174,74 @@ async function calculateKeyLevelsForSymbol(symbol: string): Promise<KeyLevelInse
     );
   }
 
-  // Calculate levels from intraday data
+  // ===========================================
+  // PREMARKET HIGH/LOW (PMH, PML)
+  // ===========================================
+  if (premarketBars.length > 0) {
+    const pmh = Math.max(...premarketBars.map(b => b.h));
+    const pml = Math.min(...premarketBars.map(b => b.l));
+    levels.push(
+      { ...baseLevel, level_type: 'pmh', timeframe: 'premarket', price: pmh, strength: 75 },
+      { ...baseLevel, level_type: 'pml', timeframe: 'premarket', price: pml, strength: 75 }
+    );
+  }
+
+  // ===========================================
+  // WEEKLY HIGH/LOW (WH, WL)
+  // ===========================================
+  if (weeklyBars.length >= 2) {
+    const prevWeek = weeklyBars[weeklyBars.length - 2];
+    levels.push(
+      { ...baseLevel, level_type: 'pwh', timeframe: 'weekly', price: prevWeek.h, strength: 90 },
+      { ...baseLevel, level_type: 'pwl', timeframe: 'weekly', price: prevWeek.l, strength: 90 }
+    );
+  }
+
+  // ===========================================
+  // STRUCTURAL LEVELS FROM 4-HOUR CHART
+  // Per KCU: Look for multiple touchpoints on 4H chart
+  // ===========================================
+  if (fourHourBars.length >= 10) {
+    // Convert to LTPBar format for ltp-engine
+    const barsForEngine: LTPBar[] = fourHourBars.map(b => ({
+      o: b.o,
+      h: b.h,
+      l: b.l,
+      c: b.c,
+      v: b.v,
+      t: b.t
+    }));
+
+    const structuralLevels = identifyKeyLevels(barsForEngine);
+
+    // Add structural levels (support/resistance with multiple touchpoints)
+    structuralLevels.forEach((level, index) => {
+      // Only add top 5 strongest structural levels
+      if (index < 5) {
+        levels.push({
+          ...baseLevel,
+          level_type: `structural_${level.type}`,
+          timeframe: '4h',
+          price: level.price,
+          strength: level.strength,
+          metadata: {
+            type: level.type,
+            touchpoints: Math.ceil(level.strength / 25) // Estimate touchpoints from strength
+          }
+        });
+      }
+    });
+  }
+
+  // ===========================================
+  // INTRADAY LEVELS (VWAP, ORB, HOD/LOD, EMAs)
+  // ===========================================
   if (intradayBars.length > 0) {
     // VWAP
-    const vwap = calculateVWAP(intradayBars);
+    const barsForVWAP: LTPBar[] = intradayBars.map(b => ({
+      o: b.o, h: b.h, l: b.l, c: b.c, v: b.v, t: b.t
+    }));
+    const vwap = calculateVWAP(barsForVWAP);
     if (vwap > 0) {
       levels.push({ ...baseLevel, level_type: 'vwap', timeframe: 'intraday', price: vwap, strength: 75 });
     }
@@ -203,7 +278,9 @@ async function calculateKeyLevelsForSymbol(symbol: string): Promise<KeyLevelInse
     }
   }
 
-  // 50 SMA and 200 SMA from daily
+  // ===========================================
+  // DAILY SMAs (50, 200)
+  // ===========================================
   if (dailyBars.length >= 50) {
     const closes = dailyBars.map(b => b.c);
     const sma50 = closes.slice(-50).reduce((a, b) => a + b, 0) / 50;

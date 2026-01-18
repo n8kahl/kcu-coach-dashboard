@@ -370,6 +370,83 @@ class MarketDataService {
   }
 
   /**
+   * Get premarket bars for today (4:00 AM - 9:30 AM ET)
+   * Returns extended hours data from Polygon API
+   */
+  async getPremarketBars(ticker: string): Promise<Bar[]> {
+    const symbol = ticker.toUpperCase();
+    const today = this.getDateString(0);
+    const cacheKey = `premarket:${symbol}:${today}`;
+
+    const bars = await this.getCached<Bar[]>(
+      cacheKey,
+      CACHE_TTL.aggregates,
+      async () => {
+        // Calculate premarket window in ET
+        // 4:00 AM ET to 9:30 AM ET
+        const etDate = new Date(today + 'T04:00:00-05:00');
+        const etMarketOpen = new Date(today + 'T09:30:00-05:00');
+        const fromTs = etDate.getTime();
+        const toTs = etMarketOpen.getTime();
+
+        interface AggregatesResponse {
+          results?: Array<{
+            t: number;
+            o: number;
+            h: number;
+            l: number;
+            c: number;
+            v: number;
+            vw?: number;
+          }>;
+        }
+
+        // Fetch 1-minute bars during premarket hours
+        const data = await this.fetch<AggregatesResponse>(
+          `/v2/aggs/ticker/${symbol}/range/1/minute/${today}/${today}`,
+          {
+            limit: 500,
+            sort: 'asc',
+            // Note: Polygon returns extended hours data by default
+          }
+        );
+
+        if (!data?.results) return [];
+
+        // Filter to only premarket hours (before 9:30 AM ET)
+        return data.results
+          .filter(bar => bar.t >= fromTs && bar.t < toTs)
+          .map((bar) => ({
+            t: bar.t,
+            timestamp: bar.t,
+            date: new Date(bar.t).toISOString(),
+            o: bar.o,
+            h: bar.h,
+            l: bar.l,
+            c: bar.c,
+            v: bar.v,
+            vw: bar.vw,
+            open: bar.o,
+            high: bar.h,
+            low: bar.l,
+            close: bar.c,
+            volume: bar.v,
+            vwap: bar.vw,
+          }));
+      }
+    );
+
+    return bars || [];
+  }
+
+  /**
+   * Get weekly bars for historical analysis
+   */
+  async getWeeklyBars(ticker: string, limit: number = 52): Promise<Bar[]> {
+    return this.getAggregates(ticker, 'week', limit);
+  }
+
+  /**
    * Get market status
    */
   async getMarketStatus(): Promise<MarketStatus> {
