@@ -1,5 +1,3 @@
-// @ts-nocheck
-// TODO: Fix type mismatches between TradeEntry type and component usage
 'use client';
 
 import { useState } from 'react';
@@ -26,6 +24,44 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import type { TradeEntry } from '@/types';
+
+// Helper to derive display fields from TradeEntry
+function getTradeDisplay(trade: TradeEntry) {
+  const ltpScore = trade.ltp_score;
+  const overallScore = ltpScore?.overall ?? 0;
+
+  // Calculate LTP grade from overall score
+  const getLTPGrade = (score: number): string => {
+    if (score >= 90) return 'A';
+    if (score >= 80) return 'B';
+    if (score >= 70) return 'C';
+    if (score >= 60) return 'D';
+    return 'F';
+  };
+
+  return {
+    // Options fields
+    isOptions: trade.contract_type === 'call' || trade.contract_type === 'put',
+    optionType: trade.contract_type,
+    expiration: trade.expiration_date,
+
+    // LTP fields
+    ltpGrade: getLTPGrade(overallScore),
+    hadLevel: (ltpScore?.level ?? 0) >= 70,
+    hadTrend: (ltpScore?.trend ?? 0) >= 70,
+    hadPatience: (ltpScore?.patience ?? 0) >= 70,
+
+    // Notes fields - map to existing fields
+    setupNotes: trade.notes,
+    exitNotes: trade.lessons,
+    emotionsList: trade.emotions?.join(', ') || null,
+
+    // Safe access for optional numeric fields
+    pnl: trade.pnl ?? 0,
+    pnlPercent: trade.pnl_percent ?? 0,
+    exitPrice: trade.exit_price,
+  };
+}
 
 interface TradeJournalTableProps {
   trades: TradeEntry[];
@@ -165,6 +201,8 @@ function TradeRow({
   onShare,
   getLTPGradeColor,
 }: TradeRowProps) {
+  const display = getTradeDisplay(trade);
+
   return (
     <>
       <TableRow
@@ -182,9 +220,9 @@ function TradeRow({
         <TableCell>
           <div className="flex items-center gap-2">
             <span className="font-semibold">{trade.symbol}</span>
-            {trade.is_options && (
+            {display.isOptions && (
               <Badge variant="gold" size="sm">
-                {trade.option_type?.toUpperCase()}
+                {display.optionType?.toUpperCase()}
               </Badge>
             )}
           </div>
@@ -207,26 +245,26 @@ function TradeRow({
         <TableCell mono>
           <span className={cn(
             'font-semibold',
-            trade.pnl >= 0 ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
+            display.pnl >= 0 ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
           )}>
-            {formatCurrency(trade.pnl)}
+            {formatCurrency(display.pnl)}
           </span>
         </TableCell>
         <TableCell mono>
           <span className={cn(
-            trade.pnl_percent >= 0 ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
+            display.pnlPercent >= 0 ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
           )}>
-            {formatPercent(trade.pnl_percent)}
+            {formatPercent(display.pnlPercent)}
           </span>
         </TableCell>
         <TableCell>
-          <span className={cn('text-lg font-bold', getLTPGradeColor(trade.ltp_grade))}>
-            {trade.ltp_grade}
+          <span className={cn('text-lg font-bold', getLTPGradeColor(display.ltpGrade))}>
+            {display.ltpGrade}
           </span>
         </TableCell>
         <TableCell>
           <div className="flex items-center gap-2">
-            {trade.pnl > 0 && onShare && (
+            {display.pnl > 0 && onShare && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -266,7 +304,7 @@ function TradeRow({
                     <div>
                       <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">Entry → Exit</p>
                       <p className="text-sm font-mono">
-                        {formatCurrency(trade.entry_price)} → {formatCurrency(trade.exit_price)}
+                        {formatCurrency(trade.entry_price)} → {display.exitPrice ? formatCurrency(display.exitPrice) : '—'}
                       </p>
                     </div>
 
@@ -280,48 +318,48 @@ function TradeRow({
                     <div>
                       <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">LTP Compliance</p>
                       <div className="flex items-center gap-2">
-                        <Badge variant={trade.had_level ? 'success' : 'default'} size="sm">
-                          L {trade.had_level ? '✓' : '✗'}
+                        <Badge variant={display.hadLevel ? 'success' : 'default'} size="sm">
+                          L {display.hadLevel ? '✓' : '✗'}
                         </Badge>
-                        <Badge variant={trade.had_trend ? 'success' : 'default'} size="sm">
-                          T {trade.had_trend ? '✓' : '✗'}
+                        <Badge variant={display.hadTrend ? 'success' : 'default'} size="sm">
+                          T {display.hadTrend ? '✓' : '✗'}
                         </Badge>
-                        <Badge variant={trade.had_patience_candle ? 'success' : 'default'} size="sm">
-                          P {trade.had_patience_candle ? '✓' : '✗'}
+                        <Badge variant={display.hadPatience ? 'success' : 'default'} size="sm">
+                          P {display.hadPatience ? '✓' : '✗'}
                         </Badge>
                       </div>
                     </div>
 
                     {/* Options Details */}
-                    {trade.is_options && (
+                    {display.isOptions && (
                       <div>
                         <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">Options</p>
                         <p className="text-sm">
-                          {trade.strike_price} {trade.option_type?.toUpperCase()} {trade.expiration}
+                          {trade.strike_price} {display.optionType?.toUpperCase()} {display.expiration}
                         </p>
                       </div>
                     )}
                   </div>
 
                   {/* Notes */}
-                  {(trade.setup_notes || trade.exit_notes || trade.emotions) && (
+                  {(display.setupNotes || display.exitNotes || display.emotionsList) && (
                     <div className="mt-4 pt-4 border-t border-[var(--border-primary)] grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {trade.setup_notes && (
+                      {display.setupNotes && (
                         <div>
                           <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">Setup Notes</p>
-                          <p className="text-sm text-[var(--text-secondary)]">{trade.setup_notes}</p>
+                          <p className="text-sm text-[var(--text-secondary)]">{display.setupNotes}</p>
                         </div>
                       )}
-                      {trade.exit_notes && (
+                      {display.exitNotes && (
                         <div>
-                          <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">Exit Notes</p>
-                          <p className="text-sm text-[var(--text-secondary)]">{trade.exit_notes}</p>
+                          <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">Lessons Learned</p>
+                          <p className="text-sm text-[var(--text-secondary)]">{display.exitNotes}</p>
                         </div>
                       )}
-                      {trade.emotions && (
+                      {display.emotionsList && (
                         <div>
                           <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">Emotions</p>
-                          <p className="text-sm text-[var(--text-secondary)]">{trade.emotions}</p>
+                          <p className="text-sm text-[var(--text-secondary)]">{display.emotionsList}</p>
                         </div>
                       )}
                     </div>

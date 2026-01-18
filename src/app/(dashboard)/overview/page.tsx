@@ -1,12 +1,12 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { Header } from '@/components/layout/header';
 import { PageShell, PageSection, Grid } from '@/components/layout/page-shell';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Stat, StatGrid } from '@/components/ui/stat';
 import { ProgressBar } from '@/components/ui/progress';
-import { StatsOverview } from '@/components/dashboard/stats-overview';
 import { MiniLeaderboard } from '@/components/dashboard/leaderboard';
 import { FeaturedAchievement } from '@/components/dashboard/achievements';
 import { formatCurrency } from '@/lib/utils';
@@ -18,53 +18,167 @@ import {
   Target,
   Share2,
   ArrowRight,
+  Loader2,
 } from 'lucide-react';
-import type { TradeStats, LeaderboardEntry, Achievement } from '@/types';
+import type { TradeStats, LeaderboardEntry, Achievement, User } from '@/types';
 
-// Mock data
-const mockStats: TradeStats = {
-  total_trades: 142,
-  winning_trades: 89,
-  losing_trades: 53,
-  win_rate: 62.7,
-  total_pnl: 4823.50,
-  average_win: 127.30,
-  average_loss: -78.45,
-  profit_factor: 1.82,
-  largest_win: 892.00,
-  largest_loss: -345.00,
-  average_hold_time: 120,
-  best_setup: 'PDH Bounce',
-  worst_setup: 'FOMO Entry',
+// Default empty stats
+const emptyStats: TradeStats = {
+  total_trades: 0,
+  winning_trades: 0,
+  losing_trades: 0,
+  win_rate: 0,
+  total_pnl: 0,
+  average_win: 0,
+  average_loss: 0,
+  profit_factor: 0,
+  largest_win: 0,
+  largest_loss: 0,
+  average_hold_time: 0,
+  best_setup: '-',
+  worst_setup: '-',
 };
 
-const mockLeaderboard: LeaderboardEntry[] = [
-  { rank: 1, user_id: '1', username: 'PrinterKing', score: 12450, win_rate: 75.2, total_trades: 60, streak: 8, badges: ['top-10'], change: 'up' },
-  { rank: 2, user_id: '2', username: 'LTPMaster', score: 10230, win_rate: 71.4, total_trades: 53, streak: 5, badges: [], change: 'same' },
-  { rank: 3, user_id: '3', username: 'PatienceCandle', score: 9870, win_rate: 69.2, total_trades: 52, streak: 6, badges: [], change: 'up' },
-  { rank: 4, user_id: 'current', username: 'TraderJoe', score: 8650, win_rate: 62.7, total_trades: 51, streak: 5, badges: [], change: 'up' },
-  { rank: 5, user_id: '5', username: 'LevelSniper', score: 7890, win_rate: 60.4, total_trades: 48, streak: 3, badges: [], change: 'down' },
-];
-
-const mockAchievement: Achievement = {
-  id: '1',
-  slug: 'seven-day-streak',
-  title: '7-Day Streak',
-  description: 'Trade for 7 consecutive days',
-  icon: '🔥',
-  category: 'consistency',
-  requirement: { type: 'streak', target: 7, current: 7 },
-  xp_reward: 100,
-  unlocked: true,
-  unlocked_at: '2024-01-15T10:30:00Z',
+// Default achievement for display when none earned yet
+const defaultAchievement: Achievement = {
+  id: 'first_trade',
+  slug: 'first_trade',
+  title: 'First Trade',
+  description: 'Log your first trade to unlock achievements!',
+  icon: '🎯',
+  category: 'milestone',
+  requirement: { type: 'trade', target: 1, current: 0 },
+  xp_reward: 50,
+  unlocked: false,
 };
+
+interface DashboardData {
+  user: User | null;
+  stats: TradeStats;
+  leaderboard: LeaderboardEntry[];
+  latestAchievement: Achievement | null;
+  progress: {
+    overall: number;
+    modules: Array<{ name: string; progress: number }>;
+    streak: number;
+  };
+}
 
 export default function OverviewPage() {
+  const [data, setData] = useState<DashboardData>({
+    user: null,
+    stats: emptyStats,
+    leaderboard: [],
+    latestAchievement: null,
+    progress: { overall: 0, modules: [], streak: 0 },
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchDashboardData() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Fetch all dashboard data in parallel
+        const [userRes, statsRes, leaderboardRes, achievementsRes, progressRes] = await Promise.all([
+          fetch('/api/user'),
+          fetch('/api/trades/stats'),
+          fetch('/api/leaderboard?limit=5'),
+          fetch('/api/achievements?latest=true'),
+          fetch('/api/progress'),
+        ]);
+
+        const userData = userRes.ok ? await userRes.json() : { user: null };
+        const statsData = statsRes.ok ? await statsRes.json() : { stats: emptyStats };
+        const leaderboardData = leaderboardRes.ok ? await leaderboardRes.json() : { entries: [] };
+        const achievementsData = achievementsRes.ok ? await achievementsRes.json() : { achievements: [] };
+        const progressData = progressRes.ok ? await progressRes.json() : { overall: 0, modules: [], streak: 0 };
+
+        // Find the most recently unlocked achievement
+        const earnedAchievements = (achievementsData.achievements || []).filter(
+          (a: Achievement) => a.unlocked || a.unlocked_at
+        );
+        const latestAchievement = earnedAchievements.length > 0
+          ? earnedAchievements.sort((a: Achievement, b: Achievement) =>
+              new Date(b.unlocked_at || 0).getTime() - new Date(a.unlocked_at || 0).getTime()
+            )[0]
+          : null;
+
+        setData({
+          user: userData.user || null,
+          stats: statsData.stats || emptyStats,
+          leaderboard: leaderboardData.entries || [],
+          latestAchievement,
+          progress: {
+            overall: progressData.overall || 0,
+            modules: progressData.modules || [],
+            streak: progressData.streak || 0,
+          },
+        });
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load dashboard');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchDashboardData();
+  }, []);
+
+  const username = data.user?.username || 'Trader';
+
+  // Loading state
+  if (loading) {
+    return (
+      <>
+        <Header
+          title="Dashboard"
+          subtitle="Loading..."
+          breadcrumbs={[{ label: 'Dashboard' }, { label: 'Overview' }]}
+        />
+        <PageShell>
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-primary)]" />
+            <span className="ml-3 text-[var(--text-secondary)]">Loading dashboard...</span>
+          </div>
+        </PageShell>
+      </>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <>
+        <Header
+          title="Dashboard"
+          subtitle="Error loading data"
+          breadcrumbs={[{ label: 'Dashboard' }, { label: 'Overview' }]}
+        />
+        <PageShell>
+          <Card className="border-[var(--loss)]">
+            <CardContent>
+              <p className="text-[var(--loss)] text-center py-4">{error}</p>
+              <div className="flex justify-center">
+                <Button variant="secondary" onClick={() => window.location.reload()}>
+                  Retry
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </PageShell>
+      </>
+    );
+  }
+
   return (
     <>
       <Header
         title="Dashboard"
-        subtitle="Welcome back, TraderJoe"
+        subtitle={`Welcome back, ${username}`}
         breadcrumbs={[{ label: 'Dashboard' }, { label: 'Overview' }]}
         actions={
           <Button variant="primary" size="sm" icon={<Share2 className="w-4 h-4" />}>
@@ -79,28 +193,24 @@ export default function OverviewPage() {
           <StatGrid columns={4}>
             <Card variant="default" padding="md">
               <Stat
-                label="Today's P&L"
-                value={formatCurrency(342.50)}
+                label="Total P&L"
+                value={formatCurrency(data.stats.total_pnl)}
                 icon={<TrendingUp className="w-4 h-4" />}
-                valueColor="profit"
-                change={2.3}
-                changeLabel="vs avg"
+                valueColor={data.stats.total_pnl >= 0 ? 'profit' : 'loss'}
               />
             </Card>
             <Card variant="default" padding="md">
               <Stat
                 label="Win Rate"
-                value="62.7%"
+                value={`${data.stats.win_rate.toFixed(1)}%`}
                 icon={<Target className="w-4 h-4" />}
-                valueColor="profit"
-                change={5.2}
-                changeLabel="this week"
+                valueColor={data.stats.win_rate >= 50 ? 'profit' : 'loss'}
               />
             </Card>
             <Card variant="default" padding="md">
               <Stat
                 label="Learning Progress"
-                value="68%"
+                value={`${data.progress.overall}%`}
                 icon={<BookOpen className="w-4 h-4" />}
                 valueColor="gold"
               />
@@ -108,7 +218,7 @@ export default function OverviewPage() {
             <Card variant="default" padding="md">
               <Stat
                 label="Current Streak"
-                value="5 days"
+                value={`${data.progress.streak} days`}
                 icon={<Flame className="w-4 h-4" />}
                 valueColor="gold"
               />
@@ -123,7 +233,7 @@ export default function OverviewPage() {
             {/* Recent Performance */}
             <Card>
               <CardHeader
-                title="This Week's Performance"
+                title="Performance Summary"
                 action={
                   <a href="/journal" className="text-xs text-[var(--accent-primary)] hover:underline flex items-center gap-1">
                     View Journal <ArrowRight className="w-3 h-3" />
@@ -133,22 +243,37 @@ export default function OverviewPage() {
               <CardContent>
                 <div className="grid grid-cols-3 gap-4 mb-6">
                   <div className="text-center p-4 bg-[var(--bg-tertiary)]">
-                    <p className="text-2xl font-bold text-[var(--profit)]">8</p>
+                    <p className="text-2xl font-bold text-[var(--profit)]">{data.stats.winning_trades}</p>
                     <p className="text-xs text-[var(--text-tertiary)] uppercase">Wins</p>
                   </div>
                   <div className="text-center p-4 bg-[var(--bg-tertiary)]">
-                    <p className="text-2xl font-bold text-[var(--loss)]">3</p>
+                    <p className="text-2xl font-bold text-[var(--loss)]">{data.stats.losing_trades}</p>
                     <p className="text-xs text-[var(--text-tertiary)] uppercase">Losses</p>
                   </div>
                   <div className="text-center p-4 bg-[var(--bg-tertiary)]">
-                    <p className="text-2xl font-bold text-[var(--accent-primary)]">B+</p>
-                    <p className="text-xs text-[var(--text-tertiary)] uppercase">Avg Grade</p>
+                    <p className="text-2xl font-bold text-[var(--accent-primary)]">{data.stats.total_trades}</p>
+                    <p className="text-xs text-[var(--text-tertiary)] uppercase">Total Trades</p>
                   </div>
                 </div>
 
-                {/* P&L Chart Placeholder */}
-                <div className="h-48 bg-[var(--bg-tertiary)] flex items-center justify-center text-[var(--text-tertiary)]">
-                  P&L Chart Coming Soon
+                {/* Stats Grid */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-3 bg-[var(--bg-tertiary)]">
+                    <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">Profit Factor</p>
+                    <p className="text-lg font-bold text-[var(--text-primary)]">{data.stats.profit_factor.toFixed(2)}</p>
+                  </div>
+                  <div className="p-3 bg-[var(--bg-tertiary)]">
+                    <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">Best Setup</p>
+                    <p className="text-lg font-bold text-[var(--text-primary)]">{data.stats.best_setup}</p>
+                  </div>
+                  <div className="p-3 bg-[var(--bg-tertiary)]">
+                    <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">Avg Win</p>
+                    <p className="text-lg font-bold text-[var(--profit)]">{formatCurrency(data.stats.average_win)}</p>
+                  </div>
+                  <div className="p-3 bg-[var(--bg-tertiary)]">
+                    <p className="text-xs text-[var(--text-tertiary)] uppercase mb-1">Avg Loss</p>
+                    <p className="text-lg font-bold text-[var(--loss)]">{formatCurrency(data.stats.average_loss)}</p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -164,29 +289,26 @@ export default function OverviewPage() {
                 }
               />
               <CardContent>
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex justify-between text-sm mb-2">
-                      <span className="text-[var(--text-secondary)]">LTP Framework</span>
-                      <span className="text-[var(--accent-primary)] font-medium">85%</span>
-                    </div>
-                    <ProgressBar value={85} variant="gold" />
+                {data.progress.modules.length > 0 ? (
+                  <div className="space-y-4">
+                    {data.progress.modules.slice(0, 3).map((module) => (
+                      <div key={module.name}>
+                        <div className="flex justify-between text-sm mb-2">
+                          <span className="text-[var(--text-secondary)]">{module.name}</span>
+                          <span className="text-[var(--accent-primary)] font-medium">{module.progress}%</span>
+                        </div>
+                        <ProgressBar value={module.progress} variant="gold" />
+                      </div>
+                    ))}
                   </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-2">
-                      <span className="text-[var(--text-secondary)]">Entry & Exit Rules</span>
-                      <span className="text-[var(--accent-primary)] font-medium">60%</span>
-                    </div>
-                    <ProgressBar value={60} variant="gold" />
+                ) : (
+                  <div className="text-center py-6">
+                    <p className="text-[var(--text-tertiary)] mb-4">Start your learning journey</p>
+                    <Button variant="primary" icon={<BookOpen className="w-4 h-4" />}>
+                      Begin Learning
+                    </Button>
                   </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-2">
-                      <span className="text-[var(--text-secondary)]">Psychology</span>
-                      <span className="text-[var(--accent-primary)] font-medium">45%</span>
-                    </div>
-                    <ProgressBar value={45} variant="gold" />
-                  </div>
-                </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -194,10 +316,10 @@ export default function OverviewPage() {
           {/* Right Column - 1/3 width */}
           <div className="space-y-6">
             {/* Mini Leaderboard */}
-            <MiniLeaderboard entries={mockLeaderboard} currentUserId="current" />
+            <MiniLeaderboard entries={data.leaderboard} currentUserId={data.user?.id} />
 
             {/* Latest Achievement */}
-            <FeaturedAchievement achievement={mockAchievement} />
+            <FeaturedAchievement achievement={data.latestAchievement || defaultAchievement} />
 
             {/* Quick Actions */}
             <Card>

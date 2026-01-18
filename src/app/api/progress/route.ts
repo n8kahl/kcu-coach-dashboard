@@ -147,12 +147,37 @@ export async function GET() {
         modulesWithProgress.length
     );
 
+    // Get user's current streak from user_profiles or calculate from activity
+    const { data: userProfile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('current_streak, last_active_date')
+      .eq('id', user.id)
+      .single();
+
+    const streak = userProfile?.current_streak || 0;
+
+    // Format modules for the overview page
+    const modulesSummary = modulesWithProgress.map((m) => ({
+      name: m.name,
+      progress: m.completionPercentage,
+    }));
+
     return NextResponse.json({
       currentModule: user.current_module,
       modules: modulesWithProgress,
       overallCompletion,
+      overall: overallCompletion, // Alias for overview page compatibility
+      streak,
       totalTopicsCompleted: modulesWithProgress.reduce((sum, m) => sum + m.completedTopics, 0),
       totalTopics: modulesWithProgress.reduce((sum, m) => sum + m.totalTopics, 0),
+      // Progress by module ID for learning page
+      progress: modulesWithProgress.reduce((acc, m) => {
+        acc[`mod_${m.id}`] = {
+          completed: m.completedTopics,
+          total: m.totalTopics,
+        };
+        return acc;
+      }, {} as Record<string, { completed: number; total: number }>),
     });
   } catch (error) {
     console.error('Error fetching progress:', error);

@@ -1,6 +1,12 @@
 import { cookies } from 'next/headers';
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { supabaseAdmin } from './supabase';
+import {
+  createSessionToken,
+  verifySessionToken,
+  shouldRefreshSession,
+  refreshSessionToken,
+  type SessionPayload,
+} from './jwt';
 
 // Extended session user type
 export interface SessionUser {
@@ -72,6 +78,9 @@ export async function exchangeDiscordCode(code: string) {
 // Session cookie helpers
 const SESSION_COOKIE_NAME = 'kcu_session';
 
+/**
+ * Create and set a secure JWT session cookie
+ */
 export async function setSessionCookie(userData: {
   userId: string;
   discordId: string;
@@ -80,9 +89,17 @@ export async function setSessionCookie(userData: {
   isAdmin: boolean;
 }) {
   const cookieStore = await cookies();
-  const sessionData = Buffer.from(JSON.stringify(userData)).toString('base64');
 
-  cookieStore.set(SESSION_COOKIE_NAME, sessionData, {
+  // Create signed JWT token
+  const token = await createSessionToken({
+    userId: userData.userId,
+    discordId: userData.discordId,
+    username: userData.username,
+    avatar: userData.avatar || undefined,
+    isAdmin: userData.isAdmin,
+  });
+
+  cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
@@ -91,11 +108,18 @@ export async function setSessionCookie(userData: {
   });
 }
 
+/**
+ * Clear the session cookie
+ */
 export async function clearSessionCookie() {
   const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE_NAME);
 }
 
+/**
+ * Get the current session from the JWT cookie
+ * Automatically refreshes the token if close to expiring
+ */
 export async function getSession(): Promise<Session> {
   try {
     const cookieStore = await cookies();
@@ -105,22 +129,65 @@ export async function getSession(): Promise<Session> {
       return { user: null };
     }
 
-    const userData = JSON.parse(Buffer.from(sessionCookie.value, 'base64').toString());
+    // Verify the JWT token
+    const payload = await verifySessionToken(sessionCookie.value);
+
+    if (!payload) {
+      // Token is invalid or expired - clear it
+      cookieStore.delete(SESSION_COOKIE_NAME);
+      return { user: null };
+    }
+
+    // Refresh token if close to expiring
+    if (shouldRefreshSession(payload)) {
+      try {
+        const newToken = await refreshSessionToken(payload);
+        cookieStore.set(SESSION_COOKIE_NAME, newToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          maxAge: 60 * 60 * 24 * 7, // 7 days
+          path: '/',
+        });
+      } catch (refreshError) {
+        // If refresh fails, continue with current session
+        console.error('Failed to refresh session:', refreshError);
+      }
+    }
 
     return {
       user: {
-        id: userData.userId,
-        discordId: userData.discordId,
-        username: userData.username,
-        image: userData.avatar,
-        isAdmin: userData.isAdmin,
+        id: payload.userId,
+        discordId: payload.discordId,
+        username: payload.username,
+        image: payload.avatar,
+        isAdmin: payload.isAdmin,
       },
       // Convenience properties for API routes
-      userId: userData.userId,
-      isAdmin: userData.isAdmin,
+      userId: payload.userId,
+      isAdmin: payload.isAdmin,
     };
-  } catch {
+  } catch (error) {
+    console.error('Session error:', error);
     return { user: null };
+  }
+}
+
+/**
+ * Get the raw session payload (for advanced use cases)
+ */
+export async function getSessionPayload(): Promise<SessionPayload | null> {
+  try {
+    const cookieStore = await cookies();
+    const sessionCookie = cookieStore.get(SESSION_COOKIE_NAME);
+
+    if (!sessionCookie?.value) {
+      return null;
+    }
+
+    return await verifySessionToken(sessionCookie.value);
+  } catch {
+    return null;
   }
 }
 
@@ -174,4 +241,31 @@ export async function getAuthenticatedUserId() {
   }
 
   return sessionUser.id;
+}
+
+/**
+ * Require authentication - throws if not authenticated
+ * Use in API routes: const session = await requireAuth();
+ */
+export async function requireAuth(): Promise<Session & { user: SessionUser; userId: string }> {
+  const session = await getSession();
+
+  if (!session.user || !session.userId) {
+    throw new Error('Authentication required');
+  }
+
+  return session as Session & { user: SessionUser; userId: string };
+}
+
+/**
+ * Require admin authentication - throws if not authenticated or not admin
+ */
+export async function requireAdmin(): Promise<Session & { user: SessionUser; userId: string; isAdmin: true }> {
+  const session = await requireAuth();
+
+  if (!session.isAdmin) {
+    throw new Error('Admin access required');
+  }
+
+  return session as Session & { user: SessionUser; userId: string; isAdmin: true };
 }

@@ -202,7 +202,7 @@ export interface TradeStats {
 // Achievement Types
 // ============================================
 
-export type AchievementCategory = 'learning' | 'trading' | 'consistency' | 'milestones';
+export type AchievementCategory = 'learning' | 'trading' | 'consistency' | 'milestones' | 'milestone' | 'streak' | 'community' | 'competition';
 
 export interface Achievement {
   id: string;
@@ -219,6 +219,13 @@ export interface Achievement {
   xp_reward: number;
   unlocked?: boolean;
   unlocked_at?: string;
+  // Component compatibility aliases
+  name?: string; // Alias for title
+  emoji?: string; // Alias for icon
+  type?: string; // Alias for slug
+  earned_at?: string; // Alias for unlocked_at
+  progress?: number; // Alias for requirement.current
+  target?: number; // Alias for requirement.target
 }
 
 // ============================================

@@ -1,21 +1,30 @@
-// @ts-nocheck
-// TODO: Fix type mismatches between Achievement type and component usage
 'use client';
 
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import { Lock, Check } from 'lucide-react';
-import { Card, CardHeader, CardContent } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { ProgressBar } from '@/components/ui/progress';
 import type { Achievement } from '@/types';
+
+// Helper to get display values from Achievement (handles both old and new field names)
+function getAchievementDisplay(achievement: Achievement) {
+  return {
+    name: achievement.name || achievement.title,
+    emoji: achievement.emoji || achievement.icon,
+    earnedAt: achievement.earned_at || achievement.unlocked_at,
+    progress: achievement.progress ?? achievement.requirement?.current,
+    target: achievement.target ?? achievement.requirement?.target,
+  };
+}
 
 interface AchievementsGridProps {
   achievements: Achievement[];
 }
 
 export function AchievementsGrid({ achievements }: AchievementsGridProps) {
-  const earned = achievements.filter((a) => a.earned_at);
-  const locked = achievements.filter((a) => !a.earned_at);
+  const earned = achievements.filter((a) => getAchievementDisplay(a).earnedAt);
+  const locked = achievements.filter((a) => !getAchievementDisplay(a).earnedAt);
 
   return (
     <div className="space-y-8">
@@ -81,10 +90,9 @@ interface AchievementCardProps {
 }
 
 function AchievementCard({ achievement, index, locked }: AchievementCardProps) {
-  const hasProgress = achievement.progress !== undefined && achievement.target !== undefined;
-  const progressPercent = hasProgress
-    ? (achievement.progress! / achievement.target!) * 100
-    : 0;
+  const display = getAchievementDisplay(achievement);
+  const hasProgress = display.progress !== undefined && display.target !== undefined;
+  const progressPercent = hasProgress ? (display.progress! / display.target!) * 100 : 0;
 
   return (
     <motion.div
@@ -95,15 +103,12 @@ function AchievementCard({ achievement, index, locked }: AchievementCardProps) {
       <Card
         variant={locked ? 'default' : 'glow'}
         hoverable
-        className={cn(
-          'text-center',
-          locked && 'opacity-60'
-        )}
+        className={cn('text-center', locked && 'opacity-60')}
       >
         <CardContent>
           {/* Emoji/Icon */}
           <div className="relative inline-flex items-center justify-center w-16 h-16 mb-3">
-            <span className="text-4xl">{achievement.emoji}</span>
+            <span className="text-4xl">{display.emoji}</span>
             {locked ? (
               <div className="absolute inset-0 flex items-center justify-center bg-[var(--bg-card)]/80">
                 <Lock className="w-6 h-6 text-[var(--text-muted)]" />
@@ -124,7 +129,7 @@ function AchievementCard({ achievement, index, locked }: AchievementCardProps) {
               locked ? 'text-[var(--text-tertiary)]' : 'text-[var(--text-primary)]'
             )}
           >
-            {achievement.name}
+            {display.name}
           </h4>
 
           {/* Description */}
@@ -137,12 +142,12 @@ function AchievementCard({ achievement, index, locked }: AchievementCardProps) {
             <div className="mt-3">
               <ProgressBar value={progressPercent} size="sm" />
               <p className="text-xs text-[var(--text-muted)] mt-1">
-                {achievement.progress} / {achievement.target}
+                {display.progress} / {display.target}
               </p>
             </div>
-          ) : achievement.earned_at ? (
+          ) : display.earnedAt ? (
             <p className="text-xs text-[var(--accent-primary)]">
-              {new Date(achievement.earned_at).toLocaleDateString()}
+              {new Date(display.earnedAt).toLocaleDateString()}
             </p>
           ) : null}
         </CardContent>
@@ -157,21 +162,23 @@ interface FeaturedAchievementProps {
 }
 
 export function FeaturedAchievement({ achievement }: FeaturedAchievementProps) {
+  const display = getAchievementDisplay(achievement);
+
   return (
     <Card variant="glow" className="overflow-hidden">
       <div className="flex items-center gap-6 p-6">
-        <div className="text-6xl">{achievement.emoji}</div>
+        <div className="text-6xl">{display.emoji}</div>
         <div className="flex-1">
           <p className="text-xs text-[var(--accent-primary)] uppercase tracking-wide mb-1">
             Latest Achievement
           </p>
           <h3 className="text-xl font-bold text-[var(--text-primary)] mb-1">
-            {achievement.name}
+            {display.name}
           </h3>
           <p className="text-sm text-[var(--text-tertiary)]">{achievement.description}</p>
-          {achievement.earned_at && (
+          {display.earnedAt && (
             <p className="text-xs text-[var(--text-muted)] mt-2">
-              Earned {new Date(achievement.earned_at).toLocaleDateString()}
+              Earned {new Date(display.earnedAt).toLocaleDateString()}
             </p>
           )}
         </div>
@@ -180,84 +187,136 @@ export function FeaturedAchievement({ achievement }: FeaturedAchievementProps) {
   );
 }
 
-// Achievement definitions
-export const achievementDefinitions: Record<string, Omit<Achievement, 'id' | 'earned_at' | 'progress' | 'target'>> = {
+// Achievement definitions for reference
+export const achievementDefinitions: Record<string, Partial<Achievement>> = {
   first_trade: {
-    type: 'first_trade',
+    slug: 'first_trade',
+    title: 'First Trade',
     name: 'First Trade',
     description: 'Log your first trade in the journal',
+    icon: '🎯',
     emoji: '🎯',
+    category: 'milestone',
+    xp_reward: 50,
   },
   seven_day_streak: {
-    type: 'seven_day_streak',
+    slug: 'seven_day_streak',
+    title: '7-Day Streak',
     name: '7-Day Streak',
     description: 'Trade for 7 consecutive days',
+    icon: '🔥',
     emoji: '🔥',
+    category: 'streak',
+    xp_reward: 100,
   },
   quiz_master: {
-    type: 'quiz_master',
+    slug: 'quiz_master',
+    title: 'Quiz Master',
     name: 'Quiz Master',
     description: 'Score 100% on 5 different quizzes',
+    icon: '🧠',
     emoji: '🧠',
+    category: 'learning',
+    xp_reward: 150,
   },
   ltp_disciple: {
-    type: 'ltp_disciple',
+    slug: 'ltp_disciple',
+    title: 'LTP Disciple',
     name: 'LTP Disciple',
     description: 'Get an A grade on 10 trades',
+    icon: '📊',
     emoji: '📊',
+    category: 'trading',
+    xp_reward: 200,
   },
   green_week: {
-    type: 'green_week',
+    slug: 'green_week',
+    title: 'Green Week',
     name: 'Green Week',
     description: 'Finish a week with positive P&L',
+    icon: '💚',
     emoji: '💚',
+    category: 'milestone',
+    xp_reward: 100,
   },
   patience_pays: {
-    type: 'patience_pays',
+    slug: 'patience_pays',
+    title: 'Patience Pays',
     name: 'Patience Pays',
     description: 'Wait for patience candle on 20 trades',
+    icon: '⏳',
     emoji: '⏳',
+    category: 'trading',
+    xp_reward: 150,
   },
   level_master: {
-    type: 'level_master',
+    slug: 'level_master',
+    title: 'Level Master',
     name: 'Level Master',
     description: 'Trade at key levels 50 times',
+    icon: '📏',
     emoji: '📏',
+    category: 'trading',
+    xp_reward: 200,
   },
   trend_rider: {
-    type: 'trend_rider',
+    slug: 'trend_rider',
+    title: 'Trend Rider',
     name: 'Trend Rider',
     description: 'Trade with the trend 50 times',
+    icon: '🏄',
     emoji: '🏄',
+    category: 'trading',
+    xp_reward: 200,
   },
   practice_pro: {
-    type: 'practice_pro',
+    slug: 'practice_pro',
+    title: 'Practice Pro',
     name: 'Practice Pro',
     description: 'Complete 25 practice scenarios',
+    icon: '🎮',
     emoji: '🎮',
+    category: 'learning',
+    xp_reward: 150,
   },
   journal_regular: {
-    type: 'journal_regular',
+    slug: 'journal_regular',
+    title: 'Journal Regular',
     name: 'Journal Regular',
     description: 'Log trades for 30 days',
+    icon: '📓',
     emoji: '📓',
+    category: 'consistency',
+    xp_reward: 250,
   },
   helping_hand: {
-    type: 'helping_hand',
+    slug: 'helping_hand',
+    title: 'Helping Hand',
     name: 'Helping Hand',
     description: 'Help 10 community members',
+    icon: '🤝',
     emoji: '🤝',
+    category: 'community',
+    xp_reward: 100,
   },
   podium_finish: {
-    type: 'podium_finish',
+    slug: 'podium_finish',
+    title: 'Podium Finish',
     name: 'Podium Finish',
     description: 'Reach top 3 on the weekly leaderboard',
+    icon: '🏅',
     emoji: '🏅',
+    category: 'competition',
+    xp_reward: 200,
   },
   weekly_champion: {
-    type: 'weekly_champion',
+    slug: 'weekly_champion',
+    title: 'Weekly Champion',
     name: 'Weekly Champion',
     description: 'Win the weekly leaderboard',
+    icon: '🏆',
     emoji: '🏆',
+    category: 'competition',
+    xp_reward: 300,
   },
 };

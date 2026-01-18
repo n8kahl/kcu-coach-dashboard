@@ -1,8 +1,6 @@
-// @ts-nocheck
-// TODO: Fix type mismatches between LeaderboardEntry type and component usage
 'use client';
 
-import { cn, formatCurrency, formatNumber } from '@/lib/utils';
+import { cn, formatCurrency, formatNumber, formatPercent } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import { Trophy, Flame, TrendingUp, Medal } from 'lucide-react';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -128,12 +126,6 @@ function PodiumCard({ entry, position, isCurrentUser }: PodiumCardProps) {
     3: 'h-36',
   };
 
-  const colors = {
-    1: 'from-[#FFD700] to-[#FFA500]',
-    2: 'from-[#C0C0C0] to-[#808080]',
-    3: 'from-[#CD7F32] to-[#8B4513]',
-  };
-
   const icons = {
     1: '🥇',
     2: '🥈',
@@ -164,7 +156,7 @@ function PodiumCard({ entry, position, isCurrentUser }: PodiumCardProps) {
             <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-2xl">👑</span>
           )}
           <Avatar
-            src={entry.avatar_url}
+            src={entry.avatar}
             alt={entry.username}
             fallback={entry.username}
             size={position === 1 ? 'xl' : 'lg'}
@@ -190,11 +182,11 @@ function PodiumCard({ entry, position, isCurrentUser }: PodiumCardProps) {
 
         {/* Stats */}
         <div className="flex items-center gap-2 mt-2 text-xs text-[var(--text-tertiary)]">
-          <span className={entry.pnl >= 0 ? 'text-[var(--profit)]' : 'text-[var(--loss)]'}>
-            {formatCurrency(entry.pnl)}
+          <span className={entry.win_rate >= 50 ? 'text-[var(--profit)]' : 'text-[var(--loss)]'}>
+            {formatPercent(entry.win_rate)}
           </span>
           <span>•</span>
-          <span>{entry.wins}W</span>
+          <span>{entry.total_trades} trades</span>
         </div>
       </Card>
     </motion.div>
@@ -226,7 +218,7 @@ function LeaderboardRow({ entry, index, isCurrentUser }: LeaderboardRowProps) {
 
       {/* Avatar & Name */}
       <Avatar
-        src={entry.avatar_url}
+        src={entry.avatar}
         alt={entry.username}
         fallback={entry.username}
         size="md"
@@ -244,7 +236,7 @@ function LeaderboardRow({ entry, index, isCurrentUser }: LeaderboardRowProps) {
         <div className="flex items-center gap-3 text-xs text-[var(--text-tertiary)]">
           <span className="flex items-center gap-1">
             <TrendingUp className="w-3 h-3" />
-            {entry.wins} wins
+            {entry.total_trades} trades
           </span>
           <span className="flex items-center gap-1">
             <Flame className="w-3 h-3" />
@@ -253,14 +245,15 @@ function LeaderboardRow({ entry, index, isCurrentUser }: LeaderboardRowProps) {
         </div>
       </div>
 
-      {/* P&L */}
+      {/* Win Rate */}
       <div className="text-right">
         <p className={cn(
           'font-bold',
-          entry.pnl >= 0 ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
+          entry.win_rate >= 50 ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
         )}>
-          {formatCurrency(entry.pnl)}
+          {formatPercent(entry.win_rate)}
         </p>
+        <p className="text-xs text-[var(--text-tertiary)]">win rate</p>
       </div>
 
       {/* Score */}
@@ -310,7 +303,7 @@ export function MiniLeaderboard({ entries, currentUserId }: MiniLeaderboardProps
               >
                 <span className="text-lg">{icons[index]}</span>
                 <Avatar
-                  src={entry.avatar_url}
+                  src={entry.avatar}
                   alt={entry.username}
                   fallback={entry.username}
                   size="sm"

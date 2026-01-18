@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Header } from '@/components/layout/header';
 import { PageShell, PageSection } from '@/components/layout/page-shell';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -9,96 +9,69 @@ import { StatsOverview } from '@/components/dashboard/stats-overview';
 import { TradeJournalTable } from '@/components/dashboard/trade-journal-table';
 import { TradeWinCard } from '@/components/cards/win-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Download, Filter } from 'lucide-react';
+import { Plus, Download, Loader2 } from 'lucide-react';
 import type { TradeEntry, TradeStats } from '@/types';
 
-// Mock trades
-const mockTrades: TradeEntry[] = [
-  {
-    id: '1',
-    user_id: 'current',
-    symbol: 'NVDA',
-    direction: 'long',
-    entry_price: 890.50,
-    exit_price: 920.00,
-    quantity: 10,
-    entry_time: '2024-01-16T10:30:00Z',
-    exit_time: '2024-01-16T14:15:00Z',
-    pnl: 295.00,
-    pnl_percent: 3.31,
-    setup_type: 'PDH Bounce',
-    notes: 'Bounced off PDH with strong volume',
-    emotions: ['Confident', 'Disciplined'],
-    ltp_score: { level: 9, trend: 8, patience: 9, overall: 8.7 },
-    status: 'closed',
-    created_at: '2024-01-16T14:15:00Z',
-    updated_at: '2024-01-16T14:15:00Z',
-  },
-  {
-    id: '2',
-    user_id: 'current',
-    symbol: 'SPY',
-    direction: 'short',
-    entry_price: 462.30,
-    exit_price: 458.50,
-    quantity: 50,
-    contract_type: 'put',
-    strike_price: 460,
-    expiration_date: '2024-01-19',
-    entry_time: '2024-01-15T09:45:00Z',
-    exit_time: '2024-01-15T11:30:00Z',
-    pnl: 190.00,
-    pnl_percent: 0.82,
-    setup_type: 'VWAP Rejection',
-    notes: 'Rejection at VWAP',
-    emotions: ['Slightly anxious'],
-    ltp_score: { level: 8, trend: 6, patience: 8, overall: 7.3 },
-    status: 'closed',
-    created_at: '2024-01-15T11:30:00Z',
-    updated_at: '2024-01-15T11:30:00Z',
-  },
-  {
-    id: '3',
-    user_id: 'current',
-    symbol: 'TSLA',
-    direction: 'long',
-    entry_price: 215.00,
-    exit_price: 210.50,
-    quantity: 20,
-    entry_time: '2024-01-14T13:00:00Z',
-    exit_time: '2024-01-14T15:45:00Z',
-    pnl: -90.00,
-    pnl_percent: -2.09,
-    setup_type: 'FOMO Entry',
-    notes: 'FOMO entry, no clear level',
-    emotions: ['Frustrated'],
-    mistakes: ['Chased the move', 'No patience candle'],
-    ltp_score: { level: 4, trend: 7, patience: 3, overall: 4.7 },
-    status: 'closed',
-    created_at: '2024-01-14T15:45:00Z',
-    updated_at: '2024-01-14T15:45:00Z',
-  },
-];
-
-const mockStats: TradeStats = {
-  total_trades: 142,
-  winning_trades: 89,
-  losing_trades: 53,
-  win_rate: 62.7,
-  total_pnl: 4823.50,
-  average_win: 127.30,
-  average_loss: -78.45,
-  profit_factor: 1.82,
-  largest_win: 892.00,
-  largest_loss: -345.00,
-  average_hold_time: 120,
-  best_setup: 'PDH Bounce',
-  worst_setup: 'FOMO Entry',
+// Default empty stats for loading state
+const emptyStats: TradeStats = {
+  total_trades: 0,
+  winning_trades: 0,
+  losing_trades: 0,
+  win_rate: 0,
+  total_pnl: 0,
+  average_win: 0,
+  average_loss: 0,
+  profit_factor: 0,
+  largest_win: 0,
+  largest_loss: 0,
+  average_hold_time: 0,
+  best_setup: '-',
+  worst_setup: '-',
 };
 
 export default function JournalPage() {
   const [selectedTrade, setSelectedTrade] = useState<TradeEntry | null>(null);
   const [showWinCard, setShowWinCard] = useState(false);
+  const [trades, setTrades] = useState<TradeEntry[]>([]);
+  const [stats, setStats] = useState<TradeStats>(emptyStats);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch trades and stats from API
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Fetch trades and stats in parallel
+        const [tradesRes, statsRes] = await Promise.all([
+          fetch('/api/trades'),
+          fetch('/api/trades/stats'),
+        ]);
+
+        if (!tradesRes.ok) {
+          throw new Error('Failed to fetch trades');
+        }
+        if (!statsRes.ok) {
+          throw new Error('Failed to fetch stats');
+        }
+
+        const tradesData = await tradesRes.json();
+        const statsData = await statsRes.json();
+
+        setTrades(tradesData.trades || []);
+        setStats(statsData.stats || emptyStats);
+      } catch (err) {
+        console.error('Error fetching journal data:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load data');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchData();
+  }, []);
 
   const handleShareTrade = (trade: TradeEntry) => {
     setSelectedTrade(trade);
@@ -124,23 +97,58 @@ export default function JournalPage() {
       />
 
       <PageShell>
-        <Tabs defaultValue="trades">
-          <TabsList variant="underline">
-            <TabsTrigger value="trades" variant="underline">All Trades</TabsTrigger>
-            <TabsTrigger value="stats" variant="underline">Statistics</TabsTrigger>
-            <TabsTrigger value="insights" variant="underline">Insights</TabsTrigger>
-          </TabsList>
+        {/* Loading State */}
+        {loading && (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-primary)]" />
+            <span className="ml-3 text-[var(--text-secondary)]">Loading trades...</span>
+          </div>
+        )}
 
-          <TabsContent value="trades">
-            <TradeJournalTable
-              trades={mockTrades}
-              onShareTrade={handleShareTrade}
-            />
-          </TabsContent>
+        {/* Error State */}
+        {error && !loading && (
+          <Card className="border-[var(--loss)]">
+            <CardContent>
+              <p className="text-[var(--loss)] text-center py-4">{error}</p>
+              <div className="flex justify-center">
+                <Button variant="secondary" onClick={() => window.location.reload()}>
+                  Retry
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-          <TabsContent value="stats">
-            <StatsOverview stats={mockStats} />
-          </TabsContent>
+        {/* Main Content */}
+        {!loading && !error && (
+          <Tabs defaultValue="trades">
+            <TabsList variant="underline">
+              <TabsTrigger value="trades" variant="underline">All Trades ({trades.length})</TabsTrigger>
+              <TabsTrigger value="stats" variant="underline">Statistics</TabsTrigger>
+              <TabsTrigger value="insights" variant="underline">Insights</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="trades">
+              {trades.length === 0 ? (
+                <Card>
+                  <CardContent className="text-center py-12">
+                    <p className="text-[var(--text-tertiary)] mb-4">No trades logged yet</p>
+                    <Button variant="primary" icon={<Plus className="w-4 h-4" />}>
+                      Log Your First Trade
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                <TradeJournalTable
+                  trades={trades}
+                  onShareTrade={handleShareTrade}
+                />
+              )}
+            </TabsContent>
+
+            <TabsContent value="stats">
+              <StatsOverview stats={stats} />
+            </TabsContent>
 
           <TabsContent value="insights">
             <PageSection title="AI Insights" description="Pattern analysis from your trading">
@@ -195,8 +203,9 @@ export default function JournalPage() {
                 </Card>
               </div>
             </PageSection>
-          </TabsContent>
-        </Tabs>
+            </TabsContent>
+          </Tabs>
+        )}
 
         {/* Win Card Modal */}
         {showWinCard && selectedTrade && (selectedTrade.pnl ?? 0) > 0 && (

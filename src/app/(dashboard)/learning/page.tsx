@@ -1,9 +1,11 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { Header } from '@/components/layout/header';
 import { PageShell } from '@/components/layout/page-shell';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { ProgressBar, CircularProgress } from '@/components/ui/progress';
 import { CURRICULUM_MODULES, getCurriculumStats } from '@/data/curriculum';
 import { motion } from 'framer-motion';
@@ -22,6 +24,7 @@ import {
   Clock,
   CheckCircle2,
   Play,
+  Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -39,26 +42,84 @@ const iconMap: Record<string, React.ElementType> = {
   Shield,
 };
 
-// Mock user progress - in real app, fetch from API
-const mockUserProgress: Record<string, { completed: number; total: number }> = {
-  'mod_fundamentals': { completed: 4, total: 4 },
-  'mod_price_action': { completed: 3, total: 4 },
-  'mod_indicators': { completed: 2, total: 4 },
-  'mod_ltp_framework': { completed: 1, total: 5 },
-  'mod_strategies': { completed: 0, total: 4 },
-  'mod_entries_exits': { completed: 0, total: 4 },
-  'mod_psychology': { completed: 0, total: 5 },
-  'mod_trading_rules': { completed: 0, total: 4 },
-  'mod_watchlist': { completed: 0, total: 3 },
-};
+// Progress data type
+type ModuleProgress = Record<string, { completed: number; total: number }>;
 
 export default function LearningPage() {
   const stats = getCurriculumStats();
+  const [userProgress, setUserProgress] = useState<ModuleProgress>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Calculate overall progress
-  const totalCompleted = Object.values(mockUserProgress).reduce((sum, p) => sum + p.completed, 0);
-  const totalLessons = Object.values(mockUserProgress).reduce((sum, p) => sum + p.total, 0);
-  const overallProgress = Math.round((totalCompleted / totalLessons) * 100);
+  // Fetch user progress from API
+  useEffect(() => {
+    async function fetchProgress() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const res = await fetch('/api/learning/progress');
+
+        if (!res.ok) {
+          // If not authenticated or no progress, use empty progress
+          if (res.status === 401) {
+            setUserProgress({});
+            return;
+          }
+          throw new Error('Failed to fetch progress');
+        }
+
+        const data = await res.json();
+
+        // Convert API response to module progress format
+        const progress: ModuleProgress = {};
+        CURRICULUM_MODULES.forEach(module => {
+          const moduleProgress = data.progress?.[module.id] || { completed: 0, total: module.lessons.length };
+          progress[module.id] = {
+            completed: moduleProgress.completed || 0,
+            total: moduleProgress.total || module.lessons.length,
+          };
+        });
+
+        setUserProgress(progress);
+      } catch (err) {
+        console.error('Error fetching learning progress:', err);
+        // Don't show error, just use empty progress
+        setUserProgress({});
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchProgress();
+  }, []);
+
+  // Calculate overall progress (use 0 if no progress data)
+  const moduleValues = Object.values(userProgress);
+  const totalCompleted = moduleValues.reduce((sum, p) => sum + p.completed, 0);
+  const totalLessons = moduleValues.length > 0
+    ? moduleValues.reduce((sum, p) => sum + p.total, 0)
+    : CURRICULUM_MODULES.reduce((sum, m) => sum + m.lessons.length, 0);
+  const overallProgress = totalLessons > 0 ? Math.round((totalCompleted / totalLessons) * 100) : 0;
+
+  // Show loading state
+  if (loading) {
+    return (
+      <>
+        <Header
+          title="Learning Center"
+          subtitle="Master the LTP Framework step by step"
+          breadcrumbs={[{ label: 'Dashboard' }, { label: 'Learning' }]}
+        />
+        <PageShell>
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-primary)]" />
+            <span className="ml-3 text-[var(--text-secondary)]">Loading curriculum...</span>
+          </div>
+        </PageShell>
+      </>
+    );
+  }
 
   return (
     <>
@@ -115,10 +176,10 @@ export default function LearningPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {CURRICULUM_MODULES.map((module, index) => {
               const Icon = iconMap[module.icon] || BookOpen;
-              const progress = mockUserProgress[module.id] || { completed: 0, total: module.lessons.length };
+              const progress = userProgress[module.id] || { completed: 0, total: module.lessons.length };
               const progressPercent = Math.round((progress.completed / progress.total) * 100);
               const isComplete = progressPercent === 100;
-              const isLocked = index > 0 && mockUserProgress[CURRICULUM_MODULES[index - 1].id]?.completed === 0;
+              const isLocked = index > 0 && userProgress[CURRICULUM_MODULES[index - 1].id]?.completed === 0;
 
               return (
                 <motion.div
