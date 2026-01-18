@@ -681,16 +681,40 @@ function KeyLevelsPanel({
 }) {
   const currentPrice = quote?.last_price || 0;
 
-  // Organize levels by category
+  // Organize levels by category (per KCU methodology)
+  const premarketLevels = levels.filter(l =>
+    ['pmh', 'pml', 'premarket_high', 'premarket_low'].includes(l.level_type)
+  );
+  const dailyLevels = levels.filter(l =>
+    ['pdh', 'pdl', 'pdc', 'open_price'].includes(l.level_type)
+  );
   const intradayLevels = levels.filter(l =>
-    ['pdh', 'pdl', 'pdc', 'orb_high', 'orb_low', 'vwap', 'open_price', 'hod', 'lod', 'premarket_high', 'premarket_low'].includes(l.level_type)
+    ['orb_high', 'orb_low', 'vwap', 'hod', 'lod'].includes(l.level_type)
+  );
+  const structuralLevels = levels.filter(l =>
+    l.level_type.startsWith('structural_') || ['hourly_pivot'].includes(l.level_type)
   );
   const maLevels = levels.filter(l =>
     ['ema_9', 'ema_21', 'sma_50', 'sma_200'].includes(l.level_type)
   );
-  const htfLevels = levels.filter(l =>
-    ['weekly_high', 'weekly_low', 'monthly_high', 'monthly_low', 'hourly_pivot'].includes(l.level_type)
+  const weeklyLevels = levels.filter(l =>
+    ['pwh', 'pwl', 'weekly_high', 'weekly_low', 'monthly_high', 'monthly_low'].includes(l.level_type)
   );
+
+  // Detect confluence zones (levels within 0.3% of each other)
+  const confluenceZones = detectConfluenceZones(levels, currentPrice);
+
+  // Calculate trend status
+  const vwap = levels.find(l => l.level_type === 'vwap')?.price;
+  const ema21 = levels.find(l => l.level_type === 'ema_21')?.price;
+  const pmHigh = premarketLevels.find(l => ['pmh', 'premarket_high'].includes(l.level_type))?.price;
+  const pmLow = premarketLevels.find(l => ['pml', 'premarket_low'].includes(l.level_type))?.price;
+
+  const isAboveVWAP = vwap && currentPrice > vwap;
+  const isAboveEMA21 = ema21 && currentPrice > ema21;
+  const pmBreak = pmHigh && pmLow ? (
+    currentPrice > pmHigh ? 'above' : currentPrice < pmLow ? 'below' : 'inside'
+  ) : null;
 
   return (
     <div className="card p-6">
@@ -704,7 +728,99 @@ function KeyLevelsPanel({
         </button>
       </div>
 
+      {/* Trend Status Banner (per KCU methodology) */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <div className={cn(
+          'p-3 border text-center',
+          isAboveVWAP ? 'border-[var(--success)] bg-[var(--success)]/10' : 'border-[var(--error)] bg-[var(--error)]/10'
+        )}>
+          <div className="text-xs text-[var(--text-tertiary)] uppercase">VWAP</div>
+          <div className={cn('font-semibold', isAboveVWAP ? 'text-[var(--success)]' : 'text-[var(--error)]')}>
+            {isAboveVWAP ? 'ABOVE' : 'BELOW'}
+          </div>
+        </div>
+        <div className={cn(
+          'p-3 border text-center',
+          isAboveEMA21 ? 'border-[var(--success)] bg-[var(--success)]/10' : 'border-[var(--error)] bg-[var(--error)]/10'
+        )}>
+          <div className="text-xs text-[var(--text-tertiary)] uppercase">21 EMA</div>
+          <div className={cn('font-semibold', isAboveEMA21 ? 'text-[var(--success)]' : 'text-[var(--error)]')}>
+            {isAboveEMA21 ? 'ABOVE' : 'BELOW'}
+          </div>
+        </div>
+        <div className={cn(
+          'p-3 border text-center',
+          pmBreak === 'above' ? 'border-[var(--success)] bg-[var(--success)]/10' :
+          pmBreak === 'below' ? 'border-[var(--error)] bg-[var(--error)]/10' :
+          'border-[var(--warning)] bg-[var(--warning)]/10'
+        )}>
+          <div className="text-xs text-[var(--text-tertiary)] uppercase">Premarket</div>
+          <div className={cn('font-semibold',
+            pmBreak === 'above' ? 'text-[var(--success)]' :
+            pmBreak === 'below' ? 'text-[var(--error)]' :
+            'text-[var(--warning)]'
+          )}>
+            {pmBreak === 'above' ? 'PM HIGH BROKE' : pmBreak === 'below' ? 'PM LOW BROKE' : 'INSIDE RANGE'}
+          </div>
+        </div>
+        <div className={cn(
+          'p-3 border text-center',
+          isAboveVWAP && isAboveEMA21 ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]/10' :
+          !isAboveVWAP && !isAboveEMA21 ? 'border-[var(--error)] bg-[var(--error)]/10' :
+          'border-[var(--warning)] bg-[var(--warning)]/10'
+        )}>
+          <div className="text-xs text-[var(--text-tertiary)] uppercase">Bias</div>
+          <div className={cn('font-semibold',
+            isAboveVWAP && isAboveEMA21 ? 'text-[var(--accent-primary)]' :
+            !isAboveVWAP && !isAboveEMA21 ? 'text-[var(--error)]' :
+            'text-[var(--warning)]'
+          )}>
+            {isAboveVWAP && isAboveEMA21 ? 'BULLISH' : !isAboveVWAP && !isAboveEMA21 ? 'BEARISH' : 'NEUTRAL'}
+          </div>
+        </div>
+      </div>
+
+      {/* Confluence Zones (King & Queen) */}
+      {confluenceZones.length > 0 && (
+        <div className="mb-6 p-4 bg-[var(--accent-primary-glow)] border border-[var(--accent-primary)]">
+          <h4 className="text-sm font-semibold text-[var(--accent-primary)] mb-2 uppercase tracking-wider flex items-center gap-2">
+            <Target className="w-4 h-4" />
+            Confluence Zones (King & Queen)
+          </h4>
+          <div className="flex flex-wrap gap-3">
+            {confluenceZones.map((zone, idx) => (
+              <div key={idx} className="bg-[var(--bg-primary)] p-2 border border-[var(--accent-primary)]">
+                <div className="font-mono font-semibold text-[var(--accent-primary)]">${zone.price.toFixed(2)}</div>
+                <div className="text-xs text-[var(--text-secondary)]">{zone.levels.join(' + ')}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Premarket Levels */}
+        {premarketLevels.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold text-[var(--accent-primary)] mb-3 uppercase tracking-wider">Premarket</h4>
+            <div className="space-y-2">
+              {premarketLevels.map((level) => (
+                <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Daily Levels (PDH, PDL, PDC) */}
+        <div>
+          <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 uppercase tracking-wider">Daily</h4>
+          <div className="space-y-2">
+            {dailyLevels.map((level) => (
+              <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
+            ))}
+          </div>
+        </div>
+
         {/* Intraday Levels */}
         <div>
           <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 uppercase tracking-wider">Intraday</h4>
@@ -718,6 +834,18 @@ function KeyLevelsPanel({
           </div>
         </div>
 
+        {/* Structural Levels (4H chart) */}
+        {structuralLevels.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold text-[var(--warning)] mb-3 uppercase tracking-wider">Structural (4H)</h4>
+            <div className="space-y-2">
+              {structuralLevels.map((level) => (
+                <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Moving Averages */}
         <div>
           <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 uppercase tracking-wider">Moving Averages</h4>
@@ -728,15 +856,17 @@ function KeyLevelsPanel({
           </div>
         </div>
 
-        {/* Higher Timeframe */}
-        <div>
-          <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 uppercase tracking-wider">Higher Timeframe</h4>
-          <div className="space-y-2">
-            {htfLevels.map((level) => (
-              <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
-            ))}
+        {/* Weekly/Monthly Levels */}
+        {weeklyLevels.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold text-[var(--text-tertiary)] mb-3 uppercase tracking-wider">Weekly/Monthly</h4>
+            <div className="space-y-2">
+              {weeklyLevels.map((level) => (
+                <LevelRow key={level.id} level={level} currentPrice={currentPrice} />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* ORB Info */}
@@ -782,12 +912,48 @@ function KeyLevelsPanel({
   );
 }
 
-// Level Row Component
-function LevelRow({ level, currentPrice }: { level: KeyLevel; currentPrice: number }) {
-  const distance = currentPrice > 0 ? ((level.price - currentPrice) / currentPrice * 100) : 0;
-  const isAbove = level.price > currentPrice;
-  const isNear = Math.abs(distance) < 0.5; // Within 0.5%
+// Confluence Zone Detection (King & Queen strategy)
+interface ConfluenceZone {
+  price: number;
+  levels: string[];
+}
 
+function detectConfluenceZones(levels: KeyLevel[], currentPrice: number): ConfluenceZone[] {
+  if (levels.length < 2 || currentPrice === 0) return [];
+
+  const zones: ConfluenceZone[] = [];
+  const threshold = currentPrice * 0.003; // 0.3% threshold
+
+  // Group levels that are within 0.3% of each other
+  const sorted = [...levels].sort((a, b) => a.price - b.price);
+
+  for (let i = 0; i < sorted.length; i++) {
+    const cluster: KeyLevel[] = [sorted[i]];
+
+    for (let j = i + 1; j < sorted.length; j++) {
+      if (Math.abs(sorted[j].price - sorted[i].price) <= threshold) {
+        cluster.push(sorted[j]);
+      }
+    }
+
+    // Only add if we have 2+ levels in confluence
+    if (cluster.length >= 2) {
+      const avgPrice = cluster.reduce((sum, l) => sum + l.price, 0) / cluster.length;
+      const levelNames = cluster.map(l => getLevelLabel(l.level_type));
+
+      // Check if we already have a zone at this price
+      const existing = zones.find(z => Math.abs(z.price - avgPrice) < threshold);
+      if (!existing) {
+        zones.push({ price: avgPrice, levels: levelNames });
+      }
+    }
+  }
+
+  return zones;
+}
+
+// Level label mapping
+function getLevelLabel(levelType: string): string {
   const labelMap: Record<string, string> = {
     pdh: 'PDH',
     pdl: 'PDL',
@@ -800,6 +966,10 @@ function LevelRow({ level, currentPrice }: { level: KeyLevel; currentPrice: numb
     lod: 'LOD',
     premarket_high: 'PM High',
     premarket_low: 'PM Low',
+    pmh: 'PM High',
+    pml: 'PM Low',
+    pwh: 'Weekly High',
+    pwl: 'Weekly Low',
     ema_9: '9 EMA',
     ema_21: '21 EMA',
     sma_50: '50 SMA',
@@ -808,8 +978,25 @@ function LevelRow({ level, currentPrice }: { level: KeyLevel; currentPrice: numb
     weekly_low: 'Weekly Low',
     monthly_high: 'Monthly High',
     monthly_low: 'Monthly Low',
-    hourly_pivot: 'Hourly Pivot'
+    hourly_pivot: 'Hourly Pivot',
+    structural_support: 'Support (4H)',
+    structural_resistance: 'Resistance (4H)',
   };
+
+  // Handle dynamic structural levels
+  if (levelType.startsWith('structural_')) {
+    return levelType.replace('structural_', '').charAt(0).toUpperCase() +
+           levelType.replace('structural_', '').slice(1) + ' (4H)';
+  }
+
+  return labelMap[levelType] || levelType;
+}
+
+// Level Row Component
+function LevelRow({ level, currentPrice }: { level: KeyLevel; currentPrice: number }) {
+  const distance = currentPrice > 0 ? ((level.price - currentPrice) / currentPrice * 100) : 0;
+  const isAbove = level.price > currentPrice;
+  const isNear = Math.abs(distance) < 0.5; // Within 0.5%
 
   return (
     <div className={cn(
@@ -818,7 +1005,7 @@ function LevelRow({ level, currentPrice }: { level: KeyLevel; currentPrice: numb
     )}>
       <div>
         <div className="text-sm font-medium text-[var(--text-primary)]">
-          {labelMap[level.level_type] || level.level_type}
+          {getLevelLabel(level.level_type)}
         </div>
         <div className="text-xs text-[var(--text-muted)]">
           {level.timeframe}
