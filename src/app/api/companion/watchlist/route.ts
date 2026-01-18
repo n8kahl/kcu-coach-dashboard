@@ -14,16 +14,16 @@ export async function GET() {
     const userId = session.userId;
     logger.debug('Fetching watchlist for user', { userId });
 
-    // Get or create user's personal watchlist
-    // Try owner_id first, then user_id for schema compatibility
+    // Get user's personal watchlist
+    // Try user_id first (this is what the actual schema uses based on Railway logs)
     let { data: watchlist, error: watchlistError } = await supabaseAdmin
       .from('watchlists')
       .select('id, name, is_shared, is_admin_watchlist, symbols')
-      .eq('owner_id', userId)
+      .eq('user_id', userId)
       .eq('is_shared', false)
       .single();
 
-    logger.debug('Initial watchlist query result', {
+    logger.debug('Watchlist query result (user_id)', {
       hasWatchlist: !!watchlist,
       errorCode: watchlistError?.code,
       errorMessage: watchlistError?.message
@@ -38,28 +38,32 @@ export async function GET() {
       }, { status: 500 });
     }
 
-    // Fallback: try user_id if owner_id didn't work (PGRST116 = no rows found)
+    // Fallback: try owner_id if user_id didn't find anything (for schema compatibility)
     if (!watchlist && watchlistError?.code === 'PGRST116') {
-      const { data: watchlistByUserId } = await supabaseAdmin
+      const { data: watchlistByOwnerId, error: ownerIdError } = await supabaseAdmin
         .from('watchlists')
         .select('id, name, is_shared, is_admin_watchlist, symbols')
-        .eq('user_id', userId)
+        .eq('owner_id', userId)
         .eq('is_shared', false)
         .single();
-      watchlist = watchlistByUserId;
+
+      // Only use owner_id result if it worked (column exists and found data)
+      if (!ownerIdError || ownerIdError.code === 'PGRST116') {
+        watchlist = watchlistByOwnerId;
+      }
     }
 
     if (!watchlist) {
       // Create personal watchlist if doesn't exist
-      // Try with owner_id first, fall back to user_id
+      // Try with user_id first (matches actual schema), fall back to owner_id
       let createError;
       let newWatchlist;
 
-      // Try owner_id first
+      // Try user_id first (this is what the actual schema uses)
       const result1 = await supabaseAdmin
         .from('watchlists')
         .insert({
-          owner_id: userId,
+          user_id: userId,
           name: 'My Watchlist',
           is_shared: false,
           is_admin_watchlist: false,
@@ -68,12 +72,12 @@ export async function GET() {
         .select()
         .single();
 
-      if (result1.error?.message?.includes('owner_id')) {
-        // Column doesn't exist, try user_id
+      if (result1.error?.message?.includes('user_id') && result1.error.message.includes('does not exist')) {
+        // Column doesn't exist, try owner_id
         const result2 = await supabaseAdmin
           .from('watchlists')
           .insert({
-            user_id: userId,
+            owner_id: userId,
             name: 'My Watchlist',
             is_shared: false,
             is_admin_watchlist: false,
@@ -194,43 +198,43 @@ export async function POST(request: Request) {
 
     const normalizedSymbol = symbol.trim().toUpperCase();
 
-    // Get user's watchlist - try owner_id first, then user_id
+    // Get user's watchlist - try user_id first (matches actual schema)
     let { data: watchlist } = await supabaseAdmin
       .from('watchlists')
       .select('id, symbols')
-      .eq('owner_id', userId)
+      .eq('user_id', userId)
       .eq('is_shared', false)
       .single();
 
     if (!watchlist) {
-      // Try user_id as fallback
-      const { data: watchlistByUserId } = await supabaseAdmin
+      // Try owner_id as fallback for schema compatibility
+      const { data: watchlistByOwnerId } = await supabaseAdmin
         .from('watchlists')
         .select('id, symbols')
-        .eq('user_id', userId)
+        .eq('owner_id', userId)
         .eq('is_shared', false)
         .single();
-      watchlist = watchlistByUserId;
+      watchlist = watchlistByOwnerId;
     }
 
     if (!watchlist) {
-      // Create watchlist with the symbol - try owner_id first
+      // Create watchlist with the symbol - try user_id first (matches actual schema)
       const result1 = await supabaseAdmin
         .from('watchlists')
         .insert({
-          owner_id: userId,
+          user_id: userId,
           name: 'My Watchlist',
           is_shared: false,
           is_admin_watchlist: false,
           symbols: [normalizedSymbol]
         });
 
-      if (result1.error?.message?.includes('owner_id')) {
-        // Try user_id instead
+      if (result1.error?.message?.includes('user_id') && result1.error.message.includes('does not exist')) {
+        // Try owner_id instead
         const result2 = await supabaseAdmin
           .from('watchlists')
           .insert({
-            user_id: userId,
+            owner_id: userId,
             name: 'My Watchlist',
             is_shared: false,
             is_admin_watchlist: false,
@@ -238,11 +242,11 @@ export async function POST(request: Request) {
           });
 
         if (result2.error) {
-          logger.error('Error creating watchlist (user_id)', { error: result2.error.message });
+          logger.error('Error creating watchlist (owner_id)', { error: result2.error.message });
           return NextResponse.json({ error: 'Failed to add symbol', detail: result2.error.message }, { status: 500 });
         }
       } else if (result1.error) {
-        logger.error('Error creating watchlist (owner_id)', { error: result1.error.message });
+        logger.error('Error creating watchlist (user_id)', { error: result1.error.message });
         return NextResponse.json({ error: 'Failed to add symbol', detail: result1.error.message }, { status: 500 });
       }
     } else {
@@ -292,23 +296,23 @@ export async function DELETE(request: Request) {
 
     const normalizedSymbol = symbol.trim().toUpperCase();
 
-    // Get user's watchlist - try owner_id first, then user_id
+    // Get user's watchlist - try user_id first (matches actual schema)
     let { data: watchlist } = await supabaseAdmin
       .from('watchlists')
       .select('id, symbols')
-      .eq('owner_id', userId)
+      .eq('user_id', userId)
       .eq('is_shared', false)
       .single();
 
     if (!watchlist) {
-      // Try user_id as fallback
-      const { data: watchlistByUserId } = await supabaseAdmin
+      // Try owner_id as fallback for schema compatibility
+      const { data: watchlistByOwnerId } = await supabaseAdmin
         .from('watchlists')
         .select('id, symbols')
-        .eq('user_id', userId)
+        .eq('owner_id', userId)
         .eq('is_shared', false)
         .single();
-      watchlist = watchlistByUserId;
+      watchlist = watchlistByOwnerId;
     }
 
     if (!watchlist) {
