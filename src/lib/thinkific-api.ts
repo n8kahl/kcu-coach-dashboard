@@ -58,14 +58,26 @@ export class ThinkificAPI {
 
     const url = `${THINKIFIC_API_BASE}${endpoint}`;
 
+    // Detect if API key is a JWT token (starts with eyJ) or legacy API key
+    const isJwtToken = this.apiKey.startsWith('eyJ');
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...options.headers as Record<string, string>,
+    };
+
+    if (isJwtToken) {
+      // Use Bearer authentication for JWT tokens
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    } else {
+      // Use legacy X-Auth headers for simple API keys
+      headers['X-Auth-API-Key'] = this.apiKey;
+      headers['X-Auth-Subdomain'] = this.subdomain;
+    }
+
     const response = await fetch(url, {
       ...options,
-      headers: {
-        'X-Auth-API-Key': this.apiKey,
-        'X-Auth-Subdomain': this.subdomain,
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
+      headers,
     });
 
     if (!response.ok) {
@@ -385,14 +397,16 @@ export class ThinkificAPI {
     chapterId: number,
     courseId: number
   ): Promise<void> {
-    console.log(`[ThinkificSync] Upserting content ${content.id}: ${content.name} (${content.content_type})`);
+    // Default content_type to 'unknown' if not provided by API
+    const contentType = content.content_type || 'unknown';
+    console.log(`[ThinkificSync] Upserting content ${content.id}: ${content.name} (${contentType})`);
     const { error } = await supabaseAdmin.from('thinkific_contents').upsert(
       {
         thinkific_id: content.id,
         chapter_id: chapterId,
         course_id: courseId,
         name: content.name,
-        content_type: content.content_type,
+        content_type: contentType,
         position: content.position ?? 0,
         video_duration: content.video_duration_in_seconds || null,
         video_url: content.video_identifier || null,
