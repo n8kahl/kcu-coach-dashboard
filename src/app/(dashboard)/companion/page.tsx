@@ -192,6 +192,8 @@ export default function CompanionTerminal() {
   // Chart data
   const [chartData, setChartData] = useState<ChartCandle[]>([]);
   const [chartLevels, setChartLevels] = useState<Level[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartError, setChartError] = useState<string | null>(null);
 
   // UI state
   const [coachBoxExpanded, setCoachBoxExpanded] = useState(true);
@@ -369,24 +371,44 @@ export default function CompanionTerminal() {
   };
 
   const fetchChartData = async (symbol: string) => {
+    setChartLoading(true);
+    setChartError(null);
     try {
       const res = await fetch(`/api/market/bars?symbol=${symbol}&timespan=minute&multiplier=5&limit=200`);
       if (res.ok) {
         const data = await res.json();
-        if (data.bars) {
-          setChartData(data.bars.map((c: any) => ({
-            time: c.timestamp || c.time,
-            timestamp: c.timestamp || c.time,
-            open: c.open,
-            high: c.high,
-            low: c.low,
-            close: c.close,
-            volume: c.volume,
-          })));
+        if (data.bars && data.bars.length > 0) {
+          // Convert timestamps - API returns ms, chart needs seconds
+          setChartData(data.bars.map((c: any) => {
+            const ts = c.timestamp || c.time;
+            // Convert ms to seconds if needed (lightweight-charts expects seconds)
+            const timeInSeconds = ts > 1e12 ? Math.floor(ts / 1000) : ts;
+            return {
+              time: timeInSeconds,
+              timestamp: timeInSeconds,
+              open: c.open,
+              high: c.high,
+              low: c.low,
+              close: c.close,
+              volume: c.volume,
+            };
+          }));
+          setChartError(null);
+        } else {
+          setChartData([]);
+          setChartError('No market data available for this symbol');
         }
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        const errorMsg = errorData.error || `Failed to fetch data (${res.status})`;
+        setChartError(errorMsg);
+        console.error('Chart API error:', errorMsg);
       }
     } catch (error) {
       console.error('Error fetching chart data:', error);
+      setChartError('Failed to connect to market data service');
+    } finally {
+      setChartLoading(false);
     }
   };
 
@@ -553,6 +575,8 @@ export default function CompanionTerminal() {
       setCoachingMessages([]);
       setChartData([]);
       setChartLevels([]);
+      setChartError(null);
+      setChartLoading(false);
     }
   }, [selectedSymbol]);
 
@@ -875,19 +899,63 @@ export default function CompanionTerminal() {
         {/* CHART AREA (Full Screen) */}
         <div className="absolute inset-0 z-0">
           {selectedSymbol ? (
-            // Always render KCUChart when symbol selected - it handles empty data state internally
-            <KCUChart
-              mode="live"
-              data={chartData}
-              levels={chartLevels}
-              gammaLevels={chartGammaLevels}
-              fvgZones={chartFvgZones}
-              symbol={selectedSymbol}
-              showVolume={true}
-              showIndicators={true}
-              showPatienceCandles={true}
-              className="w-full h-full"
-            />
+            <>
+              {/* Show chart when we have data */}
+              {chartData.length > 0 && !chartLoading && (
+                <KCUChart
+                  mode="live"
+                  data={chartData}
+                  levels={chartLevels}
+                  gammaLevels={chartGammaLevels}
+                  fvgZones={chartFvgZones}
+                  symbol={selectedSymbol}
+                  showVolume={true}
+                  showIndicators={true}
+                  showPatienceCandles={true}
+                  className="w-full h-full"
+                />
+              )}
+
+              {/* Loading state */}
+              {chartLoading && (
+                <div className="w-full h-full flex items-center justify-center bg-[#0d0d0d]">
+                  <div className="text-center">
+                    <RefreshCw className="w-8 h-8 mx-auto mb-3 text-[var(--accent-primary)] animate-spin" />
+                    <p className="text-[var(--text-secondary)] mb-1">Loading chart for {selectedSymbol}...</p>
+                    <p className="text-xs text-[var(--text-tertiary)]">Fetching market data</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Error state */}
+              {chartError && !chartLoading && chartData.length === 0 && (
+                <div className="w-full h-full flex items-center justify-center bg-[#0d0d0d]">
+                  <div className="text-center max-w-md px-4">
+                    <div className="w-16 h-16 mx-auto mb-4 rounded-lg bg-[var(--error)]/10 flex items-center justify-center">
+                      <AlertTriangle className="w-8 h-8 text-[var(--error)]" />
+                    </div>
+                    <p className="text-[var(--text-primary)] font-semibold mb-2">{selectedSymbol}</p>
+                    <p className="text-[var(--text-secondary)] mb-3">{chartError}</p>
+                    <button
+                      onClick={() => fetchChartData(selectedSymbol)}
+                      className="px-4 py-2 bg-[var(--accent-primary)] text-[#0d0d0d] text-sm font-semibold hover:bg-[var(--accent-primary-hover)] transition-colors"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* No data but no error (edge case) */}
+              {!chartLoading && !chartError && chartData.length === 0 && (
+                <div className="w-full h-full flex items-center justify-center bg-[#0d0d0d]">
+                  <div className="text-center">
+                    <RefreshCw className="w-8 h-8 mx-auto mb-3 text-[var(--accent-primary)] animate-spin" />
+                    <p className="text-[var(--text-secondary)] mb-1">Initializing chart for {selectedSymbol}...</p>
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-[#0d0d0d]">
               <div className="text-center">
@@ -901,38 +969,41 @@ export default function CompanionTerminal() {
           )}
         </div>
 
-        {/* LTP 2.0 SCORE HUD (Top Left Overlay) */}
-        {selectedSymbol && (ltp2Score || ltpAnalysis) && (
-          <div className="absolute top-4 left-4 z-10">
-            <LTP2ScoreHUD
-              ltp2Score={ltp2Score}
-              ltpAnalysis={ltpAnalysis}
-              gammaRegime={gammaData?.regime || null}
-              currentPrice={currentQuote?.last_price || 0}
-              vwap={currentQuote?.vwap || 0}
-              isSpeaking={someshVoice.isSpeaking}
+        {/* LEFT PANEL CONTAINER - Unified container for overlays to prevent overlap */}
+        <div className="absolute top-4 left-4 z-10 flex flex-col gap-3 max-h-[calc(100%-2rem)] pointer-events-none">
+          {/* LTP 2.0 SCORE HUD */}
+          {selectedSymbol && (ltp2Score || ltpAnalysis) && (
+            <div className="pointer-events-auto">
+              <LTP2ScoreHUD
+                ltp2Score={ltp2Score}
+                ltpAnalysis={ltpAnalysis}
+                gammaRegime={gammaData?.regime || null}
+                currentPrice={currentQuote?.last_price || 0}
+                vwap={currentQuote?.vwap || 0}
+                isSpeaking={someshVoice.isSpeaking}
+              />
+            </div>
+          )}
+
+          {/* WATCHLIST PANEL */}
+          <div className={cn(
+            'pointer-events-auto transition-all duration-300',
+            watchlistExpanded ? 'w-52' : 'w-12'
+          )}>
+            <WatchlistOverlay
+              watchlist={watchlist}
+              setups={setups}
+              selectedSymbol={selectedSymbol}
+              onSelectSymbol={setSelectedSymbol}
+              onAddSymbol={addSymbol}
+              onRemoveSymbol={removeSymbol}
+              newSymbol={newSymbol}
+              setNewSymbol={setNewSymbol}
+              loading={loading}
+              expanded={watchlistExpanded}
+              onToggle={() => setWatchlistExpanded(!watchlistExpanded)}
             />
           </div>
-        )}
-
-        {/* WATCHLIST PANEL (Left Side) */}
-        <div className={cn(
-          'absolute top-20 left-4 z-10 transition-all duration-300',
-          watchlistExpanded ? 'w-48' : 'w-12'
-        )}>
-          <WatchlistOverlay
-            watchlist={watchlist}
-            setups={setups}
-            selectedSymbol={selectedSymbol}
-            onSelectSymbol={setSelectedSymbol}
-            onAddSymbol={addSymbol}
-            onRemoveSymbol={removeSymbol}
-            newSymbol={newSymbol}
-            setNewSymbol={setNewSymbol}
-            loading={loading}
-            expanded={watchlistExpanded}
-            onToggle={() => setWatchlistExpanded(!watchlistExpanded)}
-          />
         </div>
 
         {/* COACH BOX (Bottom Right Floating Terminal) */}
@@ -958,7 +1029,7 @@ export default function CompanionTerminal() {
 }
 
 // ============================================================================
-// LTP 2.0 SCORE HUD OVERLAY
+// LTP 2.0 SCORE HUD OVERLAY - Compact Design
 // ============================================================================
 
 function LTP2ScoreHUD({
@@ -976,21 +1047,13 @@ function LTP2ScoreHUD({
   vwap: number;
   isSpeaking: boolean;
 }) {
-  // LTP 2.0 grade colors
-  const ltp2GradeColors: Record<string, string> = {
-    'Sniper': 'text-[var(--success)] bg-[var(--success)]/20 border border-[var(--success)]/50',
-    'Decent': 'text-[var(--warning)] bg-[var(--warning)]/15 border border-[var(--warning)]/30',
-    'Dumb Shit': 'text-[var(--error)] bg-[var(--error)]/20 border border-[var(--error)]/50',
-  };
+  const [expanded, setExpanded] = useState(false);
 
-  // Legacy grade colors
-  const gradeColors: Record<string, string> = {
-    'A+': 'text-[var(--success)]',
-    'A': 'text-[var(--success)]',
-    'B': 'text-[var(--accent-primary)]',
-    'C': 'text-[var(--warning)]',
-    'D': 'text-[var(--error)]',
-    'F': 'text-[var(--error)]',
+  // LTP 2.0 grade colors and badges
+  const ltp2GradeStyles: Record<string, { bg: string; text: string; border: string; emoji: string; label: string }> = {
+    'Sniper': { bg: 'bg-[var(--success)]/20', text: 'text-[var(--success)]', border: 'border-[var(--success)]/50', emoji: '🎯', label: 'SNIPER' },
+    'Decent': { bg: 'bg-[var(--warning)]/15', text: 'text-[var(--warning)]', border: 'border-[var(--warning)]/30', emoji: '📊', label: 'DECENT' },
+    'Dumb Shit': { bg: 'bg-[var(--error)]/20', text: 'text-[var(--error)]', border: 'border-[var(--error)]/50', emoji: '💩', label: 'DUMB' },
   };
 
   const gammaColors: Record<string, string> = {
@@ -999,68 +1062,69 @@ function LTP2ScoreHUD({
     'neutral': 'text-[var(--text-secondary)]',
   };
 
-  const directionColors: Record<string, string> = {
-    'bullish': 'text-[var(--success)]',
-    'bearish': 'text-[var(--error)]',
-    'neutral': 'text-[var(--text-tertiary)]',
-  };
-
   const aboveVwap = currentPrice > vwap;
+  const gradeStyle = ltp2Score ? ltp2GradeStyles[ltp2Score.grade] : null;
 
   return (
-    <div className="bg-[#0d0d0d]/90 backdrop-blur border border-[var(--border-primary)] rounded-lg p-3 min-w-[200px]">
-      {/* LTP 2.0 Header with Grade */}
-      <div className="flex items-center justify-between mb-3">
-        {ltp2Score ? (
+    <div className={cn(
+      'bg-[#0d0d0d]/95 backdrop-blur border rounded-lg overflow-hidden transition-all duration-300',
+      gradeStyle ? gradeStyle.border : 'border-[var(--border-primary)]',
+      expanded ? 'w-52' : 'w-auto'
+    )}>
+      {/* Compact Header - Always Visible */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className={cn(
+          'w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--bg-tertiary)]/50 transition-colors',
+          gradeStyle ? gradeStyle.bg : ''
+        )}
+      >
+        {/* Grade Badge */}
+        {ltp2Score && gradeStyle ? (
           <span className={cn(
-            'text-sm font-black px-2 py-1 rounded',
-            ltp2GradeColors[ltp2Score.grade] || 'text-[var(--text-secondary)] bg-[var(--bg-tertiary)]'
+            'text-xs font-black px-1.5 py-0.5 rounded border',
+            gradeStyle.bg, gradeStyle.text, gradeStyle.border
           )}>
-            {ltp2Score.grade === 'Dumb Shit' ? '💩 DUMB' : ltp2Score.grade === 'Sniper' ? '🎯 SNIPER' : '📊 DECENT'}
+            {gradeStyle.emoji} {gradeStyle.label}
           </span>
         ) : ltpAnalysis ? (
-          <span className={cn(
-            'text-lg font-black px-2 py-0.5 rounded bg-[var(--bg-tertiary)]',
-            gradeColors[ltpAnalysis.grade] || 'text-[var(--text-secondary)]'
-          )}>
+          <span className="text-sm font-black text-[var(--accent-primary)]">
             {ltpAnalysis.grade}
           </span>
         ) : null}
-        <div className="flex items-center gap-2">
-          {isSpeaking && (
-            <div className="flex items-center gap-1 text-[10px] text-[var(--accent-primary)] animate-pulse">
-              <Volume2 className="w-3 h-3" />
-            </div>
-          )}
-          <span className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
-            LTP 2.0
+
+        {/* Score */}
+        {ltp2Score && (
+          <span className={cn(
+            'text-lg font-black tabular-nums',
+            ltp2Score.score >= 75 ? 'text-[var(--success)]' :
+            ltp2Score.score >= 50 ? 'text-[var(--warning)]' :
+            'text-[var(--error)]'
+          )}>
+            {ltp2Score.score}
           </span>
+        )}
+
+        {/* Quick Indicators */}
+        <div className="flex items-center gap-1.5 ml-auto">
+          <span className={cn('text-[10px] font-bold', aboveVwap ? 'text-[var(--success)]' : 'text-[var(--error)]')}>
+            {aboveVwap ? '▲' : '▼'}
+          </span>
+          {gammaRegime && (
+            <span className={cn('text-[10px] font-bold', gammaColors[gammaRegime])}>
+              {gammaRegime === 'positive' ? '+γ' : gammaRegime === 'negative' ? '-γ' : '~γ'}
+            </span>
+          )}
+          {isSpeaking && <Volume2 className="w-3 h-3 text-[var(--accent-primary)] animate-pulse" />}
+          <ChevronDown className={cn('w-3 h-3 text-[var(--text-tertiary)] transition-transform', expanded && 'rotate-180')} />
         </div>
-      </div>
+      </button>
 
-      {/* LTP 2.0 Score & Breakdown */}
-      {ltp2Score && (
-        <>
-          {/* Score Circle */}
-          <div className="flex items-center justify-center mb-3">
-            <div className={cn(
-              'relative w-16 h-16 rounded-full border-4 flex items-center justify-center',
-              ltp2Score.score >= 75 ? 'border-[var(--success)]' :
-              ltp2Score.score >= 50 ? 'border-[var(--warning)]' :
-              'border-[var(--error)]'
-            )}>
-              <span className="text-xl font-black text-[var(--text-primary)]">{ltp2Score.score}</span>
-              <span className={cn(
-                'absolute -bottom-1 text-[8px] font-bold px-1 rounded',
-                directionColors[ltp2Score.direction]
-              )}>
-                {ltp2Score.direction.toUpperCase()}
-              </span>
-            </div>
-          </div>
-
-          {/* Breakdown Bars */}
-          <div className="space-y-1.5 mb-3">
+      {/* Expanded Details */}
+      {expanded && ltp2Score && (
+        <div className="px-3 pb-3 border-t border-[var(--border-primary)]">
+          {/* Score Breakdown - Compact Bars */}
+          <div className="space-y-1 py-2">
             <ScoreBar label="Cloud" value={ltp2Score.breakdown.cloudScore} max={25} color="var(--accent-primary)" />
             <ScoreBar label="VWAP" value={ltp2Score.breakdown.vwapScore} max={20} color="var(--success)" />
             <ScoreBar label="Gamma" value={ltp2Score.breakdown.gammaWallScore + ltp2Score.breakdown.gammaRegimeScore} max={35} color="#00ffff" />
@@ -1071,62 +1135,28 @@ function LTP2ScoreHUD({
           </div>
 
           {/* Recommendation */}
-          <div className="text-[10px] text-[var(--text-secondary)] leading-relaxed mb-2 px-1">
+          <p className="text-[10px] text-[var(--text-secondary)] leading-relaxed">
             {ltp2Score.recommendation}
-          </div>
+          </p>
 
-          {/* Warnings */}
+          {/* Warning */}
           {ltp2Score.warnings.length > 0 && (
-            <div className="flex items-start gap-1 text-[9px] text-[var(--warning)] bg-[var(--warning)]/10 rounded px-2 py-1">
+            <div className="flex items-start gap-1 text-[9px] text-[var(--warning)] bg-[var(--warning)]/10 rounded px-2 py-1 mt-2">
               <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
               <span>{ltp2Score.warnings[0]}</span>
             </div>
           )}
-        </>
-      )}
-
-      {/* Legacy LTP Scores (fallback) */}
-      {!ltp2Score && ltpAnalysis && (
-        <div className="space-y-2 mb-3">
-          <ScoreBar label="L" value={ltpAnalysis.levels.levelScore} color="var(--accent-primary)" />
-          <ScoreBar label="T" value={ltpAnalysis.trend.trendScore} color="var(--success)" />
-          <ScoreBar label="P" value={ltpAnalysis.patience.patienceScore} color="var(--warning)" />
         </div>
       )}
 
-      {/* Context Row */}
-      <div className="flex items-center justify-between text-[10px] pt-2 border-t border-[var(--border-primary)]">
-        {/* VWAP Position */}
-        <div className="flex items-center gap-1">
-          <span className="text-[var(--text-tertiary)]">VWAP</span>
-          <span className={aboveVwap ? 'text-[var(--success)]' : 'text-[var(--error)]'}>
-            {aboveVwap ? '▲' : '▼'}
-          </span>
+      {/* Expanded Legacy LTP (fallback) */}
+      {expanded && !ltp2Score && ltpAnalysis && (
+        <div className="px-3 pb-3 space-y-1">
+          <ScoreBar label="Level" value={ltpAnalysis.levels.levelScore} color="var(--accent-primary)" />
+          <ScoreBar label="Trend" value={ltpAnalysis.trend.trendScore} color="var(--success)" />
+          <ScoreBar label="Patience" value={ltpAnalysis.patience.patienceScore} color="var(--warning)" />
         </div>
-
-        {/* Gamma Regime */}
-        {gammaRegime && (
-          <div className="flex items-center gap-1">
-            <Shield className="w-3 h-3 text-[var(--text-tertiary)]" />
-            <span className={gammaColors[gammaRegime]}>
-              {gammaRegime === 'positive' ? '+γ' : gammaRegime === 'negative' ? '-γ' : '~γ'}
-            </span>
-          </div>
-        )}
-
-        {/* Direction Indicator */}
-        {ltp2Score && (
-          <div className="flex items-center gap-1">
-            {ltp2Score.direction === 'bullish' ? (
-              <TrendingUp className="w-3 h-3 text-[var(--success)]" />
-            ) : ltp2Score.direction === 'bearish' ? (
-              <TrendingDown className="w-3 h-3 text-[var(--error)]" />
-            ) : (
-              <Activity className="w-3 h-3 text-[var(--text-tertiary)]" />
-            )}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
