@@ -3,7 +3,7 @@
 // Force dynamic rendering to prevent prerender errors with useSearchParams
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Header } from '@/components/layout/header';
 import { PageShell, PageSection } from '@/components/layout/page-shell';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -11,30 +11,21 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Stat, StatGrid } from '@/components/ui/stat';
 import { ProgressBar } from '@/components/ui/progress';
-import { PracticeChart } from '@/components/practice/practice-chart';
-import { ChartGrid } from '@/components/practice/ChartGrid';
+import { KCUChart, Candle, Level, GammaLevel } from '@/components/charts/KCUChart';
+import { useBatchCandleReplay, OHLCCandle } from '@/hooks/useCandleReplay';
 import { DailyChallenges } from '@/components/practice/DailyChallenge';
-import { AdvancedPracticeChart } from '@/components/practice/AdvancedPracticeChart';
 import { AchievementPopup, Achievement } from '@/components/practice/AchievementPopup';
-import { ContextPanel, ContextBadges, MarketContext, LTPAnalysis } from '@/components/practice/ContextPanel';
 import { Leaderboard, MiniLeaderboard } from '@/components/practice/Leaderboard';
-import { ChartSkeleton, DailyChallengeSkeleton, LeaderboardSkeleton } from '@/components/practice/LoadingSkeletons';
 import { DecisionPanel, TradePlan } from '@/components/practice/DecisionPanel';
 import { ComparisonPanel } from '@/components/practice/ComparisonPanel';
 import { AICoachFeedback, AIFeedback } from '@/components/practice/AICoachFeedback';
-import { MarketContextCard, ScenarioContext } from '@/components/practice/MarketContextCard';
 import { InstructionsPanel, DecisionGuide, KeyboardShortcuts } from '@/components/practice/InstructionsPanel';
-import { PaperTradingPanel } from '@/components/practice/paper-trading-panel';
-import { OptionsChain } from '@/components/practice/options-chain';
-import { ReplayController, useReplayState } from '@/components/practice/replay-controller';
-import { SkillExercises } from '@/components/practice/skill-exercises';
 import { cn } from '@/lib/utils';
 import { usePageContext } from '@/components/ai';
 import { Tooltip } from '@/components/ui/tooltip';
 import {
   PracticePageSkeleton,
   ScenarioChartSkeleton,
-  ScenarioListSkeleton,
 } from '@/components/practice/PracticeSkeletons';
 import {
   Target,
@@ -64,12 +55,20 @@ import {
   MessageSquare,
   Wand2,
   LayoutGrid,
-  Wallet,
-  Layers,
-  GraduationCap,
+  Eye,
+  EyeOff,
+  Volume2,
+  SkipForward,
+  FastForward,
+  Rewind,
+  Square,
+  AlertTriangle,
 } from 'lucide-react';
 
+// =============================================================================
 // Types
+// =============================================================================
+
 interface Scenario {
   id: string;
   title: string;
@@ -149,9 +148,46 @@ interface CoachingFeedback {
   personalizedTip?: string;
 }
 
-type PracticeMode = 'standard' | 'quick_drill' | 'deep_analysis' | 'replay' | 'ai_generated' | 'multi_timeframe';
+interface TradeExecution {
+  entryCandle: number;
+  entryPrice: number;
+  direction: 'long' | 'short';
+  stopPrice?: number;
+  target1Price?: number;
+  target2Price?: number;
+  currentPnl: number;
+  status: 'pending' | 'active' | 'won' | 'lost' | 'breakeven';
+  exitCandle?: number;
+  exitPrice?: number;
+}
 
+type PracticeMode = 'standard' | 'quick_drill' | 'deep_analysis' | 'replay' | 'ai_generated' | 'hard_mode';
+
+// =============================================================================
+// Somesh Early Entry Feedback
+// =============================================================================
+
+const EARLY_ENTRY_QUOTES = [
+  "Yo! You jumping the gun. Where's the patience candle?",
+  "WAIT. Did the candle even CLOSE yet? Patience ain't just a virtue - it's a requirement.",
+  "Bro. What are you doing? You're entering BEFORE confirmation. That's gambling, not trading.",
+  "The candle hasn't closed. You're ANTICIPATING instead of REACTING. Bad habit.",
+  "Hold up! No patience candle = no entry. It's that simple. Chill.",
+  "You see that candle forming? FORMING. Not CLOSED. There's a difference.",
+  "This is how accounts blow up - entering before the setup confirms. Slow down.",
+  "Whoa whoa whoa. The patience candle ain't confirmed yet. What's the rush?",
+  "Remember the P in LTP? PATIENCE. Wait for the close. Always.",
+  "You're jumping in early like a rookie. Wait for the candle to CLOSE first.",
+];
+
+const getEarlyEntryFeedback = (): string => {
+  return EARLY_ENTRY_QUOTES[Math.floor(Math.random() * EARLY_ENTRY_QUOTES.length)];
+};
+
+// =============================================================================
 // Practice Mode Definitions
+// =============================================================================
+
 const PRACTICE_MODES = [
   {
     id: 'standard' as PracticeMode,
@@ -175,6 +211,13 @@ const PRACTICE_MODES = [
     color: 'success',
   },
   {
+    id: 'hard_mode' as PracticeMode,
+    name: 'Hard Mode',
+    description: 'Chart hides future - real-time feel',
+    icon: EyeOff,
+    color: 'error',
+  },
+  {
     id: 'ai_generated' as PracticeMode,
     name: 'AI Scenarios',
     description: 'Unlimited AI-generated practice',
@@ -182,23 +225,333 @@ const PRACTICE_MODES = [
     color: 'info',
   },
   {
-    id: 'multi_timeframe' as PracticeMode,
-    name: 'Multi-TF',
-    description: '5-chart grid analysis',
-    icon: LayoutGrid,
-    color: 'default',
-  },
-  {
     id: 'replay' as PracticeMode,
     name: 'Live Replay',
-    description: 'Watch candles unfold in real-time',
+    description: 'Watch candles unfold candle-by-candle',
     icon: Play,
     color: 'info',
   },
 ];
 
+// =============================================================================
+// LTP Score HUD Component (Same as Companion)
+// =============================================================================
+
+interface LTPScoreHUDProps {
+  ltpAnalysis?: {
+    level: { score: number; reason: string };
+    trend: { score: number; reason: string };
+    patience: { score: number; reason: string };
+  };
+  grade?: string;
+  className?: string;
+}
+
+function LTPScoreHUD({ ltpAnalysis, grade, className }: LTPScoreHUDProps) {
+  if (!ltpAnalysis) return null;
+
+  const getGradeColor = (g: string) => {
+    if (g === 'A+' || g === 'A') return 'text-[var(--success)] bg-[var(--success)]/20';
+    if (g === 'B+' || g === 'B') return 'text-[var(--warning)] bg-[var(--warning)]/20';
+    if (g === 'C+' || g === 'C') return 'text-[var(--text-secondary)] bg-[var(--bg-tertiary)]';
+    return 'text-[var(--error)] bg-[var(--error)]/20';
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 80) return 'bg-[var(--success)]';
+    if (score >= 60) return 'bg-[var(--warning)]';
+    return 'bg-[var(--error)]';
+  };
+
+  return (
+    <div className={cn(
+      'absolute top-4 left-4 z-20 bg-[var(--bg-secondary)]/95 backdrop-blur-sm border border-[var(--border-primary)] p-3',
+      className
+    )}>
+      <div className="flex items-center gap-3 mb-2">
+        <span className="text-xs font-mono text-[var(--text-tertiary)] uppercase">LTP Score</span>
+        {grade && (
+          <span className={cn('px-2 py-0.5 text-sm font-bold', getGradeColor(grade))}>
+            {grade}
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-1.5">
+        {/* Level */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono text-[var(--accent-primary)] w-4">L</span>
+          <div className="flex-1 h-1.5 bg-[var(--bg-tertiary)] overflow-hidden">
+            <div
+              className={cn('h-full transition-all duration-500', getScoreColor(ltpAnalysis.level.score))}
+              style={{ width: `${ltpAnalysis.level.score}%` }}
+            />
+          </div>
+          <span className="text-[10px] font-mono text-[var(--text-secondary)] w-6">{ltpAnalysis.level.score}%</span>
+        </div>
+
+        {/* Trend */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono text-[var(--accent-primary)] w-4">T</span>
+          <div className="flex-1 h-1.5 bg-[var(--bg-tertiary)] overflow-hidden">
+            <div
+              className={cn('h-full transition-all duration-500', getScoreColor(ltpAnalysis.trend.score))}
+              style={{ width: `${ltpAnalysis.trend.score}%` }}
+            />
+          </div>
+          <span className="text-[10px] font-mono text-[var(--text-secondary)] w-6">{ltpAnalysis.trend.score}%</span>
+        </div>
+
+        {/* Patience */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono text-[var(--accent-primary)] w-4">P</span>
+          <div className="flex-1 h-1.5 bg-[var(--bg-tertiary)] overflow-hidden">
+            <div
+              className={cn('h-full transition-all duration-500', getScoreColor(ltpAnalysis.patience.score))}
+              style={{ width: `${ltpAnalysis.patience.score}%` }}
+            />
+          </div>
+          <span className="text-[10px] font-mono text-[var(--text-secondary)] w-6">{ltpAnalysis.patience.score}%</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// Coach Feedback Box (Floating Terminal Style)
+// =============================================================================
+
+interface CoachFeedbackBoxProps {
+  message: string;
+  type: 'info' | 'warning' | 'error' | 'success';
+  show: boolean;
+  onDismiss?: () => void;
+}
+
+function CoachFeedbackBox({ message, type, show, onDismiss }: CoachFeedbackBoxProps) {
+  if (!show) return null;
+
+  const typeStyles = {
+    info: 'border-[var(--accent-primary)] bg-[var(--accent-primary)]/10',
+    warning: 'border-[var(--warning)] bg-[var(--warning)]/10',
+    error: 'border-[var(--error)] bg-[var(--error)]/10',
+    success: 'border-[var(--success)] bg-[var(--success)]/10',
+  };
+
+  const iconStyles = {
+    info: 'text-[var(--accent-primary)]',
+    warning: 'text-[var(--warning)]',
+    error: 'text-[var(--error)]',
+    success: 'text-[var(--success)]',
+  };
+
+  return (
+    <div className={cn(
+      'absolute bottom-4 right-4 z-20 max-w-sm p-4 border animate-in slide-in-from-bottom-4 duration-300',
+      typeStyles[type]
+    )}>
+      <div className="flex items-start gap-3">
+        {type === 'warning' && <AlertTriangle className={cn('w-5 h-5 shrink-0', iconStyles[type])} />}
+        {type === 'error' && <XCircle className={cn('w-5 h-5 shrink-0', iconStyles[type])} />}
+        {type === 'success' && <CheckCircle className={cn('w-5 h-5 shrink-0', iconStyles[type])} />}
+        {type === 'info' && <MessageSquare className={cn('w-5 h-5 shrink-0', iconStyles[type])} />}
+
+        <div className="flex-1">
+          <p className="text-sm text-[var(--text-primary)] font-medium">{message}</p>
+        </div>
+
+        {onDismiss && (
+          <button
+            onClick={onDismiss}
+            className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            <XCircle className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// Trade Execution Overlay
+// =============================================================================
+
+interface TradeOverlayProps {
+  trade: TradeExecution | null;
+  currentPrice: number;
+  className?: string;
+}
+
+function TradeOverlay({ trade, currentPrice, className }: TradeOverlayProps) {
+  if (!trade || trade.status === 'pending') return null;
+
+  const pnlColor = trade.currentPnl >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]';
+  const statusBadge = {
+    active: { text: 'ACTIVE', color: 'bg-[var(--accent-primary)]' },
+    won: { text: 'WIN', color: 'bg-[var(--success)]' },
+    lost: { text: 'STOPPED', color: 'bg-[var(--error)]' },
+    breakeven: { text: 'B/E', color: 'bg-[var(--warning)]' },
+    pending: { text: 'PENDING', color: 'bg-[var(--text-tertiary)]' },
+  };
+
+  return (
+    <div className={cn(
+      'absolute top-4 right-4 z-20 bg-[var(--bg-secondary)]/95 backdrop-blur-sm border border-[var(--border-primary)] p-3 min-w-[180px]',
+      className
+    )}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-mono text-[var(--text-tertiary)] uppercase">Trade</span>
+        <span className={cn('px-2 py-0.5 text-[10px] font-bold text-white', statusBadge[trade.status].color)}>
+          {statusBadge[trade.status].text}
+        </span>
+      </div>
+
+      <div className="space-y-1.5 text-xs font-mono">
+        <div className="flex justify-between">
+          <span className="text-[var(--text-tertiary)]">Direction</span>
+          <span className={trade.direction === 'long' ? 'text-[var(--success)]' : 'text-[var(--error)]'}>
+            {trade.direction.toUpperCase()}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-[var(--text-tertiary)]">Entry</span>
+          <span className="text-[var(--text-primary)]">${trade.entryPrice.toFixed(2)}</span>
+        </div>
+        {trade.stopPrice && (
+          <div className="flex justify-between">
+            <span className="text-[var(--text-tertiary)]">Stop</span>
+            <span className="text-[var(--error)]">${trade.stopPrice.toFixed(2)}</span>
+          </div>
+        )}
+        {trade.target1Price && (
+          <div className="flex justify-between">
+            <span className="text-[var(--text-tertiary)]">T1</span>
+            <span className="text-[var(--success)]">${trade.target1Price.toFixed(2)}</span>
+          </div>
+        )}
+        <div className="flex justify-between border-t border-[var(--border-primary)] pt-1.5 mt-1.5">
+          <span className="text-[var(--text-tertiary)]">P&L</span>
+          <span className={cn('font-bold', pnlColor)}>
+            {trade.currentPnl >= 0 ? '+' : ''}{trade.currentPnl.toFixed(2)}%
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// Replay Controls
+// =============================================================================
+
+interface ReplayControlsProps {
+  isPlaying: boolean;
+  currentIndex: number;
+  totalCandles: number;
+  playbackSpeed: number;
+  onPlayPause: () => void;
+  onStepForward: () => void;
+  onReset: () => void;
+  onSpeedChange: (speed: number) => void;
+  onSeek: (index: number) => void;
+  className?: string;
+}
+
+function ReplayControls({
+  isPlaying,
+  currentIndex,
+  totalCandles,
+  playbackSpeed,
+  onPlayPause,
+  onStepForward,
+  onReset,
+  onSpeedChange,
+  onSeek,
+  className,
+}: ReplayControlsProps) {
+  return (
+    <div className={cn(
+      'flex items-center gap-3 bg-[var(--bg-secondary)] border border-[var(--border-primary)] p-3',
+      className
+    )}>
+      {/* Play/Pause */}
+      <button
+        onClick={onPlayPause}
+        className={cn(
+          'p-2 transition-colors',
+          isPlaying
+            ? 'bg-[var(--warning)] text-black'
+            : 'bg-[var(--accent-primary)] text-black'
+        )}
+      >
+        {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+      </button>
+
+      {/* Step Forward */}
+      <button
+        onClick={onStepForward}
+        disabled={currentIndex >= totalCandles - 1}
+        className="p-2 bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:bg-[var(--border-primary)] transition-colors disabled:opacity-50"
+      >
+        <SkipForward className="w-4 h-4" />
+      </button>
+
+      {/* Reset */}
+      <button
+        onClick={onReset}
+        className="p-2 bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:bg-[var(--border-primary)] transition-colors"
+      >
+        <Rewind className="w-4 h-4" />
+      </button>
+
+      {/* Progress Bar */}
+      <div className="flex-1 h-2 bg-[var(--bg-tertiary)] relative cursor-pointer"
+        onClick={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const percent = (e.clientX - rect.left) / rect.width;
+          onSeek(Math.floor(percent * totalCandles));
+        }}
+      >
+        <div
+          className="h-full bg-[var(--accent-primary)] transition-all duration-100"
+          style={{ width: `${(currentIndex / (totalCandles - 1)) * 100}%` }}
+        />
+      </div>
+
+      {/* Current / Total */}
+      <span className="text-xs font-mono text-[var(--text-secondary)] min-w-[60px] text-right">
+        {currentIndex + 1} / {totalCandles}
+      </span>
+
+      {/* Speed Control */}
+      <div className="flex items-center gap-1">
+        {[0.5, 1, 2, 4].map((speed) => (
+          <button
+            key={speed}
+            onClick={() => onSpeedChange(speed)}
+            className={cn(
+              'px-2 py-1 text-xs font-mono transition-colors',
+              playbackSpeed === speed
+                ? 'bg-[var(--accent-primary)] text-black'
+                : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--border-primary)]'
+            )}
+          >
+            {speed}x
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// Main Practice Page Component
+// =============================================================================
+
 export default function PracticePage() {
-  // AI Context - update page context
+  // AI Context
   usePageContext();
 
   // Core state
@@ -239,39 +592,19 @@ export default function PracticePage() {
   const [showFeedbackDetails, setShowFeedbackDetails] = useState(false);
   const [decisionReached, setDecisionReached] = useState(false);
 
-  // AI Scenario state
-  const [generatingAI, setGeneratingAI] = useState(false);
-  const [aiScenarioParams, setAiScenarioParams] = useState({
-    symbol: 'SPY',
-    difficulty: 'intermediate',
-    focusArea: 'all',
-  });
-  const [showMTFChart, setShowMTFChart] = useState(false);
+  // Replay state
+  const [replayIndex, setReplayIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const replayIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Right panel state for tools
-  type RightPanelTab = 'none' | 'paper_trading' | 'options' | 'exercises';
-  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('none');
+  // Trade execution state
+  const [activeTrade, setActiveTrade] = useState<TradeExecution | null>(null);
 
-  // Replay state (for enhanced replay mode)
-  const replayState = useReplayState(
-    selectedScenario?.chartData?.candles?.length || 0,
-    0
-  );
+  // Coach feedback state
+  const [coachFeedback, setCoachFeedback] = useState<{ message: string; type: 'info' | 'warning' | 'error' | 'success' } | null>(null);
 
-  // Trade Plan state (for full trade analysis)
-  const [tradePlan, setTradePlan] = useState<TradePlan>({
-    isValidSetup: null,
-    direction: null,
-    entryPrice: null,
-    stopPrice: null,
-    target1Price: null,
-    target2Price: null,
-    levelTypes: [],
-    confidence: 3,
-    reasoning: '',
-  });
-
-  // Scoring state
+  // Scoring/feedback state
   const [scoringResult, setScoringResult] = useState<{
     overall_score: number;
     grade: string;
@@ -286,10 +619,7 @@ export default function PracticePage() {
     };
   } | null>(null);
 
-  // AI Feedback state
   const [aiFeedback, setAiFeedback] = useState<AIFeedback | null>(null);
-
-  // Ideal trade for comparison
   const [idealTrade, setIdealTrade] = useState<{
     isValidSetup: boolean;
     direction: 'long' | 'short';
@@ -300,7 +630,6 @@ export default function PracticePage() {
     primaryLevelType: string;
   } | null>(null);
 
-  // Outcome data for comparison
   const [outcomeData, setOutcomeData] = useState<{
     result: 'hit_t1' | 'hit_t2' | 'stopped_out' | 'breakeven' | 'chopped';
     exitPrice: number;
@@ -309,21 +638,217 @@ export default function PracticePage() {
     maxAdverse: number;
   } | null>(null);
 
-  // Scenario context for MarketContextCard
-  const [scenarioContext, setScenarioContext] = useState<ScenarioContext | null>(null);
+  // Trade Plan state
+  const [tradePlan, setTradePlan] = useState<TradePlan>({
+    isValidSetup: null,
+    direction: null,
+    entryPrice: null,
+    stopPrice: null,
+    target1Price: null,
+    target2Price: null,
+    levelTypes: [],
+    confidence: 3,
+    reasoning: '',
+  });
 
   // Filters
   const [difficultyFilter, setDifficultyFilter] = useState<string>('');
   const [focusFilter, setFocusFilter] = useState<string>('');
-  const [typeFilter, setTypeFilter] = useState<string>('');
 
-  // Fetch scenarios
+  // AI generation
+  const [generatingAI, setGeneratingAI] = useState(false);
+  const [aiScenarioParams, setAiScenarioParams] = useState({
+    symbol: 'SPY',
+    difficulty: 'intermediate',
+    focusArea: 'all',
+  });
+
+  // =============================================================================
+  // Convert scenario candles to KCUChart format
+  // =============================================================================
+
+  const chartCandles = useMemo((): Candle[] => {
+    if (!selectedScenario?.chartData?.candles) return [];
+
+    const candles = selectedScenario.chartData.candles;
+
+    // In replay/hard mode, only show candles up to current index
+    const isReplayOrHardMode = practiceMode === 'replay' || practiceMode === 'hard_mode';
+    const visibleCandles = isReplayOrHardMode && !showOutcome
+      ? candles.slice(0, replayIndex + 1)
+      : candles;
+
+    return visibleCandles.map((c) => ({
+      time: c.t,
+      open: c.o,
+      high: c.h,
+      low: c.l,
+      close: c.c,
+      volume: c.v,
+    }));
+  }, [selectedScenario, practiceMode, replayIndex, showOutcome]);
+
+  // Convert key levels to KCUChart format
+  const chartLevels = useMemo((): Level[] => {
+    if (!selectedScenario?.keyLevels) return [];
+
+    return selectedScenario.keyLevels.map((level) => ({
+      price: level.price,
+      label: level.label,
+      type: level.type === 'support' || level.type === 'resistance' ? level.type :
+            level.type === 'vwap' ? 'vwap' :
+            level.type.includes('ema') ? 'ema' :
+            level.type.includes('pivot') ? 'pivot' : 'custom',
+    }));
+  }, [selectedScenario]);
+
+  // Add trade levels when active
+  const tradeLevels = useMemo((): Level[] => {
+    if (!activeTrade || activeTrade.status === 'pending') return [];
+
+    const levels: Level[] = [
+      {
+        price: activeTrade.entryPrice,
+        label: 'Entry',
+        type: 'custom',
+        color: '#fbbf24',
+        lineStyle: 'solid',
+      },
+    ];
+
+    if (activeTrade.stopPrice) {
+      levels.push({
+        price: activeTrade.stopPrice,
+        label: 'Stop',
+        type: 'custom',
+        color: '#ef4444',
+        lineStyle: 'dashed',
+      });
+    }
+
+    if (activeTrade.target1Price) {
+      levels.push({
+        price: activeTrade.target1Price,
+        label: 'T1',
+        type: 'custom',
+        color: '#22c55e',
+        lineStyle: 'dashed',
+      });
+    }
+
+    return levels;
+  }, [activeTrade]);
+
+  // Get current price
+  const currentPrice = useMemo(() => {
+    if (chartCandles.length === 0) return 0;
+    return chartCandles[chartCandles.length - 1].close;
+  }, [chartCandles]);
+
+  // =============================================================================
+  // Replay Controls
+  // =============================================================================
+
+  const totalCandles = selectedScenario?.chartData?.candles?.length || 0;
+  const decisionPointIndex = Math.floor(totalCandles * 0.7);
+
+  // Auto-play effect
+  useEffect(() => {
+    if (isPlaying && (practiceMode === 'replay' || practiceMode === 'hard_mode')) {
+      const intervalMs = 500 / playbackSpeed;
+
+      replayIntervalRef.current = setInterval(() => {
+        setReplayIndex((prev) => {
+          // Check if we should stop at decision point or end
+          if (prev >= totalCandles - 1) {
+            setIsPlaying(false);
+            return prev;
+          }
+
+          // Pause at decision point if not yet decided
+          if (prev >= decisionPointIndex && !activeTrade && !result) {
+            setIsPlaying(false);
+            setDecisionReached(true);
+            return prev;
+          }
+
+          return prev + 1;
+        });
+      }, intervalMs);
+
+      return () => {
+        if (replayIntervalRef.current) {
+          clearInterval(replayIntervalRef.current);
+        }
+      };
+    }
+  }, [isPlaying, practiceMode, playbackSpeed, totalCandles, decisionPointIndex, activeTrade, result]);
+
+  // Update trade P&L as replay progresses
+  useEffect(() => {
+    if (activeTrade && activeTrade.status === 'active' && chartCandles.length > 0) {
+      const lastCandle = chartCandles[chartCandles.length - 1];
+      const entryPrice = activeTrade.entryPrice;
+      const currentClose = lastCandle.close;
+
+      const pnl = activeTrade.direction === 'long'
+        ? ((currentClose - entryPrice) / entryPrice) * 100
+        : ((entryPrice - currentClose) / entryPrice) * 100;
+
+      // Check for stop hit
+      if (activeTrade.stopPrice) {
+        const stopHit = activeTrade.direction === 'long'
+          ? lastCandle.low <= activeTrade.stopPrice
+          : lastCandle.high >= activeTrade.stopPrice;
+
+        if (stopHit) {
+          setActiveTrade((prev) => prev ? {
+            ...prev,
+            status: 'lost',
+            exitPrice: activeTrade.stopPrice,
+            exitCandle: replayIndex,
+            currentPnl: activeTrade.direction === 'long'
+              ? ((activeTrade.stopPrice! - entryPrice) / entryPrice) * 100
+              : ((entryPrice - activeTrade.stopPrice!) / entryPrice) * 100,
+          } : null);
+          return;
+        }
+      }
+
+      // Check for T1 hit
+      if (activeTrade.target1Price) {
+        const t1Hit = activeTrade.direction === 'long'
+          ? lastCandle.high >= activeTrade.target1Price
+          : lastCandle.low <= activeTrade.target1Price;
+
+        if (t1Hit) {
+          setActiveTrade((prev) => prev ? {
+            ...prev,
+            status: 'won',
+            exitPrice: activeTrade.target1Price,
+            exitCandle: replayIndex,
+            currentPnl: activeTrade.direction === 'long'
+              ? ((activeTrade.target1Price! - entryPrice) / entryPrice) * 100
+              : ((entryPrice - activeTrade.target1Price!) / entryPrice) * 100,
+          } : null);
+          return;
+        }
+      }
+
+      // Update current P&L
+      setActiveTrade((prev) => prev ? { ...prev, currentPnl: pnl } : null);
+    }
+  }, [chartCandles, activeTrade, replayIndex]);
+
+  // =============================================================================
+  // Data Fetching
+  // =============================================================================
+
   const fetchScenarios = useCallback(async () => {
     try {
       const params = new URLSearchParams();
       if (difficultyFilter) params.append('difficulty', difficultyFilter);
       if (focusFilter) params.append('focus', focusFilter);
-      if (typeFilter) params.append('type', typeFilter);
       params.append('limit', '50');
 
       const res = await fetch(`/api/practice/scenarios?${params}`);
@@ -334,9 +859,8 @@ export default function PracticePage() {
     } catch (error) {
       console.error('Error fetching scenarios:', error);
     }
-  }, [difficultyFilter, focusFilter, typeFilter]);
+  }, [difficultyFilter, focusFilter]);
 
-  // Fetch user stats
   const fetchStats = useCallback(async () => {
     try {
       const res = await fetch('/api/practice/stats');
@@ -349,7 +873,6 @@ export default function PracticePage() {
     }
   }, []);
 
-  // Initialize
   useEffect(() => {
     async function init() {
       setLoading(true);
@@ -359,7 +882,10 @@ export default function PracticePage() {
     init();
   }, [fetchScenarios, fetchStats]);
 
-  // Start a new practice session
+  // =============================================================================
+  // Session Management
+  // =============================================================================
+
   const startSession = async () => {
     try {
       const res = await fetch('/api/practice/session', {
@@ -377,7 +903,10 @@ export default function PracticePage() {
     }
   };
 
-  // Reset trade plan to initial state
+  // =============================================================================
+  // Scenario Selection
+  // =============================================================================
+
   const resetTradePlan = () => {
     setTradePlan({
       isValidSetup: null,
@@ -394,71 +923,18 @@ export default function PracticePage() {
     setAiFeedback(null);
     setIdealTrade(null);
     setOutcomeData(null);
-    setScenarioContext(null);
   };
 
-  // Generate scenario context from scenario data
-  const generateScenarioContext = (scenario: ScenarioDetail): ScenarioContext => {
-    const candles = scenario.chartData?.candles || [];
-    const lastCandle = candles[candles.length - 1];
-    const firstCandle = candles[0];
-
-    // Calculate change percent
-    const changePercent = lastCandle && firstCandle
-      ? ((lastCandle.c - firstCandle.o) / firstCandle.o) * 100
-      : 0;
-
-    // Calculate total volume and average
-    const totalVolume = candles.reduce((sum, c) => sum + (c.v || 0), 0);
-    const avgVolume = candles.length > 0 ? totalVolume / candles.length : 0;
-
-    // Find ORB (first 5 candles for 5m chart = first 25 minutes)
-    const orbCandles = candles.slice(0, 5);
-    const orbHigh = Math.max(...orbCandles.map(c => c.h), 0);
-    const orbLow = Math.min(...orbCandles.map(c => c.l), Infinity);
-
-    // Find premarket high/low from key levels if available
-    const preHigh = scenario.keyLevels?.find(l => l.type === 'premarket_high')?.price || (lastCandle?.h || 0) * 1.01;
-    const preLow = scenario.keyLevels?.find(l => l.type === 'premarket_low')?.price || (lastCandle?.l || 0) * 0.99;
-
-    return {
-      symbol: scenario.symbol,
-      date: new Date(lastCandle?.t * 1000 || Date.now()).toLocaleDateString('en-US', {
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      freezeTime: scenario.decisionPoint?.time
-        ? new Date(scenario.decisionPoint.time * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
-        : '09:45',
-      currentPrice: lastCandle?.c || 0,
-      changePercent,
-      volume: lastCandle?.v || totalVolume,
-      avgVolume,
-      premarket: {
-        high: preHigh,
-        low: preLow,
-        change: ((preHigh - preLow) / preLow) * 100,
-      },
-      orb: {
-        high: orbHigh || lastCandle?.h || 0,
-        low: orbLow !== Infinity ? orbLow : lastCandle?.l || 0,
-        range: orbHigh && orbLow !== Infinity ? orbHigh - orbLow : 0,
-      },
-      spyTrend: 'neutral', // TODO: Add market context integration
-      sector: 'Technology',
-      sectorPerformance: changePercent >= 0 ? `+${changePercent.toFixed(2)}%` : `${changePercent.toFixed(2)}%`,
-    };
-  };
-
-  // Select a scenario
   const selectScenario = async (id: string) => {
     setScenarioLoading(true);
     setResult(null);
     setShowOutcome(false);
     setDecisionReached(false);
     setShowFeedbackDetails(false);
+    setActiveTrade(null);
+    setCoachFeedback(null);
+    setReplayIndex(0);
+    setIsPlaying(false);
     setLtpChecklist({ levelScore: 50, trendScore: 50, patienceScore: 50, notes: '' });
     resetTradePlan();
 
@@ -469,16 +945,18 @@ export default function PracticePage() {
         setSelectedScenario(data);
         setStartTime(Date.now());
 
-        // Generate scenario context
-        setScenarioContext(generateScenarioContext(data));
+        // Auto-start replay in replay/hard mode
+        if (practiceMode === 'replay' || practiceMode === 'hard_mode') {
+          setReplayIndex(0);
+          setTimeout(() => setIsPlaying(true), 500);
+        }
 
-        // Start timer for quick drill mode
+        // Start timer for quick drill
         if (practiceMode === 'quick_drill') {
           setTimeRemaining(30);
           startTimer();
         }
 
-        // Start session if not already started
         if (!sessionId) {
           startSession();
         }
@@ -490,13 +968,19 @@ export default function PracticePage() {
     }
   };
 
-  // Generate AI Scenario
+  // =============================================================================
+  // AI Scenario Generation
+  // =============================================================================
+
   const generateAIScenario = async () => {
     setGeneratingAI(true);
     setResult(null);
     setShowOutcome(false);
     setDecisionReached(false);
     setShowFeedbackDetails(false);
+    setActiveTrade(null);
+    setCoachFeedback(null);
+    setReplayIndex(0);
     setLtpChecklist({ levelScore: 50, trendScore: 50, patienceScore: 50, notes: '' });
     resetTradePlan();
 
@@ -516,7 +1000,6 @@ export default function PracticePage() {
         const data = await res.json();
         const scenario = data.scenario;
 
-        // Transform to ScenarioDetail format
         const scenarioDetail: ScenarioDetail = {
           id: scenario.id || `ai-${Date.now()}`,
           title: scenario.title,
@@ -530,26 +1013,15 @@ export default function PracticePage() {
           decisionPoint: scenario.decisionPoint,
           hasAttempted: false,
           correctAction: scenario.correctAction,
-          outcomeData: scenario.outcomeData ? {
-            result: scenario.correctAction === 'long' ? 'win' : scenario.correctAction === 'short' ? 'win' : 'neutral',
-            pnl_percent: scenario.correctAction !== 'wait' ? 1.5 : 0,
-          } : undefined,
           ltpAnalysis: scenario.ltpAnalysis,
           explanation: scenario.explanation,
         };
         setSelectedScenario(scenarioDetail);
-
-        // Generate scenario context
-        setScenarioContext(generateScenarioContext(scenarioDetail));
-
         setStartTime(Date.now());
 
-        // Start session if not already started
         if (!sessionId) {
           startSession();
         }
-      } else {
-        console.error('Failed to generate AI scenario');
       }
     } catch (error) {
       console.error('Error generating AI scenario:', error);
@@ -558,15 +1030,17 @@ export default function PracticePage() {
     }
   };
 
-  // Timer for quick drill
+  // =============================================================================
+  // Timer for Quick Drill
+  // =============================================================================
+
   const startTimer = () => {
     if (timerRef.current) clearInterval(timerRef.current);
 
     timerRef.current = setInterval(() => {
-      setTimeRemaining(prev => {
+      setTimeRemaining((prev) => {
         if (prev === null || prev <= 1) {
           clearInterval(timerRef.current!);
-          // Auto-submit "wait" on timeout
           submitDecision('wait');
           return null;
         }
@@ -575,184 +1049,111 @@ export default function PracticePage() {
     }, 1000);
   };
 
-  // Submit full trade plan (for deep analysis and standard modes with full decision panel)
-  const submitTradePlan = async (plan: TradePlan) => {
-    if (!selectedScenario) return;
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
 
-    // Stop timer
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
+  // =============================================================================
+  // Early Entry Check
+  // =============================================================================
 
-    setSubmitting(true);
-    const timeTaken = startTime ? Math.round((Date.now() - startTime) / 1000) : undefined;
+  const checkEarlyEntry = (): boolean => {
+    // In replay/hard mode, check if patience candle is confirmed
+    if ((practiceMode === 'replay' || practiceMode === 'hard_mode') && !showOutcome) {
+      const patienceScore = selectedScenario?.ltpAnalysis?.patience?.score || 0;
 
-    try {
-      const res = await fetch('/api/practice/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scenarioId: selectedScenario.id,
-          decision: plan.isValidSetup === false ? 'wait' : plan.direction || 'wait',
-          tradePlan: plan,
-          reasoning: plan.reasoning || ltpChecklist.notes || undefined,
-          ltpChecklist: practiceMode === 'deep_analysis' ? ltpChecklist : undefined,
-          timeTakenSeconds: timeTaken,
-          sessionId,
-          mode: practiceMode,
-          useAICoaching: true,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-
-        // Set result
-        setResult({
-          isCorrect: data.attempt.isCorrect,
-          feedback: data.attempt.aiCoaching || data.attempt.feedback,
-          correctAction: data.correctAction,
+      // If patience score is low, it means no patience candle confirmed
+      if (patienceScore < 60) {
+        setCoachFeedback({
+          message: getEarlyEntryFeedback(),
+          type: 'warning',
         });
 
-        // Generate scoring result
-        const scoring = data.scoring || generateMockScoring(plan, selectedScenario, data.attempt.isCorrect);
-        setScoringResult(scoring);
+        // Play warning sound
+        playWarningSound();
 
-        // Generate AI feedback
-        const feedback = data.aiFeedback || generateMockAIFeedback(plan, selectedScenario, data.attempt.isCorrect);
-        setAiFeedback(feedback);
+        // Clear feedback after 4 seconds
+        setTimeout(() => setCoachFeedback(null), 4000);
 
-        // Set ideal trade
-        const ideal = data.idealTrade || {
-          isValidSetup: selectedScenario.correctAction !== 'wait',
-          direction: (selectedScenario.correctAction === 'long' || selectedScenario.correctAction === 'short')
-            ? selectedScenario.correctAction
-            : 'long',
-          entryPrice: selectedScenario.decisionPoint?.price || plan.entryPrice || 100,
-          stopPrice: selectedScenario.keyLevels?.find(l => l.type === 'support')?.price || (plan.stopPrice || 98),
-          target1Price: selectedScenario.keyLevels?.find(l => l.type === 'resistance')?.price || (plan.target1Price || 103),
-          primaryLevelType: selectedScenario.keyLevels?.[0]?.type || 'PDH',
-        };
-        setIdealTrade(ideal);
-
-        // Set outcome data
-        const outcome = data.outcomeData || generateMockOutcome(selectedScenario, ideal);
-        setOutcomeData(outcome);
-
-        // Update session stats
-        setSessionStats(prev => ({
-          attempted: prev.attempted + 1,
-          correct: prev.correct + (data.attempt.isCorrect ? 1 : 0),
-        }));
-
-        // Update the scenario
-        setSelectedScenario(prev => prev ? {
-          ...prev,
-          correctAction: data.correctAction,
-          outcomeData: data.outcomeData,
-          ltpAnalysis: data.ltpAnalysis,
-          explanation: data.explanation,
-          hasAttempted: true,
-        } : null);
-
-        // Show outcome for replay mode
-        if (practiceMode === 'replay') {
-          setShowOutcome(true);
-        }
-
-        // Update stats
-        fetchStats();
-        fetchScenarios();
+        return true; // Entry is early
       }
-    } catch (error) {
-      console.error('Error submitting trade plan:', error);
-    } finally {
-      setSubmitting(false);
-      setTimeRemaining(null);
+    }
+    return false;
+  };
+
+  const playWarningSound = () => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.frequency.value = 440;
+      oscillator.type = 'sawtooth';
+      gainNode.gain.value = 0.1;
+
+      oscillator.start();
+      setTimeout(() => {
+        oscillator.stop();
+        audioContext.close();
+      }, 300);
+    } catch (e) {
+      console.warn('Audio not available');
     }
   };
 
-  // Generate mock scoring for display
-  const generateMockScoring = (plan: TradePlan, scenario: ScenarioDetail, isCorrect: boolean) => {
-    const baseScore = isCorrect ? 75 : 45;
-    return {
-      overall_score: baseScore + Math.floor(Math.random() * 15),
-      grade: isCorrect ? (baseScore >= 80 ? 'A' : 'B') : (baseScore >= 50 ? 'C' : 'D'),
-      is_correct: isCorrect,
-      components: {
-        setup_identification: { score: isCorrect ? 20 : 10, max: 20 },
-        direction: { score: plan.direction === scenario.correctAction ? 20 : 5, max: 20 },
-        entry_placement: { score: plan.entryPrice ? (isCorrect ? 15 : 10) : 5, max: 15 },
-        stop_placement: { score: plan.stopPrice ? (isCorrect ? 15 : 8) : 5, max: 15 },
-        target_selection: { score: plan.target1Price ? (isCorrect ? 15 : 8) : 5, max: 15 },
-        level_identification: { score: plan.levelTypes.length > 0 ? (isCorrect ? 15 : 10) : 5, max: 15 },
-      },
+  // =============================================================================
+  // Trade Execution
+  // =============================================================================
+
+  const executeTrade = (direction: 'long' | 'short', plan?: TradePlan) => {
+    if (!selectedScenario || !chartCandles.length) return;
+
+    // Check for early entry
+    if (checkEarlyEntry()) {
+      return; // Don't execute if early
+    }
+
+    const lastCandle = chartCandles[chartCandles.length - 1];
+    const entryPrice = plan?.entryPrice || lastCandle.close;
+    const stopPrice = plan?.stopPrice ?? undefined;
+    const target1Price = plan?.target1Price ?? undefined;
+
+    const trade: TradeExecution = {
+      entryCandle: replayIndex,
+      entryPrice,
+      direction,
+      stopPrice,
+      target1Price,
+      currentPnl: 0,
+      status: 'active',
     };
-  };
 
-  // Generate mock AI feedback for display
-  const generateMockAIFeedback = (plan: TradePlan, scenario: ScenarioDetail, isCorrect: boolean): AIFeedback => {
-    if (isCorrect) {
-      return {
-        positive: `Great job identifying the ${plan.direction} setup! Your entry placement near $${plan.entryPrice?.toFixed(2)} shows good understanding of key levels.`,
-        improvement: 'Consider waiting for stronger volume confirmation before entry for even higher probability trades.',
-        specificTip: 'Watch for the 5-second candle close above the level to confirm the breakout before entering.',
-        ltpConcept: `This setup demonstrates proper ${plan.levelTypes[0] || 'level'} identification with trend alignment. The LTP framework helped you spot this opportunity.`,
-        grade: 'B',
-        score: 78,
-      };
-    } else {
-      return {
-        positive: 'You took the time to analyze the setup rather than rushing into a decision.',
-        improvement: `The ${scenario.correctAction?.toUpperCase()} was the better play here. The EMA alignment and level rejection pointed to this direction.`,
-        specificTip: 'Before entering, always check: 1) Is price respecting the level? 2) Are EMAs aligned? 3) Is there volume confirmation?',
-        ltpConcept: 'Remember: Level first, then Trend, then Patience. This setup required waiting for the level rejection before acting.',
-        grade: 'C',
-        score: 58,
-      };
+    setActiveTrade(trade);
+
+    // Show entry feedback
+    setCoachFeedback({
+      message: `${direction.toUpperCase()} entered at $${entryPrice.toFixed(2)}. Now let the trade work.`,
+      type: 'info',
+    });
+    setTimeout(() => setCoachFeedback(null), 3000);
+
+    // Continue replay to show trade execution
+    if ((practiceMode === 'replay' || practiceMode === 'hard_mode') && !isPlaying) {
+      setIsPlaying(true);
     }
   };
 
-  // Generate mock outcome data
-  const generateMockOutcome = (scenario: ScenarioDetail, ideal: typeof idealTrade): {
-    result: 'hit_t1' | 'hit_t2' | 'stopped_out' | 'breakeven' | 'chopped';
-    exitPrice: number;
-    pnlPercent: number;
-    maxFavorable: number;
-    maxAdverse: number;
-  } => {
-    if (!ideal) {
-      return {
-        result: 'chopped',
-        exitPrice: 100,
-        pnlPercent: 0,
-        maxFavorable: 0.5,
-        maxAdverse: 0.3,
-      };
-    }
+  // =============================================================================
+  // Decision Submission
+  // =============================================================================
 
-    const isWin = scenario.correctAction !== 'wait';
-    if (isWin) {
-      return {
-        result: 'hit_t1',
-        exitPrice: ideal.target1Price,
-        pnlPercent: ((ideal.target1Price - ideal.entryPrice) / ideal.entryPrice) * 100,
-        maxFavorable: Math.abs(ideal.target1Price - ideal.entryPrice) * 1.2,
-        maxAdverse: Math.abs(ideal.entryPrice - ideal.stopPrice) * 0.3,
-      };
-    } else {
-      return {
-        result: 'chopped',
-        exitPrice: ideal.entryPrice,
-        pnlPercent: 0,
-        maxFavorable: 0.5,
-        maxAdverse: 0.8,
-      };
-    }
-  };
-
-  // Submit decision (simplified for quick modes)
   const submitDecision = async (decision: 'long' | 'short' | 'wait') => {
     if (!selectedScenario) return;
 
@@ -760,6 +1161,17 @@ export default function PracticePage() {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
+    }
+
+    // Check for early entry (for long/short)
+    if (decision !== 'wait' && checkEarlyEntry()) {
+      return;
+    }
+
+    // Execute trade if direction chosen
+    if (decision !== 'wait' && !activeTrade) {
+      executeTrade(decision);
+      return;
     }
 
     setSubmitting(true);
@@ -790,14 +1202,12 @@ export default function PracticePage() {
           correctAction: data.correctAction,
         });
 
-        // Update session stats
-        setSessionStats(prev => ({
+        setSessionStats((prev) => ({
           attempted: prev.attempted + 1,
           correct: prev.correct + (data.attempt.isCorrect ? 1 : 0),
         }));
 
-        // Update the scenario with outcome data
-        setSelectedScenario(prev => prev ? {
+        setSelectedScenario((prev) => prev ? {
           ...prev,
           correctAction: data.correctAction,
           outcomeData: data.outcomeData,
@@ -806,12 +1216,7 @@ export default function PracticePage() {
           hasAttempted: true,
         } : null);
 
-        // Show outcome for replay mode
-        if (practiceMode === 'replay') {
-          setShowOutcome(true);
-        }
-
-        // Update stats
+        setShowOutcome(true);
         fetchStats();
         fetchScenarios();
       }
@@ -823,23 +1228,140 @@ export default function PracticePage() {
     }
   };
 
-  // Get next scenario (for quick drill)
+  const submitTradePlan = async (plan: TradePlan) => {
+    if (!selectedScenario) return;
+
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    const decision = plan.isValidSetup === false ? 'wait' : plan.direction || 'wait';
+
+    // Check for early entry
+    if (decision !== 'wait' && checkEarlyEntry()) {
+      return;
+    }
+
+    // Execute trade in replay/hard mode
+    if ((practiceMode === 'replay' || practiceMode === 'hard_mode') && decision !== 'wait') {
+      executeTrade(decision as 'long' | 'short', plan);
+      setTradePlan(plan);
+      return;
+    }
+
+    setSubmitting(true);
+    const timeTaken = startTime ? Math.round((Date.now() - startTime) / 1000) : undefined;
+
+    try {
+      const res = await fetch('/api/practice/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scenarioId: selectedScenario.id,
+          decision,
+          tradePlan: plan,
+          reasoning: plan.reasoning || ltpChecklist.notes || undefined,
+          ltpChecklist: practiceMode === 'deep_analysis' ? ltpChecklist : undefined,
+          timeTakenSeconds: timeTaken,
+          sessionId,
+          mode: practiceMode,
+          useAICoaching: true,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+
+        setResult({
+          isCorrect: data.attempt.isCorrect,
+          feedback: data.attempt.aiCoaching || data.attempt.feedback,
+          correctAction: data.correctAction,
+        });
+
+        // Generate mock scoring
+        const scoring = data.scoring || {
+          overall_score: data.attempt.isCorrect ? 78 : 52,
+          grade: data.attempt.isCorrect ? 'B' : 'C',
+          is_correct: data.attempt.isCorrect,
+          components: {
+            setup_identification: { score: data.attempt.isCorrect ? 18 : 10, max: 20 },
+            direction: { score: decision === data.correctAction ? 20 : 5, max: 20 },
+            entry_placement: { score: plan.entryPrice ? 12 : 5, max: 15 },
+            stop_placement: { score: plan.stopPrice ? 12 : 5, max: 15 },
+            target_selection: { score: plan.target1Price ? 12 : 5, max: 15 },
+            level_identification: { score: plan.levelTypes.length > 0 ? 12 : 5, max: 15 },
+          },
+        };
+        setScoringResult(scoring);
+
+        // Generate AI feedback
+        const feedback: AIFeedback = data.aiFeedback || {
+          positive: data.attempt.isCorrect
+            ? `Solid ${plan.direction} identification. You correctly read the LTP alignment.`
+            : 'Good effort analyzing the setup.',
+          improvement: data.attempt.isCorrect
+            ? 'Consider tightening your stop for better R:R.'
+            : `The correct play was ${data.correctAction}. Check the EMA alignment next time.`,
+          specificTip: 'Watch for the patience candle CLOSE before entering.',
+          ltpConcept: 'Level + Trend + Patience = A+ Setup. All three must align.',
+          grade: scoring.grade,
+          score: scoring.overall_score,
+        };
+        setAiFeedback(feedback);
+
+        // Set ideal trade
+        setIdealTrade(data.idealTrade || {
+          isValidSetup: data.correctAction !== 'wait',
+          direction: data.correctAction === 'short' ? 'short' : 'long',
+          entryPrice: selectedScenario.decisionPoint?.price || 100,
+          stopPrice: 98,
+          target1Price: 104,
+          primaryLevelType: 'PDH',
+        });
+
+        setSessionStats((prev) => ({
+          attempted: prev.attempted + 1,
+          correct: prev.correct + (data.attempt.isCorrect ? 1 : 0),
+        }));
+
+        setSelectedScenario((prev) => prev ? {
+          ...prev,
+          correctAction: data.correctAction,
+          outcomeData: data.outcomeData,
+          ltpAnalysis: data.ltpAnalysis,
+          explanation: data.explanation,
+          hasAttempted: true,
+        } : null);
+
+        setShowOutcome(true);
+        fetchStats();
+        fetchScenarios();
+      }
+    } catch (error) {
+      console.error('Error submitting trade plan:', error);
+    } finally {
+      setSubmitting(false);
+      setTimeRemaining(null);
+    }
+  };
+
+  // =============================================================================
+  // Get Next Scenario
+  // =============================================================================
+
   const getNextScenario = () => {
-    const currentIndex = scenarios.findIndex(s => s.id === selectedScenario?.id);
+    const currentIndex = scenarios.findIndex((s) => s.id === selectedScenario?.id);
     const nextScenario = scenarios[currentIndex + 1] || scenarios[0];
     if (nextScenario) {
       selectScenario(nextScenario.id);
     }
   };
 
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, []);
+  // =============================================================================
+  // Helper Functions
+  // =============================================================================
 
-  // Helper functions
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
       case 'beginner': return 'success';
@@ -858,95 +1380,9 @@ export default function PracticePage() {
     }
   };
 
-  // Render feedback content
-  const renderFeedback = (feedback: CoachingFeedback | string) => {
-    if (typeof feedback === 'string') {
-      return <p className="text-sm text-[var(--text-secondary)]">{feedback}</p>;
-    }
-
-    return (
-      <div className="space-y-4">
-        {/* Summary */}
-        <p className="text-[var(--text-primary)] font-medium">{feedback.summary}</p>
-
-        {/* Detailed Feedback */}
-        <p className="text-sm text-[var(--text-secondary)]">{feedback.detailedFeedback}</p>
-
-        {/* What You Missed */}
-        {feedback.whatYouMissed && (
-          <div className="p-3 bg-[var(--error)]/10 border border-[var(--error)]/30 rounded">
-            <p className="text-sm text-[var(--error)]">
-              <strong>What you missed:</strong> {feedback.whatYouMissed}
-            </p>
-          </div>
-        )}
-
-        {/* LTP Breakdown (expandable) */}
-        <button
-          className="flex items-center gap-2 text-sm text-[var(--accent-primary)] hover:underline"
-          onClick={() => setShowFeedbackDetails(!showFeedbackDetails)}
-        >
-          {showFeedbackDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          {showFeedbackDetails ? 'Hide' : 'Show'} LTP Breakdown
-        </button>
-
-        {showFeedbackDetails && (
-          <div className="grid grid-cols-1 gap-3 p-4 bg-[var(--bg-tertiary)] rounded">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <Target className="w-4 h-4 text-[var(--accent-primary)]" />
-                <span className="text-xs font-semibold text-[var(--text-tertiary)] uppercase">Level</span>
-              </div>
-              <p className="text-sm text-[var(--text-secondary)]">{feedback.ltpBreakdown.level}</p>
-            </div>
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <TrendingUp className="w-4 h-4 text-[var(--accent-primary)]" />
-                <span className="text-xs font-semibold text-[var(--text-tertiary)] uppercase">Trend</span>
-              </div>
-              <p className="text-sm text-[var(--text-secondary)]">{feedback.ltpBreakdown.trend}</p>
-            </div>
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <Clock className="w-4 h-4 text-[var(--accent-primary)]" />
-                <span className="text-xs font-semibold text-[var(--text-tertiary)] uppercase">Patience</span>
-              </div>
-              <p className="text-sm text-[var(--text-secondary)]">{feedback.ltpBreakdown.patience}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Encouragement */}
-        <p className="text-sm text-[var(--accent-primary)] italic">{feedback.encouragement}</p>
-
-        {/* Next Steps */}
-        {feedback.nextSteps && feedback.nextSteps.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-2">Next Steps</p>
-            <ul className="space-y-1">
-              {feedback.nextSteps.map((step, i) => (
-                <li key={i} className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                  <ArrowRight className="w-3 h-3 text-[var(--accent-primary)]" />
-                  {step}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Personalized Tip */}
-        {feedback.personalizedTip && (
-          <div className="p-3 bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/30 rounded">
-            <div className="flex items-center gap-2 mb-1">
-              <Sparkles className="w-4 h-4 text-[var(--accent-primary)]" />
-              <span className="text-xs font-semibold text-[var(--accent-primary)] uppercase">Personalized Tip</span>
-            </div>
-            <p className="text-sm text-[var(--text-secondary)]">{feedback.personalizedTip}</p>
-          </div>
-        )}
-      </div>
-    );
-  };
+  // =============================================================================
+  // Render
+  // =============================================================================
 
   if (loading) {
     return (
@@ -1037,6 +1473,9 @@ export default function PracticePage() {
                     setPracticeMode(mode.id);
                     setSelectedScenario(null);
                     setResult(null);
+                    setActiveTrade(null);
+                    setReplayIndex(0);
+                    setIsPlaying(false);
                   }}
                   className={cn(
                     'flex items-center gap-3 px-4 py-3 border transition-all min-w-[200px]',
@@ -1058,16 +1497,16 @@ export default function PracticePage() {
           </div>
         </PageSection>
 
-        {/* Instructions Panel - Mode-specific guidance */}
+        {/* Instructions */}
         <PageSection>
           <InstructionsPanel
-            mode={practiceMode}
+            mode={practiceMode === 'hard_mode' ? 'replay' : practiceMode}
             hasScenarioSelected={!!selectedScenario}
             isFirstVisit={!userStats?.totalAttempts || userStats.totalAttempts < 3}
           />
         </PageSection>
 
-        {/* Session Stats (if in session) */}
+        {/* Session Stats */}
         {sessionId && sessionStats.attempted > 0 && (
           <PageSection>
             <div className="flex items-center gap-4 px-4 py-2 bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
@@ -1088,11 +1527,10 @@ export default function PracticePage() {
           </PageSection>
         )}
 
-        {/* Daily Challenges Row */}
+        {/* Daily Challenges */}
         <PageSection>
           <DailyChallenges
             onStartChallenge={(challengeId, type) => {
-              // Focus the scenario list or start appropriate mode
               if (type === 'accuracy_target') {
                 setPracticeMode('standard');
               } else if (type === 'level_focus') {
@@ -1117,7 +1555,7 @@ export default function PracticePage() {
                     <select
                       className="w-full text-sm bg-[var(--bg-tertiary)] border border-[var(--border-primary)] px-3 py-2"
                       value={aiScenarioParams.symbol}
-                      onChange={(e) => setAiScenarioParams(prev => ({ ...prev, symbol: e.target.value }))}
+                      onChange={(e) => setAiScenarioParams((prev) => ({ ...prev, symbol: e.target.value }))}
                     >
                       <option value="SPY">SPY</option>
                       <option value="QQQ">QQQ</option>
@@ -1134,7 +1572,7 @@ export default function PracticePage() {
                     <select
                       className="w-full text-sm bg-[var(--bg-tertiary)] border border-[var(--border-primary)] px-3 py-2"
                       value={aiScenarioParams.difficulty}
-                      onChange={(e) => setAiScenarioParams(prev => ({ ...prev, difficulty: e.target.value }))}
+                      onChange={(e) => setAiScenarioParams((prev) => ({ ...prev, difficulty: e.target.value }))}
                     >
                       <option value="beginner">Beginner</option>
                       <option value="intermediate">Intermediate</option>
@@ -1146,7 +1584,7 @@ export default function PracticePage() {
                     <select
                       className="w-full text-sm bg-[var(--bg-tertiary)] border border-[var(--border-primary)] px-3 py-2"
                       value={aiScenarioParams.focusArea}
-                      onChange={(e) => setAiScenarioParams(prev => ({ ...prev, focusArea: e.target.value }))}
+                      onChange={(e) => setAiScenarioParams((prev) => ({ ...prev, focusArea: e.target.value }))}
                     >
                       <option value="all">All Areas</option>
                       <option value="level">Level</option>
@@ -1173,97 +1611,89 @@ export default function PracticePage() {
                       </>
                     )}
                   </Button>
-                  <p className="text-xs text-[var(--text-tertiary)] text-center">
-                    AI generates unique practice scenarios tailored to your skill level
-                  </p>
                 </CardContent>
               </Card>
             ) : (
-            <Card>
-              <CardHeader
-                title="Scenarios"
-                action={
-                  <div className="flex flex-col gap-2">
-                    <select
-                      className="text-xs bg-[var(--bg-tertiary)] border border-[var(--border-primary)] px-2 py-1"
-                      value={difficultyFilter}
-                      onChange={(e) => setDifficultyFilter(e.target.value)}
-                    >
-                      <option value="">All Levels</option>
-                      <option value="beginner">Beginner</option>
-                      <option value="intermediate">Intermediate</option>
-                      <option value="advanced">Advanced</option>
-                    </select>
-                    <select
-                      className="text-xs bg-[var(--bg-tertiary)] border border-[var(--border-primary)] px-2 py-1"
-                      value={focusFilter}
-                      onChange={(e) => setFocusFilter(e.target.value)}
-                    >
-                      <option value="">All Focus Areas</option>
-                      <option value="level">Level</option>
-                      <option value="trend">Trend</option>
-                      <option value="patience">Patience</option>
-                    </select>
-                  </div>
-                }
-              />
-              <CardContent className="p-0">
-                <div className="divide-y divide-[var(--border-primary)] max-h-[600px] overflow-y-auto">
-                  {scenarios.length === 0 ? (
-                    <div className="p-6 text-center text-[var(--text-tertiary)]">
-                      No scenarios available yet.
-                    </div>
-                  ) : (
-                    scenarios.map((scenario) => (
-                      <button
-                        key={scenario.id}
-                        className={cn(
-                          'w-full p-4 text-left hover:bg-[var(--bg-tertiary)] transition-colors',
-                          selectedScenario?.id === scenario.id && 'bg-[var(--bg-tertiary)] border-l-2 border-l-[var(--accent-primary)]'
-                        )}
-                        onClick={() => selectScenario(scenario.id)}
+              <Card>
+                <CardHeader
+                  title="Scenarios"
+                  action={
+                    <div className="flex flex-col gap-2">
+                      <select
+                        className="text-xs bg-[var(--bg-tertiary)] border border-[var(--border-primary)] px-2 py-1"
+                        value={difficultyFilter}
+                        onChange={(e) => setDifficultyFilter(e.target.value)}
                       >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              {getFocusIcon(scenario.focus_area)}
-                              <span className="font-medium text-[var(--text-primary)]">
-                                {scenario.symbol}
-                              </span>
-                              <Badge variant={getDifficultyColor(scenario.difficulty)} size="sm">
-                                {scenario.difficulty}
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-[var(--text-secondary)] line-clamp-1">
-                              {scenario.title}
-                            </p>
-                            {scenario.community_attempts > 0 && (
-                              <p className="text-xs text-[var(--text-tertiary)] mt-1">
-                                Community: {scenario.community_accuracy?.toFixed(0)}% accuracy
+                        <option value="">All Levels</option>
+                        <option value="beginner">Beginner</option>
+                        <option value="intermediate">Intermediate</option>
+                        <option value="advanced">Advanced</option>
+                      </select>
+                      <select
+                        className="text-xs bg-[var(--bg-tertiary)] border border-[var(--border-primary)] px-2 py-1"
+                        value={focusFilter}
+                        onChange={(e) => setFocusFilter(e.target.value)}
+                      >
+                        <option value="">All Focus Areas</option>
+                        <option value="level">Level</option>
+                        <option value="trend">Trend</option>
+                        <option value="patience">Patience</option>
+                      </select>
+                    </div>
+                  }
+                />
+                <CardContent className="p-0">
+                  <div className="divide-y divide-[var(--border-primary)] max-h-[600px] overflow-y-auto">
+                    {scenarios.length === 0 ? (
+                      <div className="p-6 text-center text-[var(--text-tertiary)]">
+                        No scenarios available yet.
+                      </div>
+                    ) : (
+                      scenarios.map((scenario) => (
+                        <button
+                          key={scenario.id}
+                          className={cn(
+                            'w-full p-4 text-left hover:bg-[var(--bg-tertiary)] transition-colors',
+                            selectedScenario?.id === scenario.id && 'bg-[var(--bg-tertiary)] border-l-2 border-l-[var(--accent-primary)]'
+                          )}
+                          onClick={() => selectScenario(scenario.id)}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                {getFocusIcon(scenario.focus_area)}
+                                <span className="font-medium text-[var(--text-primary)]">
+                                  {scenario.symbol}
+                                </span>
+                                <Badge variant={getDifficultyColor(scenario.difficulty)} size="sm">
+                                  {scenario.difficulty}
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-[var(--text-secondary)] line-clamp-1">
+                                {scenario.title}
                               </p>
+                            </div>
+                            {scenario.userAttempts > 0 && (
+                              <div className="text-right">
+                                <span className={cn(
+                                  'text-xs font-mono',
+                                  scenario.userCorrect > 0 ? 'text-[var(--profit)]' : 'text-[var(--text-tertiary)]'
+                                )}>
+                                  {scenario.userCorrect}/{scenario.userAttempts}
+                                </span>
+                              </div>
                             )}
                           </div>
-                          {scenario.userAttempts > 0 && (
-                            <div className="text-right">
-                              <span className={cn(
-                                'text-xs font-mono',
-                                scenario.userCorrect > 0 ? 'text-[var(--profit)]' : 'text-[var(--text-tertiary)]'
-                              )}>
-                                {scenario.userCorrect}/{scenario.userAttempts}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             )}
           </PageSection>
 
-          {/* Scenario Detail / Practice Area */}
+          {/* Main Practice Area */}
           <PageSection className="lg:col-span-3">
             <Card>
               {scenarioLoading ? (
@@ -1276,74 +1706,64 @@ export default function PracticePage() {
                     title={selectedScenario.title}
                     subtitle={selectedScenario.description}
                     action={
-                      timeRemaining !== null && (
-                        <div className={cn(
-                          'flex items-center gap-2 px-3 py-1 font-mono text-lg',
-                          timeRemaining <= 10 ? 'bg-[var(--error)]/20 text-[var(--error)]' : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
-                        )}>
-                          <Timer className="w-5 h-5" />
-                          {timeRemaining}s
-                        </div>
-                      )
+                      <div className="flex items-center gap-2">
+                        {(practiceMode === 'hard_mode' || practiceMode === 'replay') && (
+                          <Badge variant="info" size="sm">
+                            <EyeOff className="w-3 h-3 mr-1" />
+                            {practiceMode === 'hard_mode' ? 'HARD MODE' : 'REPLAY'}
+                          </Badge>
+                        )}
+                        {timeRemaining !== null && (
+                          <div className={cn(
+                            'flex items-center gap-2 px-3 py-1 font-mono text-lg',
+                            timeRemaining <= 10 ? 'bg-[var(--error)]/20 text-[var(--error)]' : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
+                          )}>
+                            <Timer className="w-5 h-5" />
+                            {timeRemaining}s
+                          </div>
+                        )}
+                      </div>
                     }
                   />
-                  <CardContent>
-                    {/* Chart Toggle for Multi-TF */}
-                    {practiceMode === 'multi_timeframe' && (
-                      <div className="mb-4 flex items-center gap-2">
-                        <button
-                          onClick={() => setShowMTFChart(false)}
-                          className={cn(
-                            'px-3 py-1.5 text-sm border transition-colors',
-                            !showMTFChart
-                              ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                              : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50'
-                          )}
-                        >
-                          Single Chart
-                        </button>
-                        <button
-                          onClick={() => setShowMTFChart(true)}
-                          className={cn(
-                            'px-3 py-1.5 text-sm border transition-colors flex items-center gap-1',
-                            showMTFChart
-                              ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                              : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50'
-                          )}
-                        >
-                          <LayoutGrid className="w-4 h-4" />
-                          5-Chart Grid
-                        </button>
-                      </div>
-                    )}
+                  <CardContent className="p-0">
+                    {/* Chart Area */}
+                    <div className="relative">
+                      {chartCandles.length > 0 ? (
+                        <>
+                          <KCUChart
+                            mode={practiceMode === 'replay' || practiceMode === 'hard_mode' ? 'replay' : 'live'}
+                            data={chartCandles}
+                            levels={[...chartLevels, ...tradeLevels]}
+                            symbol={selectedScenario.symbol}
+                            height={500}
+                            showVolume={true}
+                            showIndicators={true}
+                            showPatienceCandles={true}
+                            replayIndex={(practiceMode === 'replay' || practiceMode === 'hard_mode') && !showOutcome ? replayIndex : undefined}
+                          />
 
-                    {/* Chart */}
-                    <div className="mb-6">
-                      {practiceMode === 'multi_timeframe' && showMTFChart ? (
-                        <ChartGrid
-                          symbol={selectedScenario.symbol}
-                          dailyBars={selectedScenario.chartData?.candles?.slice(0, 20) || []}
-                          hourlyBars={selectedScenario.chartData?.candles?.slice(0, 40) || []}
-                          fifteenMinBars={selectedScenario.chartData?.candles?.slice(0, 60) || []}
-                          fiveMinBars={selectedScenario.chartData?.candles || []}
-                          twoMinBars={selectedScenario.chartData?.candles || []}
-                          keyLevels={selectedScenario.keyLevels || []}
-                          decisionPoint={selectedScenario.decisionPoint}
-                          showOutcome={showOutcome}
-                        />
-                      ) : selectedScenario.chartData?.candles?.length > 0 ? (
-                        <PracticeChart
-                          chartData={selectedScenario.chartData}
-                          keyLevels={selectedScenario.keyLevels || []}
-                          decisionPoint={selectedScenario.decisionPoint}
-                          outcomeData={selectedScenario.outcomeData}
-                          symbol={selectedScenario.symbol}
-                          timeframe={selectedScenario.chartTimeframe || '5m'}
-                          showOutcome={showOutcome}
-                          replayMode={practiceMode === 'replay'}
-                          onDecisionPointReached={() => setDecisionReached(true)}
-                          className="h-[400px]"
-                        />
+                          {/* LTP Score HUD */}
+                          {selectedScenario.ltpAnalysis && (
+                            <LTPScoreHUD
+                              ltpAnalysis={selectedScenario.ltpAnalysis}
+                              grade={scoringResult?.grade}
+                            />
+                          )}
+
+                          {/* Trade Overlay */}
+                          <TradeOverlay
+                            trade={activeTrade}
+                            currentPrice={currentPrice}
+                          />
+
+                          {/* Coach Feedback Box */}
+                          <CoachFeedbackBox
+                            message={coachFeedback?.message || ''}
+                            type={coachFeedback?.type || 'info'}
+                            show={!!coachFeedback}
+                            onDismiss={() => setCoachFeedback(null)}
+                          />
+                        </>
                       ) : (
                         <div className="bg-[var(--bg-tertiary)] p-6">
                           <div className="aspect-video bg-[var(--bg-primary)] border border-[var(--border-primary)] flex items-center justify-center">
@@ -1356,408 +1776,205 @@ export default function PracticePage() {
                       )}
                     </div>
 
-                    {/* Replay Controller (Replay Mode) */}
-                    {practiceMode === 'replay' && selectedScenario?.chartData?.candles?.length > 0 && (
-                      <div className="mb-4">
-                        <ReplayController
-                          totalCandles={selectedScenario.chartData.candles.length}
-                          currentIndex={replayState.currentIndex}
-                          onIndexChange={replayState.setCurrentIndex}
-                          isPlaying={replayState.isPlaying}
-                          onPlayPause={replayState.togglePlayPause}
-                          playbackSpeed={replayState.playbackSpeed}
-                          onSpeedChange={replayState.setPlaybackSpeed}
-                          decisionPointIndex={selectedScenario.decisionPoint ? Math.floor(selectedScenario.chartData.candles.length * 0.7) : undefined}
-                          onShowOutcome={() => setShowOutcome(true)}
-                        />
-                      </div>
+                    {/* Replay Controls */}
+                    {(practiceMode === 'replay' || practiceMode === 'hard_mode') && totalCandles > 0 && (
+                      <ReplayControls
+                        isPlaying={isPlaying}
+                        currentIndex={replayIndex}
+                        totalCandles={totalCandles}
+                        playbackSpeed={playbackSpeed}
+                        onPlayPause={() => setIsPlaying(!isPlaying)}
+                        onStepForward={() => setReplayIndex((prev) => Math.min(prev + 1, totalCandles - 1))}
+                        onReset={() => {
+                          setReplayIndex(0);
+                          setIsPlaying(false);
+                          setActiveTrade(null);
+                          setDecisionReached(false);
+                        }}
+                        onSpeedChange={setPlaybackSpeed}
+                        onSeek={setReplayIndex}
+                        className="border-t border-[var(--border-primary)]"
+                      />
                     )}
 
-                    {/* Tools Toolbar */}
-                    <div className="flex items-center gap-2 mb-4 pb-4 border-b border-[var(--border-primary)]">
-                      <span className="text-xs text-[var(--text-tertiary)] mr-2">Tools:</span>
-                      <Tooltip content="Practice with simulated $25,000 account" side="bottom">
-                        <button
-                          onClick={() => setRightPanelTab(rightPanelTab === 'paper_trading' ? 'none' : 'paper_trading')}
-                          className={cn(
-                            'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
-                            rightPanelTab === 'paper_trading'
-                              ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                              : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
-                          )}
-                        >
-                          <Wallet className="w-3.5 h-3.5" />
-                          Paper Trading
-                        </button>
-                      </Tooltip>
-                      <Tooltip content="View options chain with Greeks (0DTE supported)" side="bottom">
-                        <button
-                          onClick={() => setRightPanelTab(rightPanelTab === 'options' ? 'none' : 'options')}
-                          className={cn(
-                            'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
-                            rightPanelTab === 'options'
-                              ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                              : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
-                          )}
-                        >
-                          <Layers className="w-3.5 h-3.5" />
-                          Options Chain
-                        </button>
-                      </Tooltip>
-                      <Tooltip content="Targeted exercises to improve specific skills" side="bottom">
-                        <button
-                          onClick={() => setRightPanelTab(rightPanelTab === 'exercises' ? 'none' : 'exercises')}
-                          className={cn(
-                            'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
-                            rightPanelTab === 'exercises'
-                              ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                              : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
-                          )}
-                        >
-                          <GraduationCap className="w-3.5 h-3.5" />
-                          Skill Exercises
-                        </button>
-                      </Tooltip>
-                    </div>
-
-                    {/* Right Panel Content (Collapsible with animation) */}
-                    {rightPanelTab !== 'none' && (
-                      <div className="mb-6 border border-[var(--border-primary)] rounded bg-[var(--bg-secondary)] animate-in slide-in-from-top-2 duration-300 ease-out">
-                        {rightPanelTab === 'paper_trading' && (
-                          <PaperTradingPanel
-                            symbol={selectedScenario?.symbol || 'SPY'}
-                            currentPrice={
-                              selectedScenario?.chartData?.candles?.length
-                                ? selectedScenario.chartData.candles[selectedScenario.chartData.candles.length - 1].c
-                                : 0
-                            }
-                            userId="demo-user"
-                          />
-                        )}
-                        {rightPanelTab === 'options' && (
-                          <OptionsChain
-                            symbol={selectedScenario?.symbol || 'SPY'}
-                            currentPrice={
-                              selectedScenario?.chartData?.candles?.length
-                                ? selectedScenario.chartData.candles[selectedScenario.chartData.candles.length - 1].c
-                                : 450
-                            }
-                            onOptionSelect={(option) => {
-                              console.log('Selected option:', option);
-                            }}
-                          />
-                        )}
-                        {rightPanelTab === 'exercises' && (
-                          <SkillExercises
-                            onExerciseComplete={(result) => {
-                              console.log('Exercise completed:', result);
-                              fetchStats();
-                            }}
-                            className="border-0"
-                          />
-                        )}
-                      </div>
-                    )}
-
-                    {/* LTP Checklist (Deep Analysis Mode) */}
-                    {practiceMode === 'deep_analysis' && !result && (
-                      <div className="mb-6 p-4 bg-[var(--bg-tertiary)] border border-[var(--border-primary)]">
-                        <h4 className="text-sm font-semibold text-[var(--text-primary)] mb-4 flex items-center gap-2">
-                          <Brain className="w-4 h-4 text-[var(--accent-primary)]" />
-                          Your LTP Assessment
-                        </h4>
-                        <div className="grid grid-cols-3 gap-4 mb-4">
-                          <div>
-                            <label className="text-xs text-[var(--text-tertiary)] mb-1 block">
-                              Level Score: {ltpChecklist.levelScore}%
-                            </label>
-                            <input
-                              type="range"
-                              min="0"
-                              max="100"
-                              value={ltpChecklist.levelScore}
-                              onChange={(e) => setLtpChecklist(prev => ({ ...prev, levelScore: parseInt(e.target.value) }))}
-                              className="w-full"
+                    {/* Decision Area */}
+                    <div className="p-6">
+                      {result ? (
+                        <div className="space-y-6">
+                          {/* Comparison Panel */}
+                          {scoringResult && idealTrade && outcomeData && (
+                            <ComparisonPanel
+                              userResponse={tradePlan}
+                              idealTrade={idealTrade}
+                              outcomeData={outcomeData}
+                              scoringResult={scoringResult}
+                              symbol={selectedScenario.symbol}
                             />
-                          </div>
-                          <div>
-                            <label className="text-xs text-[var(--text-tertiary)] mb-1 block">
-                              Trend Score: {ltpChecklist.trendScore}%
-                            </label>
-                            <input
-                              type="range"
-                              min="0"
-                              max="100"
-                              value={ltpChecklist.trendScore}
-                              onChange={(e) => setLtpChecklist(prev => ({ ...prev, trendScore: parseInt(e.target.value) }))}
-                              className="w-full"
+                          )}
+
+                          {/* AI Coach Feedback */}
+                          {aiFeedback && (
+                            <AICoachFeedback
+                              feedback={aiFeedback}
+                              relatedLessonSlug={selectedScenario.relatedLessonSlug}
+                              onReviewSetup={() => setShowOutcome(true)}
+                              onPracticeAnother={() => {
+                                setSelectedScenario(null);
+                                setResult(null);
+                                resetTradePlan();
+                                setActiveTrade(null);
+                              }}
                             />
-                          </div>
-                          <div>
-                            <label className="text-xs text-[var(--text-tertiary)] mb-1 block">
-                              Patience Score: {ltpChecklist.patienceScore}%
-                            </label>
-                            <input
-                              type="range"
-                              min="0"
-                              max="100"
-                              value={ltpChecklist.patienceScore}
-                              onChange={(e) => setLtpChecklist(prev => ({ ...prev, patienceScore: parseInt(e.target.value) }))}
-                              className="w-full"
-                            />
-                          </div>
-                        </div>
-                        <textarea
-                          placeholder="Your analysis notes (optional)..."
-                          value={ltpChecklist.notes}
-                          onChange={(e) => setLtpChecklist(prev => ({ ...prev, notes: e.target.value }))}
-                          className="w-full px-3 py-2 text-sm bg-[var(--bg-primary)] border border-[var(--border-primary)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)]"
-                          rows={2}
-                        />
-                      </div>
-                    )}
+                          )}
 
-                    {/* Decision Buttons or Result */}
-                    {result ? (
-                      <div className="space-y-6">
-                        {/* Comparison Panel - Full trade comparison */}
-                        {scoringResult && idealTrade && outcomeData && (
-                          <ComparisonPanel
-                            userResponse={tradePlan}
-                            idealTrade={idealTrade}
-                            outcomeData={outcomeData}
-                            scoringResult={scoringResult}
-                            symbol={selectedScenario.symbol}
-                          />
-                        )}
-
-                        {/* AI Coach Feedback */}
-                        {aiFeedback && (
-                          <AICoachFeedback
-                            feedback={aiFeedback}
-                            relatedLessonSlug={selectedScenario.relatedLessonSlug}
-                            onReviewSetup={() => setShowOutcome(true)}
-                            onPracticeAnother={() => {
-                              setSelectedScenario(null);
-                              setResult(null);
-                              resetTradePlan();
-                            }}
-                          />
-                        )}
-
-                        {/* Fallback for quick modes without full scoring */}
-                        {!scoringResult && (
-                          <div className={cn(
-                            'p-6 rounded-lg',
-                            result.isCorrect
-                              ? 'bg-[var(--profit)]/10 border border-[var(--profit)]'
-                              : 'bg-[var(--loss)]/10 border border-[var(--loss)]'
-                          )}>
-                            <div className="flex items-center gap-3 mb-4">
-                              {result.isCorrect ? (
-                                <CheckCircle className="w-8 h-8 text-[var(--profit)]" />
-                              ) : (
-                                <XCircle className="w-8 h-8 text-[var(--loss)]" />
-                              )}
-                              <div>
-                                <h3 className={cn(
-                                  'text-lg font-bold',
-                                  result.isCorrect ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
-                                )}>
-                                  {result.isCorrect ? 'Correct!' : 'Incorrect'}
-                                </h3>
-                                <p className="text-sm text-[var(--text-secondary)]">
-                                  Correct action: <span className="font-semibold uppercase">{result.correctAction}</span>
-                                </p>
-                              </div>
-                              {userStats?.currentStreak && userStats.currentStreak >= 3 && result.isCorrect && (
-                                <Badge variant="warning" className="ml-auto">
-                                  <Flame className="w-3 h-3 mr-1" />
-                                  {userStats.currentStreak} Streak!
-                                </Badge>
-                              )}
-                            </div>
-
-                            {/* Feedback */}
-                            <div className="mb-4">
-                              {renderFeedback(result.feedback)}
-                            </div>
-
-                            {/* LTP Analysis */}
-                            {selectedScenario.ltpAnalysis && (
-                              <div className="mt-4 grid grid-cols-3 gap-4">
+                          {/* Fallback Result Display */}
+                          {!scoringResult && (
+                            <div className={cn(
+                              'p-6 rounded-lg',
+                              result.isCorrect
+                                ? 'bg-[var(--profit)]/10 border border-[var(--profit)]'
+                                : 'bg-[var(--loss)]/10 border border-[var(--loss)]'
+                            )}>
+                              <div className="flex items-center gap-3 mb-4">
+                                {result.isCorrect ? (
+                                  <CheckCircle className="w-8 h-8 text-[var(--profit)]" />
+                                ) : (
+                                  <XCircle className="w-8 h-8 text-[var(--loss)]" />
+                                )}
                                 <div>
-                                  <p className="text-xs text-[var(--text-tertiary)] mb-1">Level Score</p>
-                                  <ProgressBar
-                                    value={selectedScenario.ltpAnalysis.level.score}
-                                    max={100}
-                                    size="sm"
-                                  />
-                                  <p className="text-xs text-[var(--text-tertiary)] mt-1">
-                                    {selectedScenario.ltpAnalysis.level.score}%
-                                  </p>
-                                </div>
-                                <div>
-                                  <p className="text-xs text-[var(--text-tertiary)] mb-1">Trend Score</p>
-                                  <ProgressBar
-                                    value={selectedScenario.ltpAnalysis.trend.score}
-                                    max={100}
-                                    size="sm"
-                                  />
-                                  <p className="text-xs text-[var(--text-tertiary)] mt-1">
-                                    {selectedScenario.ltpAnalysis.trend.score}%
-                                  </p>
-                                </div>
-                                <div>
-                                  <p className="text-xs text-[var(--text-tertiary)] mb-1">Patience Score</p>
-                                  <ProgressBar
-                                    value={selectedScenario.ltpAnalysis.patience.score}
-                                    max={100}
-                                    size="sm"
-                                  />
-                                  <p className="text-xs text-[var(--text-tertiary)] mt-1">
-                                    {selectedScenario.ltpAnalysis.patience.score}%
+                                  <h3 className={cn(
+                                    'text-lg font-bold',
+                                    result.isCorrect ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
+                                  )}>
+                                    {result.isCorrect ? 'Correct!' : 'Incorrect'}
+                                  </h3>
+                                  <p className="text-sm text-[var(--text-secondary)]">
+                                    Correct action: <span className="font-semibold uppercase">{result.correctAction}</span>
                                   </p>
                                 </div>
                               </div>
-                            )}
 
-                            {/* Actions */}
-                            <div className="flex gap-3 mt-6">
-                              {practiceMode === 'quick_drill' ? (
-                                <Button
-                                  variant="primary"
-                                  onClick={getNextScenario}
-                                  icon={<ChevronRight className="w-4 h-4" />}
-                                >
-                                  Next Scenario
-                                </Button>
-                              ) : (
-                                <>
-                                  <Button
-                                    variant="secondary"
-                                    onClick={() => {
-                                      setSelectedScenario(null);
-                                      setResult(null);
-                                      resetTradePlan();
-                                    }}
-                                  >
-                                    Try Another
+                              <div className="flex gap-3 mt-6">
+                                {practiceMode === 'quick_drill' ? (
+                                  <Button variant="primary" onClick={getNextScenario} icon={<ChevronRight className="w-4 h-4" />}>
+                                    Next Scenario
                                   </Button>
-                                  {selectedScenario.relatedLessonSlug && (
+                                ) : (
+                                  <>
                                     <Button
-                                      variant="ghost"
-                                      icon={<BookOpen className="w-4 h-4" />}
+                                      variant="secondary"
+                                      onClick={() => {
+                                        setSelectedScenario(null);
+                                        setResult(null);
+                                        resetTradePlan();
+                                        setActiveTrade(null);
+                                      }}
                                     >
-                                      Related Lesson
+                                      Try Another
                                     </Button>
-                                  )}
-                                  {result.isCorrect && userStats?.currentStreak && userStats.currentStreak >= 5 && (
-                                    <Button
-                                      variant="ghost"
-                                      icon={<Share2 className="w-4 h-4" />}
-                                    >
-                                      Share Win
-                                    </Button>
-                                  )}
-                                </>
+                                    {selectedScenario.relatedLessonSlug && (
+                                      <Button variant="ghost" icon={<BookOpen className="w-4 h-4" />}>
+                                        Related Lesson
+                                      </Button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {/* Context for replay/hard mode */}
+                          {(practiceMode === 'replay' || practiceMode === 'hard_mode') && selectedScenario.decisionPoint && decisionReached && !activeTrade && (
+                            <div className="p-3 bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-sm text-[var(--text-secondary)]">
+                              <MessageSquare className="w-4 h-4 inline mr-2 text-[var(--accent-primary)]" />
+                              {selectedScenario.decisionPoint.context}
+                            </div>
+                          )}
+
+                          {/* Full Decision Panel for standard and deep analysis modes */}
+                          {(practiceMode === 'standard' || practiceMode === 'deep_analysis' || practiceMode === 'ai_generated') ? (
+                            <DecisionPanel
+                              currentPrice={currentPrice}
+                              symbol={selectedScenario.symbol}
+                              onSubmit={(plan) => {
+                                setTradePlan(plan);
+                                submitTradePlan(plan);
+                              }}
+                              isSubmitting={submitting}
+                              disabled={submitting}
+                            />
+                          ) : (
+                            /* Quick buttons for quick_drill, replay, and hard_mode */
+                            <>
+                              <DecisionGuide className="mb-4" />
+
+                              <div className="grid grid-cols-3 gap-4">
+                                <Button
+                                  variant="secondary"
+                                  size="lg"
+                                  className="flex-col py-6 hover:bg-[var(--profit)]/20 hover:border-[var(--profit)] group"
+                                  onClick={() => submitDecision('long')}
+                                  disabled={submitting || ((practiceMode === 'replay' || practiceMode === 'hard_mode') && !decisionReached) || !!activeTrade}
+                                >
+                                  <TrendingUp className="w-8 h-8 mb-2 text-[var(--profit)] group-hover:scale-110 transition-transform" />
+                                  <span className="text-lg font-bold">LONG</span>
+                                  <span className="text-xs text-[var(--text-tertiary)] mt-1">Buy / Bullish</span>
+                                </Button>
+
+                                <Button
+                                  variant="secondary"
+                                  size="lg"
+                                  className="flex-col py-6 hover:bg-[var(--warning)]/20 hover:border-[var(--warning)] group"
+                                  onClick={() => submitDecision('wait')}
+                                  disabled={submitting || ((practiceMode === 'replay' || practiceMode === 'hard_mode') && !decisionReached) || !!activeTrade}
+                                >
+                                  <Pause className="w-8 h-8 mb-2 text-[var(--warning)] group-hover:scale-110 transition-transform" />
+                                  <span className="text-lg font-bold">WAIT</span>
+                                  <span className="text-xs text-[var(--text-tertiary)] mt-1">No Trade</span>
+                                </Button>
+
+                                <Button
+                                  variant="secondary"
+                                  size="lg"
+                                  className="flex-col py-6 hover:bg-[var(--loss)]/20 hover:border-[var(--loss)] group"
+                                  onClick={() => submitDecision('short')}
+                                  disabled={submitting || ((practiceMode === 'replay' || practiceMode === 'hard_mode') && !decisionReached) || !!activeTrade}
+                                >
+                                  <TrendingDown className="w-8 h-8 mb-2 text-[var(--loss)] group-hover:scale-110 transition-transform" />
+                                  <span className="text-lg font-bold">SHORT</span>
+                                  <span className="text-xs text-[var(--text-tertiary)] mt-1">Sell / Bearish</span>
+                                </Button>
+                              </div>
+
+                              {(practiceMode === 'replay' || practiceMode === 'hard_mode') && (
+                                <KeyboardShortcuts mode="replay" className="mt-4" />
                               )}
+                            </>
+                          )}
+
+                          {submitting && (
+                            <div className="text-center py-4">
+                              <Loader2 className="w-6 h-6 animate-spin text-[var(--accent-primary)] mx-auto" />
+                              <p className="text-sm text-[var(--text-tertiary)] mt-2">Analyzing your decision...</p>
                             </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {/* Context for replay mode */}
-                        {practiceMode === 'replay' && selectedScenario.decisionPoint && (
-                          <div className="p-3 bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-sm text-[var(--text-secondary)]">
-                            <MessageSquare className="w-4 h-4 inline mr-2 text-[var(--accent-primary)]" />
-                            {selectedScenario.decisionPoint.context}
-                          </div>
-                        )}
+                          )}
 
-                        {/* Market Context Card - shown alongside decision panel */}
-                        {scenarioContext && (practiceMode === 'standard' || practiceMode === 'deep_analysis') && (
-                          <MarketContextCard context={scenarioContext} className="mb-4" />
-                        )}
+                          {(practiceMode === 'replay' || practiceMode === 'hard_mode') && !decisionReached && !activeTrade && (
+                            <p className="text-center text-sm text-[var(--text-tertiary)]">
+                              Wait for the chart to reach the decision point...
+                            </p>
+                          )}
 
-                        {/* Full Decision Panel for standard and deep analysis modes */}
-                        {(practiceMode === 'standard' || practiceMode === 'deep_analysis' || practiceMode === 'ai_generated') ? (
-                          <DecisionPanel
-                            currentPrice={selectedScenario.chartData?.candles?.[selectedScenario.chartData.candles.length - 1]?.c || 100}
-                            symbol={selectedScenario.symbol}
-                            onSubmit={(plan) => {
-                              setTradePlan(plan);
-                              submitTradePlan(plan);
-                            }}
-                            isSubmitting={submitting}
-                            disabled={submitting}
-                          />
-                        ) : (
-                          /* Quick buttons for quick_drill, replay, and multi_timeframe modes */
-                          <>
-                            {/* Decision Guide - Quick reference for LTP framework */}
-                            <DecisionGuide className="mb-4" />
-
-                            <div className="grid grid-cols-3 gap-4">
-                              <Button
-                                variant="secondary"
-                                size="lg"
-                                className="flex-col py-6 hover:bg-[var(--profit)]/20 hover:border-[var(--profit)] group"
-                                onClick={() => submitDecision('long')}
-                                disabled={submitting || (practiceMode === 'replay' && !decisionReached)}
-                              >
-                                <TrendingUp className="w-8 h-8 mb-2 text-[var(--profit)] group-hover:scale-110 transition-transform" />
-                                <span className="text-lg font-bold">LONG</span>
-                                <span className="text-xs text-[var(--text-tertiary)] mt-1">Buy / Bullish</span>
-                              </Button>
-
-                              <Button
-                                variant="secondary"
-                                size="lg"
-                                className="flex-col py-6 hover:bg-[var(--warning)]/20 hover:border-[var(--warning)] group"
-                                onClick={() => submitDecision('wait')}
-                                disabled={submitting || (practiceMode === 'replay' && !decisionReached)}
-                              >
-                                <Pause className="w-8 h-8 mb-2 text-[var(--warning)] group-hover:scale-110 transition-transform" />
-                                <span className="text-lg font-bold">WAIT</span>
-                                <span className="text-xs text-[var(--text-tertiary)] mt-1">No Trade</span>
-                              </Button>
-
-                              <Button
-                                variant="secondary"
-                                size="lg"
-                                className="flex-col py-6 hover:bg-[var(--loss)]/20 hover:border-[var(--loss)] group"
-                                onClick={() => submitDecision('short')}
-                                disabled={submitting || (practiceMode === 'replay' && !decisionReached)}
-                              >
-                                <TrendingDown className="w-8 h-8 mb-2 text-[var(--loss)] group-hover:scale-110 transition-transform" />
-                                <span className="text-lg font-bold">SHORT</span>
-                                <span className="text-xs text-[var(--text-tertiary)] mt-1">Sell / Bearish</span>
-                              </Button>
-                            </div>
-
-                            {/* Keyboard shortcuts for replay mode */}
-                            {practiceMode === 'replay' && (
-                              <KeyboardShortcuts mode={practiceMode} className="mt-4" />
-                            )}
-                          </>
-                        )}
-
-                        {submitting && (
-                          <div className="text-center py-4">
-                            <Loader2 className="w-6 h-6 animate-spin text-[var(--accent-primary)] mx-auto" />
-                            <p className="text-sm text-[var(--text-tertiary)] mt-2">Analyzing your decision...</p>
-                          </div>
-                        )}
-
-                        {practiceMode === 'replay' && !decisionReached && (
-                          <p className="text-center text-sm text-[var(--text-tertiary)]">
-                            Wait for the chart to reach the decision point...
-                          </p>
-                        )}
-                      </div>
-                    )}
+                          {activeTrade && activeTrade.status === 'active' && (
+                            <p className="text-center text-sm text-[var(--accent-primary)]">
+                              Trade active. Watch it play out on the chart...
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </CardContent>
                 </>
               ) : (
@@ -1770,7 +1987,7 @@ export default function PracticePage() {
                     Choose a practice scenario from the list to test your LTP skills.
                   </p>
                   <p className="text-sm text-[var(--text-tertiary)]">
-                    Current mode: <span className="text-[var(--accent-primary)] font-semibold">{PRACTICE_MODES.find(m => m.id === practiceMode)?.name}</span>
+                    Current mode: <span className="text-[var(--accent-primary)] font-semibold">{PRACTICE_MODES.find((m) => m.id === practiceMode)?.name}</span>
                   </p>
                 </CardContent>
               )}

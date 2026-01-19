@@ -1,9 +1,13 @@
 /**
- * KCU Coaching Rules Service
+ * KCU Coaching Rules Service - Digital Somesh Edition
  *
- * Provides real-time coaching guidance based on KCU curriculum principles.
+ * Provides real-time coaching guidance channeling Somesh's raw transcript energy.
  * Uses the LTP (Level, Trend, Patience) framework to evaluate setups
- * and provide actionable coaching messages.
+ * and deliver straight-talking, no-BS coaching messages.
+ *
+ * "The trend is your friend. Don't fight the river."
+ * "Patience pays the patient hand. Wait for the candle close."
+ * "Scared money don't make money. The setup is there. Execute."
  */
 
 import type { LTPAnalysis } from './market-data';
@@ -12,12 +16,21 @@ import type { LTPAnalysis } from './market-data';
 // TYPES
 // ============================================================================
 
+export interface StructureBreakContext {
+  detected: boolean;
+  type: 'bullish_break' | 'bearish_break' | null; // lower low after higher highs = bearish, higher high after lower lows = bullish
+  breakPrice: number | null;
+  direction: 'long' | 'short' | null;
+  strength: 'strong' | 'weak' | null; // strong = broke with momentum, weak = marginal break
+}
+
 export interface CoachingContext {
   symbol: string;
   currentPrice: number;
   ltpAnalysis: LTPAnalysis | null;
   gammaData?: GammaContext | null;
   fvgData?: FVGContext | null;
+  structureBreak?: StructureBreakContext | null;
   activeTrade?: ActiveTradeContext | null;
   mode: 'scan' | 'focus' | 'trade';
   marketSession: 'premarket' | 'open' | 'power_hour' | 'close' | 'after_hours' | 'closed';
@@ -107,7 +120,8 @@ class KCUCoachingRules {
   }
 
   /**
-   * Evaluate setup quality and return grade explanation
+   * Evaluate setup quality and return grade explanation - Somesh style
+   * Grades: A+ (Sniper), A/B (Decent), C/D/F (Dumb Shit)
    */
   getGradeExplanation(grade: string, ltp: LTPAnalysis): string {
     const levelScore = ltp.levels.levelScore;
@@ -116,27 +130,27 @@ class KCUCoachingRules {
 
     switch (grade) {
       case 'A+':
-        return 'Perfect LTP alignment. All components scoring 80+. This is an ideal setup per KCU methodology.';
+        return '🎯 SNIPER SETUP. This is it. Level, trend, patience - all aligned. The market is handing you this trade on a silver platter. Don\'t overthink it. Execute.';
       case 'A':
-        return 'Strong LTP alignment. Most components are excellent with minor gaps. High-probability setup.';
+        return '💪 SNIPER SETUP. Strong LTP alignment. Minor gaps but this is tradeable. The setup is there. Scared money don\'t make money.';
       case 'B':
-        return `Good potential but needs improvement. ${this.getWeakestComponent(levelScore, trendScore, patienceScore)} needs attention.`;
+        return `👀 DECENT SETUP. Could be something, but ${this.getWeakestComponent(levelScore, trendScore, patienceScore)} ain\'t cooperating. Wait for it to get better or size down.`;
       case 'C':
-        return 'Marginal setup. Multiple LTP components are weak. Consider waiting for better confirmation.';
+        return '⚠️ This setup is questionable. Multiple LTP components are weak. Why are you even looking at this? Go find a real setup.';
       case 'D':
-        return 'Poor setup. LTP framework not aligned. High risk of failed trade.';
+        return '🚫 DUMB SHIT. This is how you blow up accounts. LTP ain\'t aligned. Close the chart and walk away.';
       case 'F':
-        return 'No tradeable setup. Avoid this entry. Wait for proper LTP alignment.';
+        return '💀 DUMB SHIT. There\'s no setup here. This is gambling, not trading. The market will eat your lunch. Find something else.';
       default:
-        return 'Setup quality under evaluation.';
+        return 'Analyzing... patience pays the patient hand.';
     }
   }
 
   private getWeakestComponent(level: number, trend: number, patience: number): string {
     const min = Math.min(level, trend, patience);
-    if (min === level) return 'Level proximity';
-    if (min === trend) return 'Trend alignment';
-    return 'Patience confirmation';
+    if (min === level) return 'you\'re not at a key level - where\'s your edge?';
+    if (min === trend) return 'the trend is your friend - why are you fighting the river?';
+    return 'patience candle ain\'t confirmed - wait for the close!';
   }
 
   // ============================================================================
@@ -151,21 +165,21 @@ class KCUCoachingRules {
       messages.push({
         type: 'guidance',
         priority: 'medium',
-        title: 'Awaiting Analysis',
-        message: 'Select a symbol to begin LTP analysis. Focus on your watchlist for best results.',
+        title: 'Pick a Stock',
+        message: 'What are we trading today? Pick something from your watchlist. One stock, one direction - that\'s the rule of ones.',
         action: 'Add symbols to watchlist'
       });
       return messages;
     }
 
-    // Grade-based guidance
+    // Grade-based guidance - Somesh style
     if (ltp.grade === 'A+' || ltp.grade === 'A') {
       messages.push({
         type: 'opportunity',
         priority: 'high',
-        title: `High-Quality Setup: ${context.symbol}`,
-        message: `${context.symbol} showing ${ltp.grade} grade setup. ${ltp.recommendation}`,
-        action: 'Switch to Focus mode to monitor entry',
+        title: `🎯 SNIPER ALERT: ${context.symbol}`,
+        message: `${context.symbol} is setting up BEAUTIFULLY. ${ltp.grade} grade - level, trend, patience all lining up. This is what we wait for. Get focused.`,
+        action: 'Switch to Focus mode - this could be the one',
         relatedLesson: {
           module: 'setups',
           lesson: 'ltp-framework',
@@ -176,9 +190,17 @@ class KCUCoachingRules {
       messages.push({
         type: 'guidance',
         priority: 'medium',
-        title: `Developing Setup: ${context.symbol}`,
-        message: `B-grade setup forming. ${this.getImprovementNeeded(ltp)}`,
-        action: 'Continue monitoring for improvement'
+        title: `👀 Watching: ${context.symbol}`,
+        message: `Something brewing here. Not perfect, but could turn into something. ${this.getImprovementNeeded(ltp)}`,
+        action: 'Keep it on the radar'
+      });
+    } else if (ltp.grade === 'C' || ltp.grade === 'D' || ltp.grade === 'F') {
+      messages.push({
+        type: 'warning',
+        priority: 'low',
+        title: `❌ Not Here: ${context.symbol}`,
+        message: 'This ain\'t it, chief. The setup isn\'t there. Don\'t force it. There\'s always another play.',
+        action: 'Find a better chart'
       });
     }
 
@@ -187,14 +209,19 @@ class KCUCoachingRules {
       messages.push({
         type: 'opportunity',
         priority: 'high',
-        title: 'At Key Level',
-        message: `Price at key level. ${this.describeLevelContext(ltp)}`,
+        title: '📍 At Key Level',
+        message: `Price is kissing a level. ${this.describeLevelContext(ltp)} Levels are like magnets - this is where setups happen.`,
         relatedLesson: {
           module: 'entries',
           lesson: 'levels-mastery',
           url: '/curriculum/entries/levels-mastery'
         }
       });
+    }
+
+    // Structure break guidance
+    if (context.structureBreak?.detected) {
+      messages.push(...this.getStructureBreakGuidance(context));
     }
 
     // Add gamma context if available
@@ -215,15 +242,15 @@ class KCUCoachingRules {
 
     if (!ltp) return messages;
 
-    // Entry timing guidance
+    // Entry timing guidance - Somesh style
     if (ltp.grade === 'A+' || ltp.grade === 'A') {
       if (ltp.patience.candle5m?.confirmed || ltp.patience.candle15m?.confirmed) {
         messages.push({
           type: 'opportunity',
           priority: 'high',
-          title: 'Entry Signal Active',
-          message: 'Patience candle confirmed. LTP aligned. Valid entry window.',
-          action: 'Execute entry per trade plan',
+          title: '🚀 PATIENCE CONFIRMED - GO TIME',
+          message: 'The candle closed. LTP is aligned. Scared money don\'t make money. The setup is there. EXECUTE.',
+          action: 'Pull the trigger - this is what we waited for',
           relatedLesson: {
             module: 'entries',
             lesson: 'patience-candles',
@@ -234,9 +261,17 @@ class KCUCoachingRules {
         messages.push({
           type: 'guidance',
           priority: 'high',
-          title: 'Patience Candle Forming',
-          message: 'Wait for candle close confirmation. Do not anticipate the close.',
-          action: 'Monitor for candle close'
+          title: '⏳ Patience Candle Forming...',
+          message: 'Hold up. Candle ain\'t closed yet. PATIENCE PAYS THE PATIENT HAND. Don\'t anticipate - WAIT for the close.',
+          action: 'Eyes on the candle close'
+        });
+      } else {
+        messages.push({
+          type: 'guidance',
+          priority: 'medium',
+          title: '🔍 Waiting for Confirmation',
+          message: 'Setup looks good but we need a patience candle. The market will show you EXACTLY what it wants to do. Be patient.',
+          action: 'Wait for candle pattern at level'
         });
       }
     }
@@ -246,14 +281,19 @@ class KCUCoachingRules {
       messages.push({
         type: 'warning',
         priority: 'medium',
-        title: 'Mixed Timeframe Signals',
-        message: 'Daily and intraday trends are conflicting. Consider smaller position size.',
+        title: '⚔️ Timeframes Fighting',
+        message: 'Daily says one thing, intraday says another. The trend is your friend - don\'t fight the river. Size down or skip this one.',
         relatedLesson: {
           module: 'analysis',
           lesson: 'multi-timeframe',
           url: '/curriculum/analysis/multi-timeframe'
         }
       });
+    }
+
+    // Structure break in focus mode
+    if (context.structureBreak?.detected) {
+      messages.push(...this.getStructureBreakGuidance(context));
     }
 
     // FVG targets
@@ -276,8 +316,8 @@ class KCUCoachingRules {
       messages.push({
         type: 'guidance',
         priority: 'medium',
-        title: 'No Active Trade',
-        message: 'Enter trade details to receive real-time coaching during your trade.',
+        title: 'Log Your Trade',
+        message: 'You in a trade? Log it so I can coach you through it. Every trade is a lesson.',
         action: 'Log your entry'
       });
       return messages;
@@ -285,14 +325,14 @@ class KCUCoachingRules {
 
     const currentR = trade.currentRMultiple;
 
-    // R-multiple based guidance
+    // R-multiple based guidance - Somesh style
     if (currentR >= 2) {
       messages.push({
         type: 'trade_management',
         priority: 'high',
-        title: 'Target Zone Reached',
-        message: `Trade at ${currentR.toFixed(1)}R. Consider taking partials. Let remainder run with trailing stop.`,
-        action: 'Take 50% profits, trail rest',
+        title: '🎉 PAYDAY - 2R+ Hit!',
+        message: `Trade at ${currentR.toFixed(1)}R. RING THE REGISTER. Take 50% off, let the rest ride. Never turn a winner into a loser.`,
+        action: 'Bank profits, trail the rest',
         relatedLesson: {
           module: 'exits',
           lesson: 'scaling-out',
@@ -303,21 +343,37 @@ class KCUCoachingRules {
       messages.push({
         type: 'trade_management',
         priority: 'medium',
-        title: 'First Target Zone',
-        message: `At 1R (${currentR.toFixed(2)}R). Move stop to breakeven if not already.`,
-        action: 'Move stop to B/E'
+        title: '💰 1R - Lock It In',
+        message: `At ${currentR.toFixed(2)}R. Move that stop to breakeven NOW. House money from here. You can\'t lose on this trade anymore.`,
+        action: 'Stop to B/E - protect your gains'
       });
-    } else if (currentR <= -0.5) {
+    } else if (currentR > 0 && currentR < 1) {
+      messages.push({
+        type: 'guidance',
+        priority: 'low',
+        title: '📈 In The Green',
+        message: `Trade at ${currentR.toFixed(2)}R. Let it work. Don\'t micromanage. Stick to the plan.`,
+        action: 'Hold and let it develop'
+      });
+    } else if (currentR <= -0.5 && currentR > -1) {
       messages.push({
         type: 'warning',
         priority: 'high',
-        title: 'Approaching Stop',
-        message: `Trade at ${currentR.toFixed(2)}R. Honor your stop. No moving stops to "give it room."`,
+        title: '⚠️ Getting Close to Stop',
+        message: `Trade at ${currentR.toFixed(2)}R. DON\'T BE A HERO. Respect the stop. Don\'t move it to "give it room." That\'s how accounts blow up.`,
         relatedLesson: {
           module: 'risk',
           lesson: 'stop-discipline',
           url: '/curriculum/risk/stop-discipline'
         }
+      });
+    } else if (currentR <= -1) {
+      messages.push({
+        type: 'warning',
+        priority: 'high',
+        title: '🛑 STOP HIT',
+        message: 'Your stop should have triggered. If it didn\'t, GET OUT NOW. Live to trade another day. One trade won\'t make you, but one bad trade can break you.',
+        action: 'Exit immediately if stop was breached'
       });
     }
 
@@ -327,10 +383,25 @@ class KCUCoachingRules {
       messages.push({
         type: 'warning',
         priority: 'high',
-        title: 'Setup Deteriorating',
-        message: 'LTP analysis shows setup quality has degraded. Consider early exit.',
-        action: 'Evaluate exit'
+        title: '📉 Setup Breaking Down',
+        message: 'The LTP that got you in? It\'s gone. Setup quality degraded. Don\'t hope and pray - either manage it or exit.',
+        action: 'Consider early exit'
       });
+    }
+
+    // Structure break during trade
+    if (context.structureBreak?.detected) {
+      const breakDir = context.structureBreak.direction;
+      const tradeDir = trade.direction;
+      if ((breakDir === 'long' && tradeDir === 'short') || (breakDir === 'short' && tradeDir === 'long')) {
+        messages.push({
+          type: 'warning',
+          priority: 'high',
+          title: '🔄 Structure Break AGAINST You',
+          message: `Market structure just broke against your ${tradeDir} position. The trend might be shifting. Tighten stop or take profits.`,
+          action: 'Manage the position - structure changed'
+        });
+      }
     }
 
     return messages;
@@ -348,8 +419,8 @@ class KCUCoachingRules {
         messages.push({
           type: 'education',
           priority: 'low',
-          title: 'Pre-Market Prep',
-          message: 'Review watchlist, mark key levels, identify PDH/PDL. Wait for ORB levels to establish.',
+          title: '☀️ Pre-Market Prep Time',
+          message: 'This is when you do the WORK. Mark your levels. Know your PDH/PDL. What gapped? What has news? Be READY when that bell rings.',
           relatedLesson: {
             module: 'routine',
             lesson: 'premarket-prep',
@@ -362,17 +433,17 @@ class KCUCoachingRules {
         messages.push({
           type: 'guidance',
           priority: 'medium',
-          title: 'Market Open',
-          message: 'First 15 mins = ORB formation. Observe, don\'t chase. Let levels establish.',
+          title: '🔔 Market Open - WAIT',
+          message: 'First 15 minutes is amateur hour. ORB forming. DON\'T CHASE. Let the levels establish. The suckers get trapped now. Don\'t be a sucker.',
         });
         break;
 
       case 'power_hour':
         messages.push({
           type: 'guidance',
-          priority: 'low',
-          title: 'Power Hour Active',
-          message: 'Final hour often sees increased volatility. Manage open positions carefully.',
+          priority: 'medium',
+          title: '⚡ Power Hour',
+          message: 'Final hour - the big boys are moving. Volatility spikes. If you\'re in a trade, MANAGE IT. If you\'re flat, this can be prime time for setups.',
         });
         break;
 
@@ -380,13 +451,22 @@ class KCUCoachingRules {
         messages.push({
           type: 'education',
           priority: 'low',
-          title: 'After Hours',
-          message: 'Review today\'s trades. Journal entries, exits, and lessons learned.',
+          title: '📝 Review Time',
+          message: 'Market\'s closed. NOW you journal. What worked? What didn\'t? Be honest. The best traders are students of their own trades.',
           relatedLesson: {
             module: 'routine',
             lesson: 'trade-journaling',
             url: '/curriculum/routine/trade-journaling'
           }
+        });
+        break;
+
+      case 'closed':
+        messages.push({
+          type: 'education',
+          priority: 'low',
+          title: '💤 Markets Closed',
+          message: 'Rest up. Review charts. Plan tomorrow\'s watchlist. Preparation is what separates winners from losers.',
         });
         break;
     }
@@ -408,8 +488,8 @@ class KCUCoachingRules {
       messages.push({
         type: 'warning',
         priority: 'medium',
-        title: 'Negative Gamma Environment',
-        message: 'Dealers short gamma. Moves can accelerate. Use wider stops, smaller size.',
+        title: '🔴 Negative Gamma - WATCH OUT',
+        message: 'Dealers are SHORT gamma. When price moves, it can ACCELERATE. The moves get violent. Size DOWN, stops WIDER. Don\'t get caught slipping.',
         relatedLesson: {
           module: 'advanced',
           lesson: 'gamma-exposure',
@@ -420,8 +500,8 @@ class KCUCoachingRules {
       messages.push({
         type: 'guidance',
         priority: 'low',
-        title: 'Positive Gamma Environment',
-        message: 'Dealers long gamma. Expect mean reversion. Fade extremes, trade ranges.',
+        title: '🟢 Positive Gamma - Range Bound',
+        message: 'Dealers are LONG gamma. They\'ll fade the extremes. Price tends to stay in a range. Mean reversion plays work well here.',
       });
     }
 
@@ -430,9 +510,9 @@ class KCUCoachingRules {
     if (priceDiff < 0.5) {
       messages.push({
         type: 'guidance',
-        priority: 'low',
-        title: 'Near Max Pain',
-        message: `Price near max pain ($${gamma.maxPain.toFixed(2)}). Pin risk elevated for OPEX.`,
+        priority: 'medium',
+        title: '🧲 Max Pain Zone',
+        message: `Price at $${context.currentPrice.toFixed(2)}, max pain at $${gamma.maxPain.toFixed(2)}. OPEX week? Expect a pin. MMs want those options to expire worthless.`,
       });
     }
 
@@ -454,8 +534,8 @@ class KCUCoachingRules {
       messages.push({
         type: 'opportunity',
         priority: 'medium',
-        title: 'Bullish FVG Nearby',
-        message: `Unfilled bullish FVG at $${fvg.nearestBullish.price.toFixed(2)}. Potential support zone.`,
+        title: '📗 Bullish FVG Below',
+        message: `Unfilled bullish gap at $${fvg.nearestBullish.price.toFixed(2)}. The market left something behind - it often comes back to fill. Watch for support here.`,
         relatedLesson: {
           module: 'advanced',
           lesson: 'fair-value-gaps',
@@ -469,8 +549,47 @@ class KCUCoachingRules {
       messages.push({
         type: 'warning',
         priority: 'medium',
-        title: 'Bearish FVG Above',
-        message: `Unfilled bearish FVG at $${fvg.nearestBearish.price.toFixed(2)}. Potential resistance zone.`,
+        title: '📕 Bearish FVG Above',
+        message: `Unfilled bearish gap at $${fvg.nearestBearish.price.toFixed(2)}. Sellers left a gap - if we go up there, expect resistance. Could be a shorting zone.`,
+      });
+    }
+
+    return messages;
+  }
+
+  // ============================================================================
+  // STRUCTURE BREAK GUIDANCE
+  // ============================================================================
+
+  private getStructureBreakGuidance(context: CoachingContext): CoachingMessage[] {
+    const messages: CoachingMessage[] = [];
+    const sb = context.structureBreak;
+
+    if (!sb || !sb.detected) return messages;
+
+    if (sb.type === 'bullish_break') {
+      messages.push({
+        type: 'opportunity',
+        priority: 'high',
+        title: '📈 STRUCTURE BREAK - Bullish',
+        message: `Higher high after lower lows! Structure shifted bullish at $${sb.breakPrice?.toFixed(2)}. The trend might be flipping. ${sb.strength === 'strong' ? 'Strong momentum - this is real.' : 'Weak break - needs confirmation.'}`,
+        relatedLesson: {
+          module: 'analysis',
+          lesson: 'market-structure',
+          url: '/curriculum/analysis/market-structure'
+        }
+      });
+    } else if (sb.type === 'bearish_break') {
+      messages.push({
+        type: 'warning',
+        priority: 'high',
+        title: '📉 STRUCTURE BREAK - Bearish',
+        message: `Lower low after higher highs! Structure shifted bearish at $${sb.breakPrice?.toFixed(2)}. Bulls losing control. ${sb.strength === 'strong' ? 'Strong momentum - bears taking over.' : 'Weak break - watch for failed breakdown.'}`,
+        relatedLesson: {
+          module: 'analysis',
+          lesson: 'market-structure',
+          url: '/curriculum/analysis/market-structure'
+        }
       });
     }
 
@@ -485,16 +604,16 @@ class KCUCoachingRules {
     const issues: string[] = [];
 
     if (ltp.levels.levelScore < 60) {
-      issues.push('Price not at key level');
+      issues.push('You\'re not at a level - where\'s your edge?');
     }
     if (ltp.trend.trendScore < 60) {
-      issues.push('Trend not clearly defined');
+      issues.push('Trend\'s not clear - the trend is your friend, find one');
     }
     if (ltp.patience.patienceScore < 60) {
-      issues.push('Waiting for patience candle confirmation');
+      issues.push('No patience candle yet - wait for confirmation');
     }
 
-    return issues.length > 0 ? issues.join('. ') + '.' : 'Minor improvements needed.';
+    return issues.length > 0 ? issues.join('. ') : 'Getting there. Almost tradeable.';
   }
 
   private describeLevelContext(ltp: LTPAnalysis): string {
@@ -508,31 +627,41 @@ class KCUCoachingRules {
     }
 
     if (ltp.levels.pricePosition === 'above_vwap') {
-      levels.push('Above VWAP (bullish bias)');
+      levels.push('Above VWAP - bullish bias, favor longs');
     } else if (ltp.levels.pricePosition === 'below_vwap') {
-      levels.push('Below VWAP (bearish bias)');
+      levels.push('Below VWAP - bearish bias, favor shorts');
     }
 
     return levels.join('. ');
   }
 
   /**
-   * Get coaching for screenshot analysis results
+   * Get coaching for screenshot analysis results - Somesh style
    */
   getScreenshotCoaching(analysisResult: ScreenshotAnalysisResult): CoachingMessage[] {
     const messages: CoachingMessage[] = [];
     const { setup, recommendation, coaching } = analysisResult;
+
+    // Get Somesh-style title based on grade
+    const getGradeTitle = (quality: string, action: string): string => {
+      if (quality === 'A+' || quality === 'A') {
+        return action === 'ENTER' ? '🎯 SNIPER SETUP - EXECUTE' : `🎯 SNIPER SETUP - ${action}`;
+      } else if (quality === 'B') {
+        return `👀 DECENT SETUP - ${action}`;
+      }
+      return `❌ DUMB SHIT - ${action}`;
+    };
 
     // Primary recommendation
     messages.push({
       type: recommendation.action === 'ENTER' ? 'opportunity' :
             recommendation.action === 'AVOID' ? 'warning' : 'guidance',
       priority: recommendation.action === 'ENTER' || recommendation.action === 'AVOID' ? 'high' : 'medium',
-      title: `${setup.quality} Grade Setup - ${recommendation.action}`,
+      title: getGradeTitle(setup.quality, recommendation.action),
       message: coaching.message,
-      action: recommendation.action === 'ENTER' ? 'Execute per plan' :
-              recommendation.action === 'WAIT' ? 'Monitor for improvement' :
-              recommendation.action === 'AVOID' ? 'Find better setup' : undefined
+      action: recommendation.action === 'ENTER' ? 'Scared money don\'t make money - execute the plan' :
+              recommendation.action === 'WAIT' ? 'Patience pays the patient hand - keep watching' :
+              recommendation.action === 'AVOID' ? 'There\'s always another play - find it' : undefined
     });
 
     // Add warnings
@@ -540,7 +669,7 @@ class KCUCoachingRules {
       messages.push({
         type: 'warning',
         priority: 'medium',
-        title: 'Chart Warning',
+        title: '⚠️ Watch This',
         message: warning
       });
     }
@@ -550,7 +679,7 @@ class KCUCoachingRules {
       messages.push({
         type: 'education',
         priority: 'low',
-        title: 'Coaching Tip',
+        title: '💡 Pro Tip',
         message: tip
       });
     }
@@ -560,7 +689,7 @@ class KCUCoachingRules {
       messages.push({
         type: 'education',
         priority: 'low',
-        title: lesson.title,
+        title: `📚 ${lesson.title}`,
         message: lesson.relevance,
         relatedLesson: {
           module: lesson.moduleSlug,
@@ -670,170 +799,195 @@ export function calculateRMultiple(
 // ============================================================================
 
 export const KCU_CORE_QUOTES = [
-  "Trade at KEY LEVELS with TREND alignment and PATIENCE candle confirmation.",
-  "The market will show you EXACTLY what it wants to do - be patient.",
-  "Don't chase. If you miss it, there's always another opportunity.",
-  "Levels are like magnets - price is drawn to them.",
-  "Your job is to wait for the setup, not create one.",
-  "Green candles near support = bullish patience. Red candles near resistance = bearish patience.",
-  "The 200 SMA is the line in the sand between bulls and bears.",
-  "Trade what you see, not what you think.",
-  "Size kills accounts. Risk management is everything.",
-  "One good trade a day is all you need.",
+  // The Big Three - LTP
+  "Level. Trend. Patience. That's the whole game. Master LTP and you master the market.",
+  "The trend is your friend. Don't fight the river.",
+  "Patience pays the patient hand. Wait for the candle close.",
+  "Levels are like magnets. Price is DRAWN to them. Trade the reactions.",
+
+  // Execution & Mindset
+  "Scared money don't make money. The setup is there. EXECUTE.",
+  "Don't be a hero. Respect the stop. Live to trade another day.",
+  "One good trade a day is all you need. That's the Rule of Ones.",
+  "Missed trades are NOT losses. There's ALWAYS another play.",
+
+  // Discipline
+  "The market will show you EXACTLY what it wants to do. Your job is to WAIT and REACT.",
+  "Don't chase entries. The suckers chase. Let the trade come to you.",
+  "Size kills accounts. Risk management isn't sexy, but it keeps you in the game.",
+  "95% of your profits come from 5% of your trades. Be PATIENT for the A+ setups.",
+
+  // Key Levels
+  "The 200 SMA is the line in the sand. Bulls live above it, bears live below.",
+  "VWAP is your intraday compass. Above = bullish bias. Below = bearish bias.",
+  "PDH/PDL - yesterday's range tells you today's battlefield.",
+
+  // Trade Management
+  "Never turn a winning trade into a loser. Move that stop to breakeven at 1R.",
+  "Take partials at targets. Let runners ride. Ring the register.",
+  "If something doesn't feel right, it probably isn't. Trust your gut, but HONOR YOUR PLAN.",
+
+  // Psychology
+  "Revenge trading is how accounts die. Step away after a loss.",
+  "The best traders are students of their own trades. Journal EVERYTHING.",
+  "You can't control the market. You CAN control your risk.",
 ];
 
 export const KCU_CORE_PRINCIPLES = {
-  ruleOfOnes: "One stock, one direction, one opportunity per day. Focus beats diversification.",
-  threeThingsAtLevels: ["Price action", "Volume", "Momentum"],
-  threeTypesOfTrading: ["Trend following", "Counter-trend (reversals)", "Range trading"],
-  nintyFivePercentRule: "95% of your profits come from 5% of your trades. Be patient for A+ setups.",
-  cFramework: "Conviction + Confirmation + Commitment = Consistent profits",
+  ruleOfOnes: "ONE stock. ONE direction. ONE opportunity. That's it. Focus beats diversification every single time.",
+  threeThingsAtLevels: ["Price action - what's the candle saying?", "Volume - is money flowing?", "Momentum - are the EMAs spreading or converging?"],
+  threeTypesOfTrading: ["Trend following - the bread and butter", "Counter-trend reversals - high risk, high reward", "Range trading - when the market's choppy"],
+  nintyFivePercentRule: "95% of your profits come from 5% of your trades. Most days you're waiting. The winners are PATIENT.",
+  cFramework: "Conviction (do you believe in it?) + Confirmation (did the candle close?) + Commitment (execute the plan) = Consistent profits",
+  ltpFramework: "Level (where am I trading?) + Trend (which way is the river flowing?) + Patience (did I get my candle?) = A+ Setup",
 };
 
 export const TIMEFRAME_RULES = [
-  { timeframe: "Weekly/Daily", description: "Identify the macro trend and key structural levels" },
-  { timeframe: "4-Hour", description: "Confirm intermediate trend and find significant S/R zones" },
-  { timeframe: "1-Hour", description: "Entry timeframe for swing trades" },
-  { timeframe: "15-Min", description: "Fine-tune entries and look for patience candles" },
-  { timeframe: "5-Min", description: "Scalp entries and precise timing" },
+  { timeframe: "Weekly/Daily", description: "The BIG picture. Where's the macro trend? Where are the KEY levels? This is your roadmap." },
+  { timeframe: "4-Hour", description: "Intermediate trend confirmation. Find those significant S/R zones that everyone sees." },
+  { timeframe: "1-Hour", description: "Swing trade entries. This is where the institutional boys play." },
+  { timeframe: "15-Min", description: "The patience candle timeframe. Wait for the close. Don't anticipate." },
+  { timeframe: "5-Min", description: "Scalp precision. Quick in, quick out. Not for everyone." },
 ];
 
 export const PATIENCE_CANDLE_TYPES = [
-  { type: "hammer", direction: "bullish", description: "Small body, long lower wick at support" },
-  { type: "inverted_hammer", direction: "bullish", description: "Small body, long upper wick at support (buyers testing)" },
-  { type: "bullish_engulfing", direction: "bullish", description: "Green candle fully engulfs prior red candle at support" },
-  { type: "morning_star", direction: "bullish", description: "Three-candle reversal pattern at support" },
-  { type: "shooting_star", direction: "bearish", description: "Small body, long upper wick at resistance" },
-  { type: "hanging_man", direction: "bearish", description: "Small body, long lower wick at resistance (sellers testing)" },
-  { type: "bearish_engulfing", direction: "bearish", description: "Red candle fully engulfs prior green candle at resistance" },
-  { type: "evening_star", direction: "bearish", description: "Three-candle reversal pattern at resistance" },
+  { type: "hammer", direction: "bullish", description: "Hammer at support - buyers stepped in HARD. Long lower wick says 'we ain't going lower.'" },
+  { type: "inverted_hammer", direction: "bullish", description: "Inverted hammer at support - buyers testing. Could be reversal cooking." },
+  { type: "bullish_engulfing", direction: "bullish", description: "Engulfing green candle - bulls just swallowed the bears. Strong signal at support." },
+  { type: "morning_star", direction: "bullish", description: "Morning star - three-candle reversal. When you see this at support, PAY ATTENTION." },
+  { type: "shooting_star", direction: "bearish", description: "Shooting star at resistance - sellers rejected higher prices. Bears stepping in." },
+  { type: "hanging_man", direction: "bearish", description: "Hanging man at resistance - looks bullish but it's a trap. Sellers testing." },
+  { type: "bearish_engulfing", direction: "bearish", description: "Engulfing red candle - bears just ate the bulls for lunch. Strong signal at resistance." },
+  { type: "evening_star", direction: "bearish", description: "Evening star - three-candle reversal at resistance. The party's over for the bulls." },
 ];
 
 export const LEVEL_RULES = {
   howToDraw: [
-    "Use the 4-hour chart to identify levels with 2+ touches",
-    "Look for areas where price has reversed multiple times",
-    "Draw from the body, not the wicks (wicks are 'noise')",
-    "Focus on levels that trapped traders (big moves away)",
-    "PDH/PDL are always important",
-    "VWAP acts as a dynamic level",
+    "Use the 4-hour chart - find levels with 2+ touches. If price respects it TWICE, it's real.",
+    "Where did price REVERSE hard? Those are your key levels.",
+    "Draw from the BODIES, not the wicks. Wicks are noise, bodies show intent.",
+    "Levels that TRAPPED traders are gold - look for big moves away from a level.",
+    "PDH/PDL - yesterday's high and low. These are ALWAYS in play.",
+    "VWAP is your intraday dynamic level. Institutions use it. You should too.",
   ],
-  keyPrinciple: "Levels are zones, not exact prices. Give yourself a buffer of 0.5-1%",
+  keyPrinciple: "Levels are ZONES, not exact prices. Give yourself a 0.5-1% buffer. Don't get stopped out by a wick.",
 };
 
 export const SMA_200_RULES = {
-  corePrinciple: "The 200 SMA separates bulls from bears",
+  corePrinciple: "The 200 SMA is the LINE IN THE SAND. This is where bulls and bears go to war.",
   rules: [
-    "Price above 200 SMA = bullish bias, favor calls/longs",
-    "Price below 200 SMA = bearish bias, favor puts/shorts",
-    "Price at 200 SMA = key decision zone, wait for confirmation",
-    "The slope of the 200 SMA tells you the macro trend",
-    "Bounces off 200 SMA are high-probability entries",
+    "Above 200 SMA = bullish bias. Favor calls. Favor longs. Don't fight it.",
+    "Below 200 SMA = bearish bias. Favor puts. Favor shorts. Don't fight it.",
+    "AT the 200 SMA = KEY decision zone. This is where fortunes are made and lost. WAIT for confirmation.",
+    "The SLOPE matters - rising 200 SMA = macro uptrend. Falling = macro downtrend.",
+    "Bounces off 200 SMA are high-probability entries. Add this to your watchlist when price approaches.",
   ],
 };
 
 export const PROFIT_TARGETS = [
-  "First target: 1R (risk equals reward) - take 50% off",
-  "Second target: 2R - take 25% more off",
-  "Runner: Let the remaining 25% ride with a trailing stop",
+  "First target: 1R - RING THE REGISTER. Take 50% off. You're playing with house money now.",
+  "Second target: 2R - Take another 25% off. BANK THOSE PROFITS.",
+  "Runner: Let the remaining 25% ride with a trailing stop. This is where home runs happen.",
 ];
 
 export const PROFIT_TAKING_METHOD = [
-  "Always have a plan BEFORE entering the trade",
-  "Scale out in thirds: 1/3 at 1R, 1/3 at 2R, let 1/3 run",
-  "Move stop to breakeven after first target hit",
-  "Never turn a winning trade into a loser",
-  "It's okay to take profits early if something doesn't feel right",
+  "Have a plan BEFORE you enter. Know your targets. Know your stop. No plan = gambling.",
+  "Scale out in thirds: 1/3 at 1R, 1/3 at 2R, let 1/3 run. This is how you compound winners.",
+  "Stop to breakeven after first target. NEVER turn a winner into a loser.",
+  "It's okay to take profits early if something doesn't feel right. Trust your gut sometimes.",
+  "Greed kills accounts. A profit is a profit. Take what the market gives you.",
 ];
 
 export const VOLUME_RULES = {
   interpretations: [
-    { condition: "High volume at level", meaning: "Significant interest - watch for confirmation" },
-    { condition: "Low volume rally", meaning: "Weak move, likely to fail" },
-    { condition: "Volume spike on breakout", meaning: "Valid breakout, follow the move" },
-    { condition: "Volume climax", meaning: "Exhaustion - potential reversal" },
-    { condition: "Declining volume in trend", meaning: "Trend weakening, be cautious" },
+    { condition: "High volume at level", meaning: "BIG BOYS are interested. Watch for confirmation. Something's happening." },
+    { condition: "Low volume rally", meaning: "WEAK. This move is on fumes. Expect failure." },
+    { condition: "Volume spike on breakout", meaning: "VALID breakout. Real money is flowing. Follow the move." },
+    { condition: "Volume climax", meaning: "EXHAUSTION. Everyone's in. Nobody left to buy/sell. Reversal incoming." },
+    { condition: "Declining volume in trend", meaning: "Trend is TIRED. Interest is fading. Be cautious." },
   ],
 };
 
 export const MOMENTUM_RULES = {
   strongMomentum: [
-    "Wide-range candles",
-    "Consecutive green/red candles",
-    "Price staying at top/bottom of range",
-    "EMAs spreading apart",
+    "Wide-range candles - the market is MOVING",
+    "Consecutive same-color candles - momentum is BUILDING",
+    "Price staying at highs/lows of range - buyers/sellers in CONTROL",
+    "EMAs spreading apart - trend is ACCELERATING",
   ],
   weakMomentum: [
-    "Small-range (doji) candles",
-    "Mixed candle colors",
-    "Wicks getting longer",
-    "EMAs converging",
+    "Small doji candles - INDECISION. Nobody knows what's next.",
+    "Mixed candle colors - CHOP. Stay out.",
+    "Long wicks - REJECTION. Buyers and sellers fighting.",
+    "EMAs converging - trend is DYING. Prepare for reversal or range.",
   ],
 };
 
 export const GAP_STRATEGY = {
-  gapDown: "Wait for break of pre-market low. If reclaims = CALLS",
-  gapUp: "Wait for break of pre-market high. If fails = PUTS",
-  whyItWorks: "Gaps trap traders. The 'suckers' who chase get squeezed when price reverses.",
+  gapDown: "Gap down? Wait for break of pre-market low. If it RECLAIMS the gap = CALLS. Suckers got trapped short.",
+  gapUp: "Gap up? Wait for break of pre-market high. If it FAILS to hold = PUTS. Suckers got trapped long.",
+  whyItWorks: "Gaps trap traders. The amateurs chase, then get squeezed when smart money reverses it. Trade the REVERSAL, not the chase.",
 };
 
 export const ORB_RULES = {
-  definition: "Opening Range Breakout - the high and low of the first 15-30 minutes of trading",
+  definition: "Opening Range Breakout - first 15-30 minutes high/low. This is where the battlefield gets drawn.",
   uses: [
-    "Breakout above ORB high = bullish bias",
-    "Breakdown below ORB low = bearish bias",
-    "ORB range defines the day's initial value area",
-    "Failed ORB breakouts are high-probability reversals",
+    "Above ORB high = bullish bias for the day. Favor longs.",
+    "Below ORB low = bearish bias for the day. Favor shorts.",
+    "ORB range = the day's initial value area. Know these numbers.",
+    "FAILED ORB breakouts are GOLD. The trap is set, now fade it.",
   ],
 };
 
 export const DYNAMITE_LEVELS = {
   definition: "DYNAMITE = Day's low, Yesterday's high/low, Next day's open, All-time highs/lows, Monthly levels, Intraday pivots, Technical levels, Earnings/events",
-  additionalLevels: "PDH, PDL, PWH, PWL, VWAP, 200 SMA, 50 SMA, 20 EMA, 9 EMA",
+  additionalLevels: "PDH, PDL, PWH, PWL, VWAP, 200 SMA, 50 SMA, 20 EMA, 9 EMA - KNOW THESE NUMBERS",
   tradingRules: [
-    "More levels clustered = stronger zone",
-    "Trade the reaction, not the expectation",
-    "Wait for the candle to close before acting",
+    "More levels clustered = STRONGER zone. Confluence is KING.",
+    "Trade the REACTION at the level, not your expectation of what should happen.",
+    "WAIT for the candle to close. Patience pays the patient hand.",
   ],
 };
 
 export const REVERSAL_RULES = {
-  keyPrinciple: "Reversals require EXHAUSTION + LEVEL + PATIENCE CANDLE",
+  keyPrinciple: "Reversals need THREE things: EXHAUSTION + LEVEL + PATIENCE CANDLE. Miss one? Skip the trade.",
   requirements: [
-    "Price at a significant support/resistance level",
-    "Signs of exhaustion (volume climax, extended move)",
-    "Patience candle confirmation on the timeframe you trade",
-    "Preferably against a bigger timeframe trend for counter-trend",
+    "Price at a SIGNIFICANT level. Not some random line you drew.",
+    "EXHAUSTION - volume climax, extended move, everyone's on one side of the boat.",
+    "PATIENCE CANDLE - wait for confirmation. Don't anticipate reversals.",
+    "Counter-trend plays are LOWER probability. Size accordingly.",
   ],
-  successRate: "Lower probability than trend trades, but higher reward when they work",
+  successRate: "Reversals are harder than trend trades. But when they work? BIG rewards. Risk/reward makes up for lower hit rate.",
 };
 
 export const RISK_MANAGEMENT = {
   positionSizing: [
-    "Never risk more than 1-2% of your account on a single trade",
-    "Size based on your stop loss distance, not greed",
-    "If unsure, size DOWN not up",
-    "Bigger account = same percentage, bigger position",
+    "Never risk more than 1-2% of your account on ONE trade. This is NON-NEGOTIABLE.",
+    "Size based on your STOP LOSS distance, not your greed or your ego.",
+    "Unsure? SIZE DOWN. You can always add if you're right.",
+    "Bigger account = same percentage. The math scales. Don't get crazy.",
   ],
   riskReward: [
-    "Minimum 2:1 risk/reward ratio for most trades",
-    "A+ setups can justify 3:1 or better",
-    "Never take a trade below 1:1 R/R",
+    "Minimum 2:1 risk/reward. If you can't get 2:1, SKIP THE TRADE.",
+    "A+ setups justify 3:1 or better. This is where you make real money.",
+    "Below 1:1 R/R? That's not trading. That's gambling.",
   ],
   stopLossRules: [
-    "Stop goes on the OTHER side of the level/patience candle",
-    "Never move your stop further from entry",
-    "Mental stops will get you killed - always use hard stops",
+    "Stop goes on the OTHER SIDE of the level or patience candle. Logic, not hope.",
+    "NEVER move your stop further from entry. This is how accounts blow up.",
+    "Mental stops don't work. Use HARD stops. The market doesn't care about your feelings.",
   ],
 };
 
 export const COMMON_MISTAKES = [
-  { mistake: "Chasing entries", solution: "Wait for pullbacks to levels" },
-  { mistake: "No stop loss", solution: "Always define risk before entry" },
-  { mistake: "Overtrading", solution: "Quality over quantity - 1-3 trades max per day" },
-  { mistake: "Moving stop further", solution: "Accept the loss, move on" },
-  { mistake: "Averaging down", solution: "Cut losers, add to winners" },
-  { mistake: "Trading FOMO", solution: "Missed trades are not losses" },
-  { mistake: "Not taking profits", solution: "Follow your profit plan religiously" },
-  { mistake: "Fighting the trend", solution: "Trade WITH the trend, not against it" },
+  { mistake: "Chasing entries", solution: "STOP CHASING. Let the trade come to you. Wait for pullbacks to levels." },
+  { mistake: "No stop loss", solution: "No stop = gambling. ALWAYS define your risk BEFORE entry." },
+  { mistake: "Overtrading", solution: "Quality over quantity. 1-3 good trades a DAY. That's it. More isn't better." },
+  { mistake: "Moving stop further", solution: "DON'T BE A HERO. Accept the loss. Move on. Live to trade another day." },
+  { mistake: "Averaging down", solution: "Adding to losers is how accounts die. CUT losers, ADD to winners." },
+  { mistake: "Trading FOMO", solution: "Missed trades are NOT losses. There's ALWAYS another play." },
+  { mistake: "Not taking profits", solution: "Greed kills. Follow your profit plan. Ring the register." },
+  { mistake: "Fighting the trend", solution: "The trend is your FRIEND. Stop fighting the river." },
+  { mistake: "Revenge trading", solution: "Lost money? Walk away. Revenge trading doubles your losses." },
+  { mistake: "No trade plan", solution: "No plan = no edge. Know your entry, stop, and targets BEFORE you click." },
 ];
