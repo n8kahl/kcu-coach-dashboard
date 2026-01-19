@@ -17,6 +17,12 @@ import { ReplayController, useReplayState } from '@/components/practice/replay-c
 import { SkillExercises } from '@/components/practice/skill-exercises';
 import { cn } from '@/lib/utils';
 import { usePageContext } from '@/components/ai';
+import { Tooltip } from '@/components/ui/tooltip';
+import {
+  PracticePageSkeleton,
+  ScenarioChartSkeleton,
+  ScenarioListSkeleton,
+} from '@/components/practice/PracticeSkeletons';
 import {
   Target,
   TrendingUp,
@@ -616,9 +622,18 @@ export default function PracticePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-primary)]" />
-      </div>
+      <>
+        <Header
+          title="Practice Simulator"
+          subtitle="Master the LTP framework through interactive scenarios"
+          breadcrumbs={[{ label: 'Practice' }]}
+        />
+        <PageShell>
+          <PageSection>
+            <PracticePageSkeleton />
+          </PageSection>
+        </PageShell>
+      </>
     );
   }
 
@@ -915,8 +930,8 @@ export default function PracticePage() {
           <PageSection className="lg:col-span-3">
             <Card>
               {scenarioLoading ? (
-                <CardContent className="py-20 text-center">
-                  <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-primary)] mx-auto" />
+                <CardContent className="p-6">
+                  <ScenarioChartSkeleton />
                 </CardContent>
               ) : selectedScenario ? (
                 <>
@@ -1024,45 +1039,48 @@ export default function PracticePage() {
                     {/* Tools Toolbar */}
                     <div className="flex items-center gap-2 mb-4 pb-4 border-b border-[var(--border-primary)]">
                       <span className="text-xs text-[var(--text-tertiary)] mr-2">Tools:</span>
-                      <button
-                        onClick={() => setRightPanelTab(rightPanelTab === 'paper_trading' ? 'none' : 'paper_trading')}
-                        className={cn(
-                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
-                          rightPanelTab === 'paper_trading'
-                            ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
-                        )}
-                        title="Practice with simulated $25,000 account"
-                      >
-                        <Wallet className="w-3.5 h-3.5" />
-                        Paper Trading
-                      </button>
-                      <button
-                        onClick={() => setRightPanelTab(rightPanelTab === 'options' ? 'none' : 'options')}
-                        className={cn(
-                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
-                          rightPanelTab === 'options'
-                            ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
-                        )}
-                        title="View options chain with Greeks (0DTE supported)"
-                      >
-                        <Layers className="w-3.5 h-3.5" />
-                        Options Chain
-                      </button>
-                      <button
-                        onClick={() => setRightPanelTab(rightPanelTab === 'exercises' ? 'none' : 'exercises')}
-                        className={cn(
-                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
-                          rightPanelTab === 'exercises'
-                            ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
-                        )}
-                        title="Targeted exercises to improve specific skills"
-                      >
-                        <GraduationCap className="w-3.5 h-3.5" />
-                        Skill Exercises
-                      </button>
+                      <Tooltip content="Practice with simulated $25,000 account" side="bottom">
+                        <button
+                          onClick={() => setRightPanelTab(rightPanelTab === 'paper_trading' ? 'none' : 'paper_trading')}
+                          className={cn(
+                            'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
+                            rightPanelTab === 'paper_trading'
+                              ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                              : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
+                          )}
+                        >
+                          <Wallet className="w-3.5 h-3.5" />
+                          Paper Trading
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="View options chain with Greeks (0DTE supported)" side="bottom">
+                        <button
+                          onClick={() => setRightPanelTab(rightPanelTab === 'options' ? 'none' : 'options')}
+                          className={cn(
+                            'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
+                            rightPanelTab === 'options'
+                              ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                              : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
+                          )}
+                        >
+                          <Layers className="w-3.5 h-3.5" />
+                          Options Chain
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="Targeted exercises to improve specific skills" side="bottom">
+                        <button
+                          onClick={() => setRightPanelTab(rightPanelTab === 'exercises' ? 'none' : 'exercises')}
+                          className={cn(
+                            'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
+                            rightPanelTab === 'exercises'
+                              ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                              : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
+                          )}
+                        >
+                          <GraduationCap className="w-3.5 h-3.5" />
+                          Skill Exercises
+                        </button>
+                      </Tooltip>
                     </div>
 
                     {/* Right Panel Content (Collapsible with animation) */}
