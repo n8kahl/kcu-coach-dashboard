@@ -9,11 +9,13 @@
  * - Options chain for 0DTE practice
  * - Multi-timeframe grid view
  * - Daily challenges and XP system
+ * - AI-powered feedback and analysis
  */
 
-// Chart Components
+// Core Chart Components
 export { PracticeChart } from './practice-chart';
 export { ChartGrid } from './ChartGrid';
+export { AdvancedPracticeChart } from './AdvancedPracticeChart';
 
 // Drawing Tools
 export { DrawingTools, useDrawingTools } from './drawing-tools';
@@ -27,6 +29,18 @@ export type {
   FibonacciData,
   TextData,
 } from './drawing-tools';
+
+// Decision and Analysis Components
+export { DecisionPanel, type TradePlan } from './DecisionPanel';
+export { ComparisonPanel } from './ComparisonPanel';
+export { AICoachFeedback, type AIFeedback } from './AICoachFeedback';
+
+// Context and Information Components
+export { ContextPanel, ContextBadges, type MarketContext, type LTPAnalysis } from './ContextPanel';
+export { MarketContextCard, type ScenarioContext } from './MarketContextCard';
+
+// Instructions and guidance components
+export { InstructionsPanel, DecisionGuide, KeyboardShortcuts } from './InstructionsPanel';
 
 // Paper Trading
 export { PaperTradingPanel } from './paper-trading-panel';
@@ -47,6 +61,11 @@ export type {
   ExerciseResult,
 } from './skill-exercises';
 
-// Gamification
+// Gamification Components
 export { DailyChallenges } from './DailyChallenge';
+export { AchievementPopup, AchievementBadge, AchievementList, type Achievement } from './AchievementPopup';
+export { Leaderboard, MiniLeaderboard } from './Leaderboard';
 export { WinCard } from './win-card';
+
+// Loading Skeletons
+export * from './LoadingSkeletons';
