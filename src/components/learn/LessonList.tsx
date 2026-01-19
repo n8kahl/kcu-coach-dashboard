@@ -71,7 +71,7 @@ export function LessonList({
                 href={
                   isLocked
                     ? '#'
-                    : `/learning/${courseSlug}/${moduleSlug}/${lesson.slug}`
+                    : `/learn/${courseSlug}/${moduleSlug}/${lesson.slug}`
                 }
                 className={isLocked ? 'cursor-not-allowed' : ''}
               >
