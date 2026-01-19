@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { StatsOverview } from '@/components/dashboard/stats-overview';
 import { TradeJournalTable } from '@/components/dashboard/trade-journal-table';
 import { TradeWinCard } from '@/components/cards/win-card';
+import { TradeEntryModal } from '@/components/trade-journal';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/toast';
 import { Plus, Download, Loader2 } from 'lucide-react';
@@ -220,8 +221,9 @@ export default function JournalPage() {
 
         {/* Trade Form Modal */}
         {showTradeForm && (
-          <TradeFormModal
+          <TradeEntryModal
             onClose={() => setShowTradeForm(false)}
+            recentSymbols={Array.from(new Set(trades.slice(0, 10).map(t => t.symbol)))}
             onSubmit={async (trade) => {
               try {
                 const res = await fetch('/api/trades', {
@@ -467,180 +469,3 @@ function AIInsightsSection({
   );
 }
 
-// Trade Form Modal Component
-function TradeFormModal({
-  onClose,
-  onSubmit,
-}: {
-  onClose: () => void;
-  onSubmit: (trade: Partial<TradeEntry>) => Promise<void>;
-}) {
-  const [submitting, setSubmitting] = useState(false);
-  const [formData, setFormData] = useState({
-    symbol: 'SPY',
-    direction: 'long' as 'long' | 'short',
-    entry_price: '',
-    exit_price: '',
-    quantity: '1',
-    entry_time: new Date().toISOString().slice(0, 16),
-    exit_time: new Date().toISOString().slice(0, 16),
-    setup_type: 'breakout',
-    had_level: false,
-    had_trend: false,
-    had_patience_candle: false,
-    followed_rules: false,
-    notes: '',
-  });
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-
-    const entryPrice = parseFloat(formData.entry_price);
-    const exitPrice = parseFloat(formData.exit_price);
-    const quantity = parseInt(formData.quantity);
-
-    const pnl = formData.direction === 'long'
-      ? (exitPrice - entryPrice) * quantity
-      : (entryPrice - exitPrice) * quantity;
-    const pnlPercent = ((exitPrice - entryPrice) / entryPrice) * 100 * (formData.direction === 'long' ? 1 : -1);
-
-    await onSubmit({
-      symbol: formData.symbol,
-      direction: formData.direction,
-      entry_price: entryPrice,
-      exit_price: exitPrice,
-      shares: quantity, // API accepts both 'shares' and 'quantity'
-      entry_time: formData.entry_time,
-      exit_time: formData.exit_time,
-      setup_type: formData.setup_type,
-      notes: formData.notes,
-      pnl,
-      pnl_percent: pnlPercent,
-      // LTP checklist fields - used by API to compute LTP grade
-      had_level: formData.had_level,
-      had_trend: formData.had_trend,
-      had_patience_candle: formData.had_patience_candle,
-      followed_rules: formData.followed_rules,
-    });
-
-    setSubmitting(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <CardHeader title="Log Trade" />
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Symbol & Direction */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Symbol</label>
-                <input
-                  type="text"
-                  value={formData.symbol}
-                  onChange={(e) => setFormData(p => ({ ...p, symbol: e.target.value.toUpperCase() }))}
-                  className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-[var(--text-primary)] focus:border-[var(--accent-primary)] outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Direction</label>
-                <select
-                  value={formData.direction}
-                  onChange={(e) => setFormData(p => ({ ...p, direction: e.target.value as 'long' | 'short' }))}
-                  className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-[var(--text-primary)] focus:border-[var(--accent-primary)] outline-none"
-                >
-                  <option value="long">Long</option>
-                  <option value="short">Short</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Prices */}
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Entry Price</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.entry_price}
-                  onChange={(e) => setFormData(p => ({ ...p, entry_price: e.target.value }))}
-                  className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-[var(--text-primary)] focus:border-[var(--accent-primary)] outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Exit Price</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.exit_price}
-                  onChange={(e) => setFormData(p => ({ ...p, exit_price: e.target.value }))}
-                  className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-[var(--text-primary)] focus:border-[var(--accent-primary)] outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Quantity</label>
-                <input
-                  type="number"
-                  value={formData.quantity}
-                  onChange={(e) => setFormData(p => ({ ...p, quantity: e.target.value }))}
-                  className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-[var(--text-primary)] focus:border-[var(--accent-primary)] outline-none"
-                  required
-                />
-              </div>
-            </div>
-
-            {/* LTP Checklist */}
-            <div>
-              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">LTP Checklist</label>
-              <div className="space-y-2">
-                {[
-                  { key: 'had_level', label: 'Had a key level (support/resistance)' },
-                  { key: 'had_trend', label: 'Traded with the trend' },
-                  { key: 'had_patience_candle', label: 'Waited for patience candle' },
-                  { key: 'followed_rules', label: 'Followed all trading rules' },
-                ].map(item => (
-                  <label key={item.key} className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                    <input
-                      type="checkbox"
-                      checked={formData[item.key as keyof typeof formData] as boolean}
-                      onChange={(e) => setFormData(p => ({ ...p, [item.key]: e.target.checked }))}
-                      className="w-4 h-4 accent-[var(--accent-primary)]"
-                    />
-                    {item.label}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* Notes */}
-            <div>
-              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Notes</label>
-              <textarea
-                value={formData.notes}
-                onChange={(e) => setFormData(p => ({ ...p, notes: e.target.value }))}
-                rows={3}
-                className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-[var(--text-primary)] focus:border-[var(--accent-primary)] outline-none resize-none"
-                placeholder="What did you learn from this trade?"
-              />
-            </div>
-
-            {/* Buttons */}
-            <div className="flex gap-3 pt-2">
-              <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
-                Cancel
-              </Button>
-              <Button type="submit" variant="primary" className="flex-1" disabled={submitting}>
-                {submitting ? 'Saving...' : 'Save Trade'}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
