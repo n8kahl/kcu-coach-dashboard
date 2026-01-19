@@ -7,6 +7,8 @@
  * Usage:
  *   npx ts-node scripts/migrate-videos.ts --path="/path/to/videos" --dry-run
  *   npx ts-node scripts/migrate-videos.ts --path="/path/to/videos" --course="KCU Trading Mastery"
+ *   npx ts-node scripts/migrate-videos.ts --check-quota  # Check current usage
+ *   npx ts-node scripts/migrate-videos.ts --path="/path/to/videos" --resume  # Resume from last failure
  *
  * Environment variables required:
  *   CLOUDFLARE_ACCOUNT_ID
@@ -18,6 +20,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
+import * as tus from 'tus-js-client';
 
 // Load environment variables from .env.local
 dotenv.config({ path: '.env.local' });
@@ -60,6 +63,91 @@ const VIDEO_BASE_PATH = getArg('path') || '/path/to/Videos - English';
 const COURSE_TITLE = getArg('course') || 'KCU Trading Mastery';
 const DRY_RUN = args.includes('--dry-run');
 const SKIP_UPLOAD = args.includes('--skip-upload');
+const CHECK_QUOTA = args.includes('--check-quota');
+const RESUME = args.includes('--resume');
+
+// File size threshold for TUS uploads (200MB)
+const TUS_THRESHOLD_BYTES = 200 * 1024 * 1024;
+
+// Progress tracking file
+const PROGRESS_FILE = path.join(process.cwd(), 'scripts', '.migration-progress.json');
+
+interface MigrationProgress {
+  lastProcessedVideo: string;
+  successfulUploads: string[];
+  failedUploads: { file: string; error: string }[];
+  startedAt: string;
+  lastUpdated: string;
+}
+
+function loadProgress(): MigrationProgress | null {
+  try {
+    if (fs.existsSync(PROGRESS_FILE)) {
+      return JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf-8'));
+    }
+  } catch (e) {
+    console.warn('Could not load progress file, starting fresh');
+  }
+  return null;
+}
+
+function saveProgress(progress: MigrationProgress): void {
+  progress.lastUpdated = new Date().toISOString();
+  fs.writeFileSync(PROGRESS_FILE, JSON.stringify(progress, null, 2));
+}
+
+async function checkCloudflareQuota(): Promise<{ usedMinutes: number; allocatedMinutes: number; remainingMinutes: number } | null> {
+  try {
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/stream/storage-usage`,
+      {
+        headers: {
+          'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      console.error('Failed to fetch quota info:', await response.text());
+      return null;
+    }
+
+    const data = await response.json();
+    const result = data.result;
+
+    // Get total minutes from videos
+    const videosResponse = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/stream?per_page=1000`,
+      {
+        headers: {
+          'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+        },
+      }
+    );
+
+    if (!videosResponse.ok) {
+      console.error('Failed to fetch videos:', await videosResponse.text());
+      return null;
+    }
+
+    const videosData = await videosResponse.json();
+    const totalDuration = videosData.result?.reduce((acc: number, v: any) => acc + (v.duration || 0), 0) || 0;
+    const usedMinutes = Math.round(totalDuration / 60);
+
+    // The allocated minutes would need to be fetched from account settings
+    // For now, we'll use the error message value if available, or estimate
+    const allocatedMinutes = 11000; // Default from your error
+
+    return {
+      usedMinutes,
+      allocatedMinutes,
+      remainingMinutes: allocatedMinutes - usedMinutes,
+    };
+  } catch (error) {
+    console.error('Error checking quota:', error);
+    return null;
+  }
+}
 
 async function discoverVideos(basePath: string): Promise<VideoFile[]> {
   const videos: VideoFile[] = [];
@@ -152,10 +240,216 @@ async function discoverVideos(basePath: string): Promise<VideoFile[]> {
   });
 }
 
+// Upload large files using TUS (resumable upload) protocol
+async function uploadWithTus(
+  filePath: string,
+  metadata: { name: string; module: string }
+): Promise<{ uid: string; playbackUrl: string; duration: number }> {
+  return new Promise((resolve, reject) => {
+    const fileBuffer = fs.readFileSync(filePath);
+    const fileSize = fs.statSync(filePath).size;
+
+    const upload = new tus.Upload(fileBuffer, {
+      endpoint: `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/stream`,
+      headers: {
+        'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+      },
+      chunkSize: 50 * 1024 * 1024, // 50MB chunks
+      retryDelays: [0, 1000, 3000, 5000],
+      metadata: {
+        name: metadata.name,
+        filetype: 'video/mp4',
+        requiresignedurls: 'false',
+      },
+      uploadSize: fileSize,
+      onError: (error) => {
+        reject(error);
+      },
+      onProgress: (bytesUploaded, bytesTotal) => {
+        const percentage = ((bytesUploaded / bytesTotal) * 100).toFixed(1);
+        process.stdout.write(`\r    Uploading: ${percentage}%`);
+      },
+      onSuccess: async () => {
+        console.log('');
+        // Extract video UID from the upload URL
+        // Cloudflare returns URL like: https://api.cloudflare.com/.../stream/<uid>
+        const uploadUrl = upload.url;
+        const uidMatch = uploadUrl?.match(/\/stream\/([a-f0-9]+)/) ||
+                        uploadUrl?.match(/([a-f0-9]{32})/);
+        const videoUid = uidMatch?.[1];
+
+        if (!videoUid) {
+          // Try to get from response headers
+          console.log('    Upload URL:', uploadUrl);
+          reject(new Error('Could not extract video UID from upload URL'));
+          return;
+        }
+
+        // Wait for processing
+        console.log('    Waiting for video processing...');
+        let attempts = 0;
+        let videoDetails = null;
+
+        while (attempts < 60) { // Increase attempts for large files
+          await new Promise(r => setTimeout(r, 3000));
+
+          try {
+            const detailsResponse = await fetch(
+              `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/stream/${videoUid}`,
+              {
+                headers: {
+                  'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+                },
+              }
+            );
+
+            if (detailsResponse.ok) {
+              const data = await detailsResponse.json();
+              const state = data.result?.status?.state;
+              if (state === 'ready') {
+                videoDetails = data.result;
+                break;
+              } else if (state === 'error') {
+                reject(new Error(`Video processing failed: ${data.result?.status?.errorReasonText || 'Unknown error'}`));
+                return;
+              }
+              // Still processing, continue waiting
+            }
+          } catch (e) {
+            // Retry on network errors
+          }
+
+          attempts++;
+        }
+
+        resolve({
+          uid: videoUid,
+          playbackUrl: `https://customer-${CLOUDFLARE_ACCOUNT_ID}.cloudflarestream.com/${videoUid}/manifest/video.m3u8`,
+          duration: videoDetails?.duration || 0,
+        });
+      },
+    });
+
+    upload.start();
+  });
+}
+
+// Upload smaller files using direct upload API
+async function uploadDirect(
+  filePath: string,
+  metadata: { name: string; module: string }
+): Promise<{ uid: string; playbackUrl: string; duration: number }> {
+  const fileBuffer = fs.readFileSync(filePath);
+  const fileSize = fs.statSync(filePath).size;
+
+  // Create upload using direct upload API
+  const createResponse = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/stream/direct_upload`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        maxDurationSeconds: 7200, // 2 hours max
+        meta: {
+          name: metadata.name,
+          module: metadata.module,
+        },
+      }),
+    }
+  );
+
+  if (!createResponse.ok) {
+    const error = await createResponse.text();
+    throw new Error(`Failed to create upload URL: ${error}`);
+  }
+
+  const { result } = await createResponse.json();
+  const uploadUrl = result.uploadURL;
+  const videoUid = result.uid;
+
+  // Upload the file using the provided URL
+  const uploadResponse = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'video/mp4',
+      'Content-Length': fileSize.toString(),
+    },
+    body: fileBuffer,
+  });
+
+  if (!uploadResponse.ok) {
+    throw new Error(`Failed to upload video: ${uploadResponse.statusText}`);
+  }
+
+  // Wait for processing and get video details
+  console.log('    Waiting for video processing...');
+  let attempts = 0;
+  let videoDetails = null;
+
+  while (attempts < 30) {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    const detailsResponse = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/stream/${videoUid}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+        },
+      }
+    );
+
+    if (detailsResponse.ok) {
+      const data = await detailsResponse.json();
+      if (data.result?.status?.state === 'ready') {
+        videoDetails = data.result;
+        break;
+      }
+    }
+
+    attempts++;
+  }
+
+  if (!videoDetails) {
+    console.warn(`    Warning: Video ${videoUid} still processing after timeout`);
+  }
+
+  return {
+    uid: videoUid,
+    playbackUrl: `https://customer-${CLOUDFLARE_ACCOUNT_ID}.cloudflarestream.com/${videoUid}/manifest/video.m3u8`,
+    duration: videoDetails?.duration || 0,
+  };
+}
+
+interface UploadError {
+  type: 'quota_exceeded' | 'payload_too_large' | 'network' | 'unknown';
+  message: string;
+}
+
+function parseUploadError(error: any): UploadError {
+  const errorStr = error?.message || String(error);
+
+  if (errorStr.includes('10011') || errorStr.includes('Storage capacity exceeded') || errorStr.includes('exceeded your allocated')) {
+    return { type: 'quota_exceeded', message: 'Cloudflare Stream storage quota exceeded' };
+  }
+
+  if (errorStr.includes('Payload Too Large') || errorStr.includes('413')) {
+    return { type: 'payload_too_large', message: 'File too large for direct upload' };
+  }
+
+  if (errorStr.includes('ENOTFOUND') || errorStr.includes('ETIMEDOUT') || errorStr.includes('fetch failed')) {
+    return { type: 'network', message: 'Network error during upload' };
+  }
+
+  return { type: 'unknown', message: errorStr };
+}
+
 async function uploadToCloudflareStream(
   filePath: string,
   metadata: { name: string; module: string }
-): Promise<{ uid: string; playbackUrl: string; duration: number } | null> {
+): Promise<{ uid: string; playbackUrl: string; duration: number; error?: UploadError } | null> {
   if (SKIP_UPLOAD) {
     console.log(`    [SKIP] Would upload: ${metadata.name}`);
     return {
@@ -166,91 +460,33 @@ async function uploadToCloudflareStream(
   }
 
   try {
-    // Read the file
-    const fileBuffer = fs.readFileSync(filePath);
     const fileSize = fs.statSync(filePath).size;
+    const fileSizeMB = (fileSize / 1024 / 1024).toFixed(1);
 
-    // Create upload using direct upload API
-    const createResponse = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/stream/direct_upload`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          maxDurationSeconds: 7200, // 2 hours max
-          meta: {
-            name: metadata.name,
-            module: metadata.module,
-          },
-        }),
+    // Use TUS for files larger than 200MB
+    if (fileSize > TUS_THRESHOLD_BYTES) {
+      console.log(`    Using TUS upload for large file (${fileSizeMB} MB)...`);
+      return await uploadWithTus(filePath, metadata);
+    } else {
+      console.log(`    Using direct upload (${fileSizeMB} MB)...`);
+      return await uploadDirect(filePath, metadata);
+    }
+  } catch (error: any) {
+    const parsedError = parseUploadError(error);
+    console.error(`    Error uploading to Cloudflare: ${parsedError.message}`);
+
+    // For payload too large errors, try TUS as fallback
+    if (parsedError.type === 'payload_too_large') {
+      console.log(`    Retrying with TUS upload...`);
+      try {
+        return await uploadWithTus(filePath, metadata);
+      } catch (tusError) {
+        const tusErrorParsed = parseUploadError(tusError);
+        return { uid: '', playbackUrl: '', duration: 0, error: tusErrorParsed };
       }
-    );
-
-    if (!createResponse.ok) {
-      const error = await createResponse.text();
-      throw new Error(`Failed to create upload URL: ${error}`);
     }
 
-    const { result } = await createResponse.json();
-    const uploadUrl = result.uploadURL;
-    const videoUid = result.uid;
-
-    // Upload the file using the provided URL
-    const uploadResponse = await fetch(uploadUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'video/mp4',
-        'Content-Length': fileSize.toString(),
-      },
-      body: fileBuffer,
-    });
-
-    if (!uploadResponse.ok) {
-      throw new Error(`Failed to upload video: ${uploadResponse.statusText}`);
-    }
-
-    // Wait for processing and get video details
-    let attempts = 0;
-    let videoDetails = null;
-
-    while (attempts < 30) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      const detailsResponse = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/stream/${videoUid}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
-          },
-        }
-      );
-
-      if (detailsResponse.ok) {
-        const data = await detailsResponse.json();
-        if (data.result?.status?.state === 'ready') {
-          videoDetails = data.result;
-          break;
-        }
-      }
-
-      attempts++;
-    }
-
-    if (!videoDetails) {
-      console.warn(`    Warning: Video ${videoUid} still processing after timeout`);
-    }
-
-    return {
-      uid: videoUid,
-      playbackUrl: `https://customer-${CLOUDFLARE_ACCOUNT_ID}.cloudflarestream.com/${videoUid}/manifest/video.m3u8`,
-      duration: videoDetails?.duration || 0,
-    };
-  } catch (error) {
-    console.error(`    Error uploading to Cloudflare:`, error);
-    return null;
+    return { uid: '', playbackUrl: '', duration: 0, error: parsedError };
   }
 }
 
@@ -258,10 +494,42 @@ async function migrateVideos() {
   console.log('='.repeat(60));
   console.log('KCU Video Migration Script');
   console.log('='.repeat(60));
+
+  // Handle quota check mode
+  if (CHECK_QUOTA) {
+    console.log('\nChecking Cloudflare Stream quota...\n');
+
+    if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) {
+      console.error('Error: CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are required');
+      process.exit(1);
+    }
+
+    const quota = await checkCloudflareQuota();
+    if (quota) {
+      console.log('Cloudflare Stream Usage:');
+      console.log(`  Used:      ${quota.usedMinutes.toLocaleString()} minutes`);
+      console.log(`  Allocated: ${quota.allocatedMinutes.toLocaleString()} minutes`);
+      console.log(`  Remaining: ${quota.remainingMinutes.toLocaleString()} minutes`);
+
+      if (quota.remainingMinutes <= 0) {
+        console.log('\n⚠️  WARNING: You have exceeded your storage quota!');
+        console.log('   You need to either:');
+        console.log('   1. Upgrade your Cloudflare Stream plan');
+        console.log('   2. Delete existing videos to free up space');
+      } else if (quota.remainingMinutes < 100) {
+        console.log('\n⚠️  WARNING: You are running low on storage quota!');
+      }
+    } else {
+      console.log('Could not fetch quota information');
+    }
+    return;
+  }
+
   console.log(`\nSource: ${VIDEO_BASE_PATH}`);
   console.log(`Course: ${COURSE_TITLE}`);
   console.log(`Dry Run: ${DRY_RUN}`);
-  console.log(`Skip Upload: ${SKIP_UPLOAD}\n`);
+  console.log(`Skip Upload: ${SKIP_UPLOAD}`);
+  console.log(`Resume Mode: ${RESUME}\n`);
 
   // Validate environment
   if (!DRY_RUN && !SKIP_UPLOAD) {
@@ -269,11 +537,38 @@ async function migrateVideos() {
       console.error('Error: CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are required');
       process.exit(1);
     }
+
+    // Check quota before starting
+    console.log('Checking Cloudflare quota...');
+    const quota = await checkCloudflareQuota();
+    if (quota) {
+      console.log(`  Current usage: ${quota.usedMinutes.toLocaleString()}/${quota.allocatedMinutes.toLocaleString()} minutes`);
+      if (quota.remainingMinutes <= 0) {
+        console.error('\n❌ ERROR: Storage quota exceeded!');
+        console.error('   You have used all your allocated storage minutes.');
+        console.error('   Please upgrade your plan or delete existing videos before continuing.');
+        console.error('\n   To check current usage: npx ts-node scripts/migrate-videos.ts --check-quota');
+        process.exit(1);
+      }
+    }
   }
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
     console.error('Error: Supabase credentials are required');
     process.exit(1);
+  }
+
+  // Load previous progress if resuming
+  let previousProgress: MigrationProgress | null = null;
+  if (RESUME) {
+    previousProgress = loadProgress();
+    if (previousProgress) {
+      console.log(`Resuming from previous run (started ${previousProgress.startedAt})`);
+      console.log(`  Previously successful: ${previousProgress.successfulUploads.length}`);
+      console.log(`  Previously failed: ${previousProgress.failedUploads.length}\n`);
+    } else {
+      console.log('No previous progress found, starting fresh\n');
+    }
   }
 
   // Initialize Supabase client
@@ -343,8 +638,20 @@ async function migrateVideos() {
   // Process each module
   let moduleOrder = 0;
   const results: MigrationResult[] = [];
+  let quotaExceeded = false;
+
+  // Initialize or continue progress tracking
+  const progress: MigrationProgress = previousProgress || {
+    lastProcessedVideo: '',
+    successfulUploads: [],
+    failedUploads: [],
+    startedAt: new Date().toISOString(),
+    lastUpdated: new Date().toISOString(),
+  };
 
   for (const [moduleNumber, moduleVideos] of Array.from(moduleGroups.entries())) {
+    if (quotaExceeded) break;
+
     const firstVideo = moduleVideos[0];
     console.log(`\nProcessing Module ${moduleNumber}: ${firstVideo.moduleName}`);
     console.log('-'.repeat(50));
@@ -372,6 +679,18 @@ async function migrateVideos() {
     // Process each video
     let lessonOrder = 0;
     for (const video of moduleVideos) {
+      if (quotaExceeded) break;
+
+      const videoKey = `${video.moduleNumber}/${video.lessonNumber}`;
+
+      // Skip if already successfully uploaded in a previous run
+      if (RESUME && progress.successfulUploads.includes(videoKey)) {
+        console.log(`\n  ${video.lessonNumber} ${video.title}`);
+        console.log(`    [SKIPPED] Already uploaded in previous run`);
+        lessonOrder++;
+        continue;
+      }
+
       console.log(`\n  ${video.lessonNumber} ${video.title}`);
 
       // Upload to Cloudflare Stream
@@ -381,11 +700,38 @@ async function migrateVideos() {
         module: video.moduleName,
       });
 
-      if (!streamResult) {
+      // Check for errors
+      if (!streamResult || streamResult.error) {
+        const errorInfo = streamResult?.error || { type: 'unknown', message: 'Unknown error' };
+
+        // Handle quota exceeded - stop processing
+        if (errorInfo.type === 'quota_exceeded') {
+          console.error('\n❌ QUOTA EXCEEDED - Stopping migration');
+          console.error('   You need to upgrade your Cloudflare Stream plan or delete existing videos.');
+          quotaExceeded = true;
+          progress.failedUploads.push({ file: videoKey, error: errorInfo.message });
+          saveProgress(progress);
+          break;
+        }
+
+        results.push({
+          success: false,
+          error: errorInfo.message,
+        });
+        progress.failedUploads.push({ file: videoKey, error: errorInfo.message });
+        progress.lastProcessedVideo = videoKey;
+        saveProgress(progress);
+        continue;
+      }
+
+      if (!streamResult.uid) {
         results.push({
           success: false,
           error: 'Failed to upload to Cloudflare Stream',
         });
+        progress.failedUploads.push({ file: videoKey, error: 'Failed to upload' });
+        progress.lastProcessedVideo = videoKey;
+        saveProgress(progress);
         continue;
       }
 
@@ -462,8 +808,16 @@ async function migrateVideos() {
         videoUid: streamResult.uid,
         videoUrl: streamResult.playbackUrl,
       });
+
+      // Track successful upload
+      progress.successfulUploads.push(videoKey);
+      progress.lastProcessedVideo = videoKey;
+      saveProgress(progress);
     }
   }
+
+  // Save final progress
+  saveProgress(progress);
 
   // Summary
   console.log('\n' + '='.repeat(60));
@@ -473,18 +827,57 @@ async function migrateVideos() {
   const successful = results.filter(r => r.success).length;
   const failed = results.filter(r => !r.success).length;
 
-  console.log(`Total videos processed: ${results.length}`);
-  console.log(`Successful: ${successful}`);
-  console.log(`Failed: ${failed}`);
+  console.log(`\nThis session:`);
+  console.log(`  Videos processed: ${results.length}`);
+  console.log(`  Successful: ${successful}`);
+  console.log(`  Failed: ${failed}`);
 
-  if (failed > 0) {
+  console.log(`\nOverall progress:`);
+  console.log(`  Total successful uploads: ${progress.successfulUploads.length}`);
+  console.log(`  Total failed: ${progress.failedUploads.length}`);
+
+  if (quotaExceeded) {
+    console.log('\n' + '='.repeat(60));
+    console.log('⚠️  MIGRATION STOPPED DUE TO QUOTA EXCEEDED');
+    console.log('='.repeat(60));
+    console.log('\nTo continue, you need to:');
+    console.log('  1. Upgrade your Cloudflare Stream plan, OR');
+    console.log('  2. Delete existing videos to free up space');
+    console.log('\nOnce you have more capacity, resume with:');
+    console.log('  npx ts-node scripts/migrate-videos.ts --path="..." --resume');
+  } else if (failed > 0) {
     console.log('\nFailed uploads:');
-    results.filter(r => !r.success).forEach(r => {
-      console.log(`  - ${r.error}`);
+
+    // Group failures by error type
+    const errorGroups = new Map<string, string[]>();
+    progress.failedUploads.forEach(f => {
+      if (!errorGroups.has(f.error)) {
+        errorGroups.set(f.error, []);
+      }
+      errorGroups.get(f.error)!.push(f.file);
     });
+
+    errorGroups.forEach((files, error) => {
+      console.log(`\n  ${error}:`);
+      files.slice(0, 5).forEach(f => console.log(`    - ${f}`));
+      if (files.length > 5) {
+        console.log(`    ... and ${files.length - 5} more`);
+      }
+    });
+
+    console.log('\nTo retry failed videos, run:');
+    console.log('  npx ts-node scripts/migrate-videos.ts --path="..." --resume');
+  } else {
+    console.log('\n✅ Migration complete!');
+
+    // Clean up progress file on successful completion
+    if (fs.existsSync(PROGRESS_FILE)) {
+      fs.unlinkSync(PROGRESS_FILE);
+      console.log('Progress file cleaned up.');
+    }
   }
 
-  console.log('\nMigration complete!');
+  console.log(`\nProgress saved to: ${PROGRESS_FILE}`);
 }
 
 // Run
