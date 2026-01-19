@@ -20,6 +20,7 @@ import { DecisionPanel, TradePlan } from '@/components/practice/DecisionPanel';
 import { ComparisonPanel } from '@/components/practice/ComparisonPanel';
 import { AICoachFeedback, AIFeedback } from '@/components/practice/AICoachFeedback';
 import { MarketContextCard, ScenarioContext } from '@/components/practice/MarketContextCard';
+import { InstructionsPanel, DecisionGuide, KeyboardShortcuts } from '@/components/practice/InstructionsPanel';
 import { PaperTradingPanel } from '@/components/practice/paper-trading-panel';
 import { OptionsChain } from '@/components/practice/options-chain';
 import { ReplayController, useReplayState } from '@/components/practice/replay-controller';
@@ -436,8 +437,7 @@ export default function PracticePage() {
         low: orbLow !== Infinity ? orbLow : lastCandle?.l || 0,
         range: orbHigh && orbLow !== Infinity ? orbHigh - orbLow : 0,
       },
-      spyTrend: marketContext?.spyTrend === 'bullish' ? 'bullish' :
-                marketContext?.spyTrend === 'bearish' ? 'bearish' : 'neutral',
+      spyTrend: 'neutral', // TODO: Add market context integration
       sector: 'Technology',
       sectorPerformance: changePercent >= 0 ? `+${changePercent.toFixed(2)}%` : `${changePercent.toFixed(2)}%`,
     };
@@ -1038,6 +1038,15 @@ export default function PracticePage() {
               );
             })}
           </div>
+        </PageSection>
+
+        {/* Instructions Panel - Mode-specific guidance */}
+        <PageSection>
+          <InstructionsPanel
+            mode={practiceMode}
+            hasScenarioSelected={!!selectedScenario}
+            isFirstVisit={!userStats?.totalAttempts || userStats.totalAttempts < 3}
+          />
         </PageSection>
 
         {/* Session Stats (if in session) */}
@@ -1662,52 +1671,55 @@ export default function PracticePage() {
                             }}
                             isSubmitting={submitting}
                             disabled={submitting}
-                            chartEntry={userPlacements.entry}
-                            chartStop={userPlacements.stopLoss}
-                            chartTarget1={userPlacements.target1}
-                            chartTarget2={userPlacements.target2}
                           />
                         ) : (
                           /* Quick buttons for quick_drill, replay, and multi_timeframe modes */
                           <>
-                            <p className="text-center text-[var(--text-secondary)] mb-6">
-                              Based on the LTP framework, what is the best action?
-                            </p>
+                            {/* Decision Guide - Quick reference for LTP framework */}
+                            <DecisionGuide className="mb-4" />
 
                             <div className="grid grid-cols-3 gap-4">
                               <Button
                                 variant="secondary"
                                 size="lg"
-                                className="flex-col py-6 hover:bg-[var(--profit)]/20 hover:border-[var(--profit)]"
+                                className="flex-col py-6 hover:bg-[var(--profit)]/20 hover:border-[var(--profit)] group"
                                 onClick={() => submitDecision('long')}
                                 disabled={submitting || (practiceMode === 'replay' && !decisionReached)}
                               >
-                                <TrendingUp className="w-8 h-8 mb-2 text-[var(--profit)]" />
+                                <TrendingUp className="w-8 h-8 mb-2 text-[var(--profit)] group-hover:scale-110 transition-transform" />
                                 <span className="text-lg font-bold">LONG</span>
+                                <span className="text-xs text-[var(--text-tertiary)] mt-1">Buy / Bullish</span>
                               </Button>
 
                               <Button
                                 variant="secondary"
                                 size="lg"
-                                className="flex-col py-6 hover:bg-[var(--warning)]/20 hover:border-[var(--warning)]"
+                                className="flex-col py-6 hover:bg-[var(--warning)]/20 hover:border-[var(--warning)] group"
                                 onClick={() => submitDecision('wait')}
                                 disabled={submitting || (practiceMode === 'replay' && !decisionReached)}
                               >
-                                <Pause className="w-8 h-8 mb-2 text-[var(--warning)]" />
+                                <Pause className="w-8 h-8 mb-2 text-[var(--warning)] group-hover:scale-110 transition-transform" />
                                 <span className="text-lg font-bold">WAIT</span>
+                                <span className="text-xs text-[var(--text-tertiary)] mt-1">No Trade</span>
                               </Button>
 
                               <Button
                                 variant="secondary"
                                 size="lg"
-                                className="flex-col py-6 hover:bg-[var(--loss)]/20 hover:border-[var(--loss)]"
+                                className="flex-col py-6 hover:bg-[var(--loss)]/20 hover:border-[var(--loss)] group"
                                 onClick={() => submitDecision('short')}
                                 disabled={submitting || (practiceMode === 'replay' && !decisionReached)}
                               >
-                                <TrendingDown className="w-8 h-8 mb-2 text-[var(--loss)]" />
+                                <TrendingDown className="w-8 h-8 mb-2 text-[var(--loss)] group-hover:scale-110 transition-transform" />
                                 <span className="text-lg font-bold">SHORT</span>
+                                <span className="text-xs text-[var(--text-tertiary)] mt-1">Sell / Bearish</span>
                               </Button>
                             </div>
+
+                            {/* Keyboard shortcuts for replay mode */}
+                            {practiceMode === 'replay' && (
+                              <KeyboardShortcuts mode={practiceMode} className="mt-4" />
+                            )}
                           </>
                         )}
 

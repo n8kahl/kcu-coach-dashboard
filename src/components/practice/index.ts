@@ -39,6 +39,9 @@ export { AICoachFeedback, type AIFeedback } from './AICoachFeedback';
 export { ContextPanel, ContextBadges, type MarketContext, type LTPAnalysis } from './ContextPanel';
 export { MarketContextCard, type ScenarioContext } from './MarketContextCard';
 
+// Instructions and guidance components
+export { InstructionsPanel, DecisionGuide, KeyboardShortcuts } from './InstructionsPanel';
+
 // Paper Trading
 export { PaperTradingPanel } from './paper-trading-panel';
 
