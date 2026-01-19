@@ -11,6 +11,10 @@ import { ProgressBar } from '@/components/ui/progress';
 import { PracticeChart } from '@/components/practice/practice-chart';
 import { ChartGrid } from '@/components/practice/ChartGrid';
 import { DailyChallenges } from '@/components/practice/DailyChallenge';
+import { PaperTradingPanel } from '@/components/practice/paper-trading-panel';
+import { OptionsChain } from '@/components/practice/options-chain';
+import { ReplayController, useReplayState } from '@/components/practice/replay-controller';
+import { SkillExercises } from '@/components/practice/skill-exercises';
 import { cn } from '@/lib/utils';
 import {
   Target,
@@ -40,6 +44,9 @@ import {
   MessageSquare,
   Wand2,
   LayoutGrid,
+  Wallet,
+  Layers,
+  GraduationCap,
 } from 'lucide-react';
 
 // Types
@@ -217,6 +224,16 @@ export default function PracticePage() {
     focusArea: 'all',
   });
   const [showMTFChart, setShowMTFChart] = useState(false);
+
+  // Right panel state for tools
+  type RightPanelTab = 'none' | 'paper_trading' | 'options' | 'exercises';
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('none');
+
+  // Replay state (for enhanced replay mode)
+  const replayState = useReplayState(
+    selectedScenario?.chartData?.candles?.length || 0,
+    0
+  );
 
   // Filters
   const [difficultyFilter, setDifficultyFilter] = useState<string>('');
@@ -982,6 +999,103 @@ export default function PracticePage() {
                         </div>
                       )}
                     </div>
+
+                    {/* Replay Controller (Replay Mode) */}
+                    {practiceMode === 'replay' && selectedScenario?.chartData?.candles?.length > 0 && (
+                      <div className="mb-4">
+                        <ReplayController
+                          totalCandles={selectedScenario.chartData.candles.length}
+                          currentIndex={replayState.currentIndex}
+                          onIndexChange={replayState.setCurrentIndex}
+                          isPlaying={replayState.isPlaying}
+                          onPlayPause={replayState.togglePlayPause}
+                          playbackSpeed={replayState.playbackSpeed}
+                          onSpeedChange={replayState.setPlaybackSpeed}
+                          decisionPointIndex={selectedScenario.decisionPoint ? Math.floor(selectedScenario.chartData.candles.length * 0.7) : undefined}
+                          onShowOutcome={() => setShowOutcome(true)}
+                        />
+                      </div>
+                    )}
+
+                    {/* Tools Toolbar */}
+                    <div className="flex items-center gap-2 mb-4 pb-4 border-b border-[var(--border-primary)]">
+                      <span className="text-xs text-[var(--text-tertiary)] mr-2">Tools:</span>
+                      <button
+                        onClick={() => setRightPanelTab(rightPanelTab === 'paper_trading' ? 'none' : 'paper_trading')}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-colors rounded',
+                          rightPanelTab === 'paper_trading'
+                            ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50'
+                        )}
+                      >
+                        <Wallet className="w-3.5 h-3.5" />
+                        Paper Trading
+                      </button>
+                      <button
+                        onClick={() => setRightPanelTab(rightPanelTab === 'options' ? 'none' : 'options')}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-colors rounded',
+                          rightPanelTab === 'options'
+                            ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50'
+                        )}
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        Options Chain
+                      </button>
+                      <button
+                        onClick={() => setRightPanelTab(rightPanelTab === 'exercises' ? 'none' : 'exercises')}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-colors rounded',
+                          rightPanelTab === 'exercises'
+                            ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50'
+                        )}
+                      >
+                        <GraduationCap className="w-3.5 h-3.5" />
+                        Skill Exercises
+                      </button>
+                    </div>
+
+                    {/* Right Panel Content (Collapsible) */}
+                    {rightPanelTab !== 'none' && (
+                      <div className="mb-6 border border-[var(--border-primary)] rounded bg-[var(--bg-secondary)]">
+                        {rightPanelTab === 'paper_trading' && (
+                          <PaperTradingPanel
+                            symbol={selectedScenario?.symbol || 'SPY'}
+                            currentPrice={
+                              selectedScenario?.chartData?.candles?.length
+                                ? selectedScenario.chartData.candles[selectedScenario.chartData.candles.length - 1].c
+                                : 0
+                            }
+                            userId="demo-user"
+                          />
+                        )}
+                        {rightPanelTab === 'options' && (
+                          <OptionsChain
+                            symbol={selectedScenario?.symbol || 'SPY'}
+                            currentPrice={
+                              selectedScenario?.chartData?.candles?.length
+                                ? selectedScenario.chartData.candles[selectedScenario.chartData.candles.length - 1].c
+                                : 450
+                            }
+                            onOptionSelect={(option) => {
+                              console.log('Selected option:', option);
+                            }}
+                          />
+                        )}
+                        {rightPanelTab === 'exercises' && (
+                          <SkillExercises
+                            onExerciseComplete={(result) => {
+                              console.log('Exercise completed:', result);
+                              fetchStats();
+                            }}
+                            className="border-0"
+                          />
+                        )}
+                      </div>
+                    )}
 
                     {/* LTP Checklist (Deep Analysis Mode) */}
                     {practiceMode === 'deep_analysis' && !result && (
