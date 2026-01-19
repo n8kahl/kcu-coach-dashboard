@@ -572,7 +572,7 @@ function MarketContextHeader({
       <div className="flex flex-wrap items-center justify-between gap-4">
         {/* Left: Market Indices */}
         <div className="flex items-center gap-6">
-          {marketStatus ? (
+          {marketStatus?.spy && marketStatus?.qqq ? (
             <>
               <MarketTicker symbol="SPY" price={marketStatus.spy.price} change={marketStatus.spy.change} />
               <MarketTicker symbol="QQQ" price={marketStatus.qqq.price} change={marketStatus.qqq.change} />
@@ -589,8 +589,8 @@ function MarketContextHeader({
             </>
           ) : (
             <div className="flex items-center gap-2 text-[var(--text-tertiary)]">
-              <Activity className="w-4 h-4 animate-pulse" />
-              <span className="text-sm">Loading market data...</span>
+              <Activity className="w-4 h-4" />
+              <span className="text-sm">Market data unavailable</span>
             </div>
           )}
         </div>
