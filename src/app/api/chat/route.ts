@@ -1,3 +1,15 @@
+/**
+ * Legacy Chat API
+ *
+ * @deprecated This endpoint continues to work but new integrations should use
+ * /api/ai/unified instead which provides mode-aware, context-aware AI responses.
+ *
+ * This endpoint is used by:
+ * - src/components/chat/ai-coach.tsx (floating button - deprecated)
+ *
+ * For new features, use the unified API with mode='coach' for equivalent functionality.
+ */
+
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getAuthenticatedUser } from '@/lib/auth';

@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useAIContext } from './AIContextProvider';
 import { AIQuickActions } from './AIQuickActions';
+import { AIMarketIntel } from './AIMarketIntel';
+import { AISuggestions } from './AISuggestions';
 import { RichContentRenderer } from '@/components/chat/rich-content';
 import { Button } from '@/components/ui/button';
 import { Avatar } from '@/components/ui/avatar';
@@ -241,6 +243,19 @@ export function AICommandCenter() {
                       Clear conversation
                     </button>
                   </div>
+                )}
+
+                {/* AI Suggestions (when no messages) */}
+                {messages.length === 0 && (
+                  <AISuggestions position="panel" maxSuggestions={2} />
+                )}
+
+                {/* Market Intel (for trading-related pages) */}
+                {['companion', 'journal', 'overview', 'practice'].includes(context.currentPage) && (
+                  <AIMarketIntel
+                    symbols={['SPY', 'QQQ']}
+                    compact={messages.length > 0}
+                  />
                 )}
 
                 {/* Input Area */}
