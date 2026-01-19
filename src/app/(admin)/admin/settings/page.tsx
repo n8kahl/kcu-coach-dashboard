@@ -1,5 +1,8 @@
 'use client';
 
+// Force dynamic rendering to prevent prerender errors with context providers
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect } from 'react';
 import { Header } from '@/components/layout/header';
 import { PageShell, PageSection, Grid } from '@/components/layout/page-shell';

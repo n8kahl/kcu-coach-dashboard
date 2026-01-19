@@ -2,12 +2,20 @@
 
 import { Sidebar, MobileSidebar } from '@/components/layout/sidebar';
 import { ToastProvider } from '@/components/ui/toast';
+import { AIContextProvider } from '@/components/ai/AIContextProvider';
 
 // Mock admin user
 const mockUser = {
+  id: 'admin-user-id',
+  discordId: 'admin-discord-id',
   username: 'Admin',
   avatar_url: undefined,
+  avatarUrl: undefined,
   is_admin: true,
+  experienceLevel: 'advanced' as const,
+  subscriptionTier: 'premium' as const,
+  isAdmin: true,
+  createdAt: new Date('2024-01-01'),
 };
 
 export default function AdminLayout({
@@ -16,8 +24,9 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   return (
-    <ToastProvider>
-      <div className="min-h-screen bg-[var(--bg-primary)] bg-hex-pattern">
+    <AIContextProvider initialContext={{ user: mockUser }}>
+      <ToastProvider>
+        <div className="min-h-screen bg-[var(--bg-primary)] bg-hex-pattern">
         {/* Sidebar - Desktop */}
         <div className="hidden lg:block">
           <Sidebar user={mockUser} />
@@ -40,6 +49,7 @@ export default function AdminLayout({
           <div className="p-6">{children}</div>
         </div>
       </div>
-    </ToastProvider>
+      </ToastProvider>
+    </AIContextProvider>
   );
 }

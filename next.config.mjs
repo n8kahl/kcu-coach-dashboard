@@ -11,6 +11,8 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ['@anthropic-ai/sdk'],
     instrumentationHook: true,
+    // Allow client components with useSearchParams without Suspense boundary
+    missingSuspenseWithCSRBailout: false,
   },
 };
 

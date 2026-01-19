@@ -1,5 +1,8 @@
 'use client';
 
+// Force dynamic rendering to prevent prerender errors with useSearchParams
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePageContext } from '@/components/ai';

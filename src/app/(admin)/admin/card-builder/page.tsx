@@ -1,5 +1,8 @@
 'use client';
 
+// Force dynamic rendering to prevent prerender errors with context providers
+export const dynamic = 'force-dynamic';
+
 import { Header } from '@/components/layout/header';
 import { PageShell } from '@/components/layout/page-shell';
 import { CardBuilder } from '@/components/admin/card-builder';

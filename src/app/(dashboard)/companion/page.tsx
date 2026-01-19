@@ -1,5 +1,8 @@
 'use client';
 
+// Force dynamic rendering to prevent prerender errors with useSearchParams
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { usePageContext } from '@/components/ai';
 import { cn } from '@/lib/utils';
