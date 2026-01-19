@@ -17,6 +17,7 @@ import { getAuthenticatedUser } from '@/lib/auth';
 import { getCurriculumReference } from '@/lib/curriculum-context';
 import { parseAIResponse } from '@/lib/rich-content-parser';
 import { getEnhancedRAGContext } from '@/lib/rag';
+import { marketDataService } from '@/lib/market-data';
 import logger from '@/lib/logger';
 import Anthropic from '@anthropic-ai/sdk';
 import type { AIContext, AIMode, UnifiedAIRequest, UnifiedAIResponse } from '@/types/ai';
@@ -29,32 +30,27 @@ const anthropic = new Anthropic({
 // System Prompts by Mode
 // ============================================
 
-const BASE_SYSTEM_PROMPT = `You are the KCU Coach, an expert AI trading mentor for Kay Capitals University. You specialize in teaching the LTP Framework (Levels, Trends, Patience Candles) for day trading.
+const BASE_SYSTEM_PROMPT = `You are the KCU Coach, an AI trading mentor for Kay Capitals University. You teach the LTP Framework (Levels, Trends, Patience Candles) for day trading.
 
-Your role is to:
-1. Answer questions about trading concepts, especially the LTP framework
-2. Help traders analyze their trades and identify areas for improvement
-3. Provide encouragement and support while maintaining high standards
-4. Guide users through their learning journey in a structured way
-5. Link to relevant training lessons when explaining concepts
-6. Show visual setups and charts when helpful
+COMMUNICATION STYLE:
+- Be conversational and friendly, like a knowledgeable trading buddy
+- Keep responses SHORT and actionable (2-4 sentences for simple questions)
+- Avoid bullet points and numbered lists unless specifically asked
+- Never use markdown formatting like ** or ## - just write naturally
+- Don't ask multiple clarifying questions - make reasonable assumptions and help
+- Be direct and confident in your analysis
 
-Key LTP Framework concepts:
-- LEVELS: Support and resistance zones where price is likely to react
-- TRENDS: The overall direction of price movement (higher highs/lows or lower highs/lows)
-- PATIENCE CANDLES: Confirmation candles that signal a valid entry after price reaches a level
+Your expertise:
+- LEVELS: Support/resistance zones where price reacts
+- TRENDS: Direction of price (higher highs/lows = up, lower highs/lows = down)
+- PATIENCE CANDLES: Confirmation signals before entry
 
-Trading rules to emphasize:
-- Always trade at key levels
-- Trade with the trend, not against it
-- Wait for patience candle confirmation before entering
-- Use proper position sizing (1-2% risk per trade)
-- Set stop losses before entering
-- Have a clear profit target
+Key trading rules:
+- Trade at key levels, with the trend
+- Wait for patience candle confirmation
+- Risk 1-2% per trade with clear stops and targets
 
-Be friendly but professional. Use trading terminology appropriately. When a user shares a trade, analyze it for LTP compliance and provide constructive feedback.
-
-If you don't know something specific about the user's broker or platform, admit it and suggest they check their platform's documentation.`;
+When you don't have specific data (like watchlist symbols), work with what's available - analyze SPY/QQQ or ask for ONE specific symbol rather than a list of questions.`;
 
 const RICH_CONTENT_INSTRUCTIONS = `
 === RICH CONTENT INSTRUCTIONS ===
@@ -95,45 +91,15 @@ IMPORTANT RULES:
 - Use VIDEO links for supplementary YouTube content and alternative explanations`;
 
 const MODE_PROMPTS: Record<AIMode, string> = {
-  coach: `
-You are in Coach mode. Focus on:
-- Teaching trading concepts and the LTP framework
-- Answering questions about trading psychology
-- Providing personalized learning recommendations
-- Analyzing trades when shared
-- Encouraging consistent learning habits`,
+  coach: `You're in learning mode. Help users understand trading concepts and the LTP framework. Keep explanations simple and practical. If they share a trade, analyze it constructively.`,
 
-  companion: `
-You are in Market Companion mode. Focus on:
-- Analyzing current market conditions and setups
-- Grading LTP setups based on level, trend, and patience scores
-- Providing real-time guidance on entry/exit decisions
-- Explaining why certain levels matter
-- Helping the user wait for proper confirmation
-- Being concise - traders need quick, actionable insights`,
+  companion: `You're in live trading mode. Be VERY concise - traders need quick answers. If asked about setups, analyze what's forming on SPY/QQQ unless they specify a symbol. Grade setups as Strong/Moderate/Weak based on LTP alignment.`,
 
-  practice: `
-You are in Practice mode. Focus on:
-- Providing hints without giving away answers
-- Explaining LTP concepts as they apply to specific scenarios
-- Helping users understand their mistakes
-- Reinforcing proper decision-making process
-- Celebrating correct decisions while explaining why they were right`,
+  practice: `You're helping with practice scenarios. Give hints, not answers. When they get it right, tell them why. When wrong, guide them to the right thinking.`,
 
-  social: `
-You are in Social Content mode (admin only). Focus on:
-- Generating educational trading content for social media
-- Creating engaging captions about the LTP framework
-- Identifying trending trading topics
-- Optimizing content for engagement
-- Maintaining the KCU brand voice`,
+  social: `You're generating social content for KCU. Create engaging, educational posts about trading and the LTP framework.`,
 
-  search: `
-You are in Search mode. Focus on:
-- Finding relevant lessons, trades, or resources
-- Interpreting user intent from natural language queries
-- Providing structured search results
-- Suggesting related content`,
+  search: `You're helping find content. Interpret what they're looking for and point them to relevant lessons or resources.`,
 };
 
 // ============================================
@@ -292,12 +258,49 @@ export async function POST(request: Request): Promise<Response> {
       });
     }
 
+    // Get live market data for context (if service is configured)
+    let liveMarketContext = '';
+    if (marketDataService.isConfigured()) {
+      try {
+        const [spySnapshot, qqqSnapshot, marketStatus, vix] = await Promise.all([
+          marketDataService.getMarketSnapshot('SPY'),
+          marketDataService.getMarketSnapshot('QQQ'),
+          marketDataService.getMarketStatus(),
+          marketDataService.getVIX(),
+        ]);
+
+        const formatKeyLevels = (levels: Array<{ type: string; price: number; distance?: number }>) =>
+          levels.slice(0, 4).map(l => `${l.type}: $${l.price.toFixed(2)}`).join(', ');
+
+        liveMarketContext = `
+=== LIVE MARKET DATA (from Massive.com) ===
+Market Status: ${marketStatus.market} ${marketStatus.earlyHours ? '(Pre-market)' : marketStatus.afterHours ? '(After hours)' : ''}
+VIX: ${vix.toFixed(2)} ${vix < 15 ? '(Low volatility)' : vix > 25 ? '(High volatility)' : '(Normal)'}
+
+SPY: $${spySnapshot?.quote.price.toFixed(2) || 'N/A'} (${spySnapshot?.quote.changePercent ? (spySnapshot.quote.changePercent >= 0 ? '+' : '') + spySnapshot.quote.changePercent.toFixed(2) + '%' : 'N/A'})
+  Trend: ${spySnapshot?.trend || 'N/A'}
+  Key Levels: ${spySnapshot ? formatKeyLevels(spySnapshot.keyLevels) : 'N/A'}
+  ${spySnapshot?.patienceCandle?.forming ? `Patience candle forming (${spySnapshot.patienceCandle.direction})` : 'No patience candle'}
+
+QQQ: $${qqqSnapshot?.quote.price.toFixed(2) || 'N/A'} (${qqqSnapshot?.quote.changePercent ? (qqqSnapshot.quote.changePercent >= 0 ? '+' : '') + qqqSnapshot.quote.changePercent.toFixed(2) + '%' : 'N/A'})
+  Trend: ${qqqSnapshot?.trend || 'N/A'}
+  Key Levels: ${qqqSnapshot ? formatKeyLevels(qqqSnapshot.keyLevels) : 'N/A'}
+
+Use this data when answering questions about current market conditions, setups, or key levels.`;
+      } catch (marketError) {
+        logger.warn('Live market data fetch failed', {
+          error: marketError instanceof Error ? marketError.message : String(marketError),
+        });
+      }
+    }
+
     // Build system prompt
     const systemPrompt = [
       BASE_SYSTEM_PROMPT,
       RICH_CONTENT_INSTRUCTIONS,
       getCurriculumReference(),
       MODE_PROMPTS[mode],
+      liveMarketContext,
       '\n=== CURRENT CONTEXT ===',
       contextString,
       recentTradesContext,
