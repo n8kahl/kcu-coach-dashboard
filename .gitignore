@@ -70,3 +70,6 @@ secrets.json
 # API key files
 api-keys.json
 service-account*.json
+
+# Migration progress tracking
+scripts/.migration-progress.json
