@@ -459,7 +459,8 @@ export type RichContent =
   | SetupVisualizationContent
   | QuizPromptContent
   | VideoTimestampContent
-  | ThinkificLinkContent;
+  | ThinkificLinkContent
+  | LTPAnalysisChartContent;
 
 export interface LessonLinkContent {
   type: 'lesson_link';
@@ -529,6 +530,28 @@ export interface ThinkificLinkContent {
   timestampSeconds?: number;
   description?: string;
   source: 'thinkific';
+}
+
+export interface LTPAnalysisChartContent {
+  type: 'ltp_analysis_chart';
+  symbol: string;
+  date: string; // YYYY-MM-DD
+  timeframe: '1m' | '5m' | '15m' | '1h' | 'day';
+  title: string;
+  summary: string;
+  ltpAnalysis: {
+    grade: string;
+    levelScore: number;
+    trendScore: number;
+    patienceScore: number;
+    recommendation: string;
+  };
+  keyLevels: Array<{
+    type: string;
+    price: number;
+    label: string;
+    strength: number;
+  }>;
 }
 
 export interface CoachingSession {

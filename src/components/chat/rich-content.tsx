@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useState } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -12,9 +12,11 @@ import type {
   QuizPromptContent,
   VideoTimestampContent,
   ThinkificLinkContent,
+  LTPAnalysisChartContent,
 } from '@/types';
 import { VideoTimestampCard } from './video-timestamp-card';
 import { ThinkificLinkCard } from './thinkific-link-card';
+import { LTPAnalysisCard } from './ltp-analysis-chart';
 import {
   BookOpen,
   TrendingUp,
@@ -55,6 +57,8 @@ export function RichContentRenderer({ content, className }: RichContentRendererP
             return <VideoTimestampCard key={`video-${index}`} content={item as VideoTimestampContent & { source: 'youtube' }} />;
           case 'thinkific_link':
             return <ThinkificLinkCard key={`thinkific-${index}`} content={item as ThinkificLinkContent} />;
+          case 'ltp_analysis_chart':
+            return <LTPAnalysisCard key={`ltp-${index}`} content={item as LTPAnalysisChartContent} />;
           default:
             return null;
         }
@@ -143,54 +147,18 @@ interface InlineChartProps {
 }
 
 function InlineChartComponent({ chart }: InlineChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    if (!containerRef.current) return;
+  // Determine exchange prefix for TradingView
+  const symbol = chart.symbol.includes(':')
+    ? chart.symbol
+    : `NASDAQ:${chart.symbol}`;
 
-    // Clear any existing content
-    containerRef.current.innerHTML = '';
+  // Convert interval to TradingView format
+  const interval = chart.interval === 'D' ? 'D' : chart.interval;
 
-    // Create the widget container div
-    const widgetContainer = document.createElement('div');
-    widgetContainer.className = 'tradingview-widget-container__widget';
-    widgetContainer.style.height = '100%';
-    widgetContainer.style.width = '100%';
-    containerRef.current.appendChild(widgetContainer);
-
-    // Determine exchange prefix
-    const symbol = chart.symbol.includes(':')
-      ? chart.symbol
-      : `NASDAQ:${chart.symbol}`;
-
-    // Create and configure the script
-    const script = document.createElement('script');
-    script.src =
-      'https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js';
-    script.type = 'text/javascript';
-    script.async = true;
-    script.innerHTML = JSON.stringify({
-      symbol,
-      width: '100%',
-      height: 160,
-      locale: 'en',
-      dateRange: '1D',
-      colorTheme: 'dark',
-      isTransparent: true,
-      autosize: false,
-      largeChartUrl: '',
-    });
-
-    script.onload = () => setIsLoaded(true);
-    containerRef.current.appendChild(script);
-
-    return () => {
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
-      }
-    };
-  }, [chart.symbol, chart.interval]);
+  // Build TradingView widget URL
+  const widgetUrl = `https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart&symbol=${encodeURIComponent(symbol)}&interval=${interval}&hidesidetoolbar=1&hidetoptoolbar=1&symboledit=0&saveimage=0&toolbarbg=0a0a0a&theme=dark&style=1&timezone=exchange&withdateranges=0&studies=[]&hideideas=1&hide_side_toolbar=1`;
 
   return (
     <motion.div
@@ -224,12 +192,24 @@ function InlineChartComponent({ chart }: InlineChartProps) {
         </a>
       </div>
 
-      {/* Chart Container */}
-      <div
-        ref={containerRef}
-        className="h-[160px] w-full"
-        style={{ minHeight: '160px' }}
-      />
+      {/* Chart Container with iframe */}
+      <div className="h-[200px] w-full relative">
+        {isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-[var(--bg-secondary)]">
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-5 h-5 border-2 border-[var(--accent-primary)] border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs text-[var(--text-tertiary)]">Loading chart...</span>
+            </div>
+          </div>
+        )}
+        <iframe
+          src={widgetUrl}
+          className="w-full h-full border-0"
+          onLoad={() => setIsLoading(false)}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          sandbox="allow-scripts allow-same-origin allow-popups"
+        />
+      </div>
 
       {/* Indicators */}
       {chart.indicators && chart.indicators.length > 0 && (

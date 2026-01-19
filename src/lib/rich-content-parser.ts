@@ -11,6 +11,7 @@
  * - [[QUIZ:module-slug|title]]
  * - [[VIDEO:videoId|startMs|endMs|Title]] - YouTube video with timestamp
  * - [[THINKIFIC:courseSlug|lessonSlug|timestampSeconds|Title]] - Thinkific lesson link
+ * - [[LTP_ANALYSIS:SYMBOL|DATE|TIMEFRAME|{JSON}]] - Interactive LTP analysis chart
  */
 
 import type {
@@ -21,6 +22,7 @@ import type {
   QuizPromptContent,
   VideoTimestampContent,
   ThinkificLinkContent,
+  LTPAnalysisChartContent,
 } from '@/types';
 import { getLessonBySlug } from './curriculum-context';
 
@@ -33,6 +35,8 @@ const QUIZ_PATTERN = /\[\[QUIZ:([^|]+)\|([^\]]+)\]\]/g;
 const VIDEO_PATTERN = /\[\[VIDEO:([^|]+)\|(\d+)\|(\d+)\|([^\]]+)\]\]/g;
 // Thinkific link: [[THINKIFIC:courseSlug|lessonSlug|timestampSeconds|Title]]
 const THINKIFIC_PATTERN = /\[\[THINKIFIC:([^|]+)\|([^|]+)\|(\d+)\|([^\]]+)\]\]/g;
+// LTP Analysis chart: [[LTP_ANALYSIS:SYMBOL|DATE|TIMEFRAME|{JSON}]]
+const LTP_ANALYSIS_PATTERN = /\[\[LTP_ANALYSIS:([^|]+)\|([^|]+)\|([^|]+)\|(\{.*?\})\]\]/g;
 
 /**
  * Calculate LTP grade from total score
@@ -216,6 +220,53 @@ function parseThinkificMarkers(text: string): ThinkificLinkContent[] {
 }
 
 /**
+ * Parse LTP Analysis chart markers from text
+ * Format: [[LTP_ANALYSIS:SYMBOL|DATE|TIMEFRAME|{JSON}]]
+ * JSON contains: title, summary, ltpAnalysis, keyLevels
+ */
+function parseLTPAnalysisMarkers(text: string): LTPAnalysisChartContent[] {
+  const charts: LTPAnalysisChartContent[] = [];
+  let match;
+
+  LTP_ANALYSIS_PATTERN.lastIndex = 0;
+
+  while ((match = LTP_ANALYSIS_PATTERN.exec(text)) !== null) {
+    const [, symbol, date, timeframe, jsonStr] = match;
+
+    try {
+      const data = JSON.parse(jsonStr);
+
+      charts.push({
+        type: 'ltp_analysis_chart',
+        symbol: symbol.trim().toUpperCase(),
+        date: date.trim(),
+        timeframe: timeframe.trim() as '1m' | '5m' | '15m' | '1h' | 'day',
+        title: data.title || `${symbol} Analysis`,
+        summary: data.summary || '',
+        ltpAnalysis: {
+          grade: data.ltpAnalysis?.grade || 'N/A',
+          levelScore: data.ltpAnalysis?.levelScore || 0,
+          trendScore: data.ltpAnalysis?.trendScore || 0,
+          patienceScore: data.ltpAnalysis?.patienceScore || 0,
+          recommendation: data.ltpAnalysis?.recommendation || '',
+        },
+        keyLevels: (data.keyLevels || []).map((level: { type?: string; price?: number; label?: string; strength?: number }) => ({
+          type: level.type || 'unknown',
+          price: level.price || 0,
+          label: level.label || '',
+          strength: level.strength || 0,
+        })),
+      });
+    } catch {
+      // Skip malformed JSON markers
+      console.warn('Failed to parse LTP_ANALYSIS marker:', jsonStr);
+    }
+  }
+
+  return charts;
+}
+
+/**
  * Remove all rich content markers from text
  */
 export function stripRichContentMarkers(text: string): string {
@@ -226,6 +277,7 @@ export function stripRichContentMarkers(text: string): string {
     .replace(QUIZ_PATTERN, '')
     .replace(VIDEO_PATTERN, '')
     .replace(THINKIFIC_PATTERN, '')
+    .replace(LTP_ANALYSIS_PATTERN, '')
     .replace(/\n{3,}/g, '\n\n') // Clean up extra newlines
     .trim();
 }
@@ -243,6 +295,7 @@ export function parseRichContent(text: string): RichContent[] {
   richContent.push(...parseQuizMarkers(text));
   richContent.push(...parseVideoMarkers(text));
   richContent.push(...parseThinkificMarkers(text));
+  richContent.push(...parseLTPAnalysisMarkers(text));
 
   return richContent;
 }
@@ -271,6 +324,7 @@ export function hasRichContent(text: string): boolean {
   QUIZ_PATTERN.lastIndex = 0;
   VIDEO_PATTERN.lastIndex = 0;
   THINKIFIC_PATTERN.lastIndex = 0;
+  LTP_ANALYSIS_PATTERN.lastIndex = 0;
 
   return (
     LESSON_PATTERN.test(text) ||
@@ -278,7 +332,8 @@ export function hasRichContent(text: string): boolean {
     SETUP_PATTERN.test(text) ||
     QUIZ_PATTERN.test(text) ||
     VIDEO_PATTERN.test(text) ||
-    THINKIFIC_PATTERN.test(text)
+    THINKIFIC_PATTERN.test(text) ||
+    LTP_ANALYSIS_PATTERN.test(text)
   );
 }
 

@@ -152,7 +152,24 @@ When users ask about stock prices, market conditions, or trading setups:
 1. Use the appropriate market data tool to get current/historical data
 2. Parse relative dates (e.g., "last Friday" = calculate from today)
 3. Present the data clearly and apply LTP Framework analysis when relevant
-4. For questions about specific dates, convert to YYYY-MM-DD format`;
+4. For questions about specific dates, convert to YYYY-MM-DD format
+
+=== INTERACTIVE CHART GENERATION ===
+When providing historical market analysis (e.g., "What did TSLA open at on Friday?"), include an interactive LTP chart that users can click to view detailed analysis.
+
+Use this marker format at the END of your response:
+[[LTP_ANALYSIS:SYMBOL|DATE|TIMEFRAME|{"title":"...","summary":"...","ltpAnalysis":{"grade":"...","levelScore":N,"trendScore":N,"patienceScore":N,"recommendation":"..."},"keyLevels":[{"type":"...","price":N,"label":"...","strength":N}]}]]
+
+Example:
+[[LTP_ANALYSIS:TSLA|2026-01-17|5m|{"title":"TSLA Morning Analysis","summary":"Strong bullish momentum with trend alignment. Price bounced off VWAP support.","ltpAnalysis":{"grade":"B+","levelScore":85,"trendScore":78,"patienceScore":72,"recommendation":"Valid long setup at VWAP with trend confirmation"},"keyLevels":[{"type":"vwap","price":425.50,"label":"VWAP","strength":85},{"type":"pdh","price":428.00,"label":"PDH","strength":70}]}]]
+
+Guidelines:
+- Use this for historical price questions, not real-time quotes
+- TIMEFRAME should be one of: 1m, 5m, 15m, 1h, day
+- DATE must be YYYY-MM-DD format
+- The JSON must be valid (no trailing commas, proper escaping)
+- Include 2-4 key levels that were relevant for that day
+- Estimate LTP scores based on the market data you retrieved`;
 
   // Build messages array for tool use
   const messages: MessageParam[] = [
