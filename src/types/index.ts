@@ -485,3 +485,28 @@ export interface CurriculumLesson {
   key_takeaways: string[];
   quiz_questions?: QuizQuestion[];
 }
+
+// ============================================
+// Practice Scenario Types
+// ============================================
+
+export interface PracticeScenario {
+  id: string;
+  title: string;
+  description: string;
+  symbol: string;
+  scenario_type: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  correct_action: 'long' | 'short' | 'wait';
+  ltp_analysis: {
+    level: { score: number; reason: string };
+    trend: { score: number; reason: string };
+    patience: { score: number; reason: string };
+  };
+  explanation: string;
+  key_levels: Array<{ type: string; price: number; label: string }>;
+  tags: string[];
+  focus_area?: string;
+  related_lesson_slug?: string;
+  created_at?: string;
+}
