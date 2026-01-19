@@ -15,7 +15,7 @@ import { AdvancedPracticeChart } from '@/components/practice/AdvancedPracticeCha
 import { AchievementPopup, Achievement } from '@/components/practice/AchievementPopup';
 import { ContextPanel, ContextBadges, MarketContext, LTPAnalysis } from '@/components/practice/ContextPanel';
 import { Leaderboard, MiniLeaderboard } from '@/components/practice/Leaderboard';
-import { ChartSkeleton, DailyChallengeSkeleton, LeaderboardSkeleton, PracticePageSkeleton } from '@/components/practice/LoadingSkeletons';
+import { ChartSkeleton, DailyChallengeSkeleton, LeaderboardSkeleton } from '@/components/practice/LoadingSkeletons';
 import { DecisionPanel, TradePlan } from '@/components/practice/DecisionPanel';
 import { ComparisonPanel } from '@/components/practice/ComparisonPanel';
 import { AICoachFeedback, AIFeedback } from '@/components/practice/AICoachFeedback';
