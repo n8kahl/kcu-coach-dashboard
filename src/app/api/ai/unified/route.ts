@@ -10,6 +10,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { parseAIResponse } from '@/lib/rich-content-parser';
 import { getEnhancedRAGContext } from '@/lib/rag';
+import { marketDataService } from '@/lib/market-data';
 import { generateSystemPrompt } from '@/lib/ai-context';
 import logger from '@/lib/logger';
 import Anthropic from '@anthropic-ai/sdk';

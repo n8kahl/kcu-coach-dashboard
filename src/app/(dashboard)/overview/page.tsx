@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { usePageContext } from '@/components/ai';
 import { Header } from '@/components/layout/header';
 import { PageShell, PageSection, Grid, LoadingState, ErrorState, SkeletonStats } from '@/components/layout/page-shell';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -66,6 +67,7 @@ interface DashboardData {
 
 export default function OverviewPage() {
   const router = useRouter();
+  usePageContext();
   const [data, setData] = useState<DashboardData>({
     user: null,
     stats: emptyStats,

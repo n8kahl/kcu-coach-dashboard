@@ -225,9 +225,102 @@ function generateOutcomeBars(
 }
 
 /**
+ * Generate a fallback scenario when AI is unavailable
+ */
+function generateFallbackScenario(params: AIScenarioParams): GeneratedScenario {
+  // Predefined scenarios based on difficulty
+  const scenarios = {
+    beginner: {
+      title: `${params.symbol} Support Bounce`,
+      description: 'Clear support level test with strong buying pressure',
+      correctAction: 'long' as const,
+      basePrice: params.symbol === 'SPY' ? 450 : params.symbol === 'QQQ' ? 380 : 150,
+    },
+    intermediate: {
+      title: `${params.symbol} VWAP Rejection`,
+      description: 'Price testing VWAP with mixed signals',
+      correctAction: 'wait' as const,
+      basePrice: params.symbol === 'SPY' ? 450 : params.symbol === 'QQQ' ? 380 : 150,
+    },
+    advanced: {
+      title: `${params.symbol} False Breakout Trap`,
+      description: 'Failed breakout above resistance with reversal pattern',
+      correctAction: 'short' as const,
+      basePrice: params.symbol === 'SPY' ? 450 : params.symbol === 'QQQ' ? 380 : 150,
+    },
+  };
+
+  const config = scenarios[params.difficulty];
+  const priceAction = {
+    trend: params.difficulty === 'beginner' ? 'uptrend into support' : 'neutral',
+    volatility: params.difficulty === 'advanced' ? 'high' : 'moderate',
+    pattern: 'range',
+  };
+
+  const chartData = generateSyntheticBars(config.basePrice, priceAction, config.correctAction, 150);
+  const lastBar = chartData[chartData.length - 1];
+  const outcomeData = generateOutcomeBars(lastBar, config.correctAction);
+
+  // Generate key levels based on chart data
+  const highPrice = Math.max(...chartData.map(c => c.h));
+  const lowPrice = Math.min(...chartData.map(c => c.l));
+
+  return {
+    title: config.title,
+    description: config.description,
+    symbol: params.symbol,
+    scenarioType: 'synthetic',
+    difficulty: params.difficulty,
+    focusArea: params.focusArea,
+    marketContext: {
+      spyTrend: 'bullish',
+      vixLevel: '15.5 - moderate',
+      sectorPerformance: 'Tech +0.3%, Financials -0.2%',
+      premarketAction: 'Slightly higher, testing resistance',
+    },
+    chartData,
+    keyLevels: [
+      { price: Math.round(highPrice * 100) / 100, label: 'PDH', type: 'pdh', strength: 85 },
+      { price: Math.round(lowPrice * 100) / 100, label: 'PDL', type: 'pdl', strength: 85 },
+      { price: Math.round(lastBar.c * 100) / 100, label: 'VWAP', type: 'vwap', strength: 80 },
+      { price: Math.round(((highPrice + lowPrice) / 2) * 100) / 100, label: 'Mid', type: 'support', strength: 65 },
+    ],
+    decisionPoint: {
+      price: lastBar.c,
+      time: lastBar.t,
+      context: `${params.symbol} is testing a key level. Analyze using the LTP framework to determine the best action.`,
+    },
+    correctAction: config.correctAction,
+    outcomeData,
+    ltpAnalysis: {
+      level: {
+        score: params.difficulty === 'beginner' ? 85 : params.difficulty === 'intermediate' ? 70 : 55,
+        reason: 'Price at key support/resistance level with multiple touches',
+      },
+      trend: {
+        score: params.difficulty === 'beginner' ? 80 : params.difficulty === 'intermediate' ? 65 : 50,
+        reason: 'EMA alignment shows trend direction',
+      },
+      patience: {
+        score: params.difficulty === 'beginner' ? 82 : params.difficulty === 'intermediate' ? 68 : 45,
+        reason: 'Candle patterns suggest continuation/reversal',
+      },
+    },
+    explanation: `This ${params.difficulty} scenario tests your ability to identify ${config.correctAction === 'long' ? 'bullish' : config.correctAction === 'short' ? 'bearish' : 'choppy'} setups using the LTP framework.`,
+    tags: [params.symbol, params.difficulty, params.focusArea, 'synthetic'],
+  };
+}
+
+/**
  * Generate an AI scenario using Claude
  */
 export async function generateAIScenario(params: AIScenarioParams): Promise<GeneratedScenario | null> {
+  // Check if Anthropic API key is available
+  if (!process.env.ANTHROPIC_API_KEY) {
+    logger.warn('No Anthropic API key found, using fallback scenario');
+    return generateFallbackScenario(params);
+  }
+
   const prompt = SCENARIO_GENERATION_PROMPT
     .replace('{symbol}', params.symbol)
     .replace('{difficulty}', params.difficulty)
@@ -315,11 +408,12 @@ export async function generateAIScenario(params: AIScenarioParams): Promise<Gene
 
     return scenario;
   } catch (error) {
-    logger.error('Error generating AI scenario', {
+    logger.error('Error generating AI scenario, using fallback', {
       error: error instanceof Error ? error.message : String(error),
       params,
     });
-    return null;
+    // Return fallback scenario instead of null
+    return generateFallbackScenario(params);
   }
 }
 

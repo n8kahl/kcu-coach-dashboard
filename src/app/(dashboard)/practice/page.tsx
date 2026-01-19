@@ -16,6 +16,7 @@ import { OptionsChain } from '@/components/practice/options-chain';
 import { ReplayController, useReplayState } from '@/components/practice/replay-controller';
 import { SkillExercises } from '@/components/practice/skill-exercises';
 import { cn } from '@/lib/utils';
+import { usePageContext } from '@/components/ai';
 import {
   Target,
   TrendingUp,
@@ -178,6 +179,9 @@ const PRACTICE_MODES = [
 ];
 
 export default function PracticePage() {
+  // AI Context - update page context
+  usePageContext();
+
   // Core state
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioDetail | null>(null);
@@ -1023,11 +1027,12 @@ export default function PracticePage() {
                       <button
                         onClick={() => setRightPanelTab(rightPanelTab === 'paper_trading' ? 'none' : 'paper_trading')}
                         className={cn(
-                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-colors rounded',
+                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
                           rightPanelTab === 'paper_trading'
                             ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50'
+                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
                         )}
+                        title="Practice with simulated $25,000 account"
                       >
                         <Wallet className="w-3.5 h-3.5" />
                         Paper Trading
@@ -1035,11 +1040,12 @@ export default function PracticePage() {
                       <button
                         onClick={() => setRightPanelTab(rightPanelTab === 'options' ? 'none' : 'options')}
                         className={cn(
-                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-colors rounded',
+                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
                           rightPanelTab === 'options'
                             ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50'
+                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
                         )}
+                        title="View options chain with Greeks (0DTE supported)"
                       >
                         <Layers className="w-3.5 h-3.5" />
                         Options Chain
@@ -1047,20 +1053,21 @@ export default function PracticePage() {
                       <button
                         onClick={() => setRightPanelTab(rightPanelTab === 'exercises' ? 'none' : 'exercises')}
                         className={cn(
-                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-colors rounded',
+                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
                           rightPanelTab === 'exercises'
                             ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50'
+                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
                         )}
+                        title="Targeted exercises to improve specific skills"
                       >
                         <GraduationCap className="w-3.5 h-3.5" />
                         Skill Exercises
                       </button>
                     </div>
 
-                    {/* Right Panel Content (Collapsible) */}
+                    {/* Right Panel Content (Collapsible with animation) */}
                     {rightPanelTab !== 'none' && (
-                      <div className="mb-6 border border-[var(--border-primary)] rounded bg-[var(--bg-secondary)]">
+                      <div className="mb-6 border border-[var(--border-primary)] rounded bg-[var(--bg-secondary)] animate-in slide-in-from-top-2 duration-300 ease-out">
                         {rightPanelTab === 'paper_trading' && (
                           <PaperTradingPanel
                             symbol={selectedScenario?.symbol || 'SPY'}

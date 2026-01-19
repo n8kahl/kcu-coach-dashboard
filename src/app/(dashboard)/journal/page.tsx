@@ -13,6 +13,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/toast';
 import { Plus, Download, Loader2 } from 'lucide-react';
 import type { TradeEntry, TradeStats } from '@/types';
+import { usePageContext, useAIContext } from '@/components/ai';
 
 // Default empty stats for loading state
 const emptyStats: TradeStats = {
@@ -40,6 +41,15 @@ export default function JournalPage() {
   const [stats, setStats] = useState<TradeStats>(emptyStats);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // AI Context - update page context and track selected trade
+  const { setSelectedTrade: setAISelectedTrade } = useAIContext();
+  usePageContext();
+
+  // Sync selected trade with AI context
+  useEffect(() => {
+    setAISelectedTrade(selectedTrade || undefined);
+  }, [selectedTrade, setAISelectedTrade]);
 
   // Fetch trades and stats from API
   useEffect(() => {

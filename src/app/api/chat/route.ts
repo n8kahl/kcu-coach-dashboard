@@ -1,4 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
+/**
+ * Legacy Chat API
+ *
+ * @deprecated This endpoint continues to work but new integrations should use
+ * /api/ai/unified instead which provides mode-aware, context-aware AI responses.
+ *
+ * This endpoint is used by:
+ * - src/components/chat/ai-coach.tsx (floating button - deprecated)
+ *
+ * For new features, use the unified API with mode='coach' for equivalent functionality.
+ */
+
+import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { getCurriculumReference } from '@/lib/curriculum-context';
@@ -6,7 +18,6 @@ import { parseAIResponse } from '@/lib/rich-content-parser';
 import { getEnhancedRAGContext } from '@/lib/rag';
 import logger from '@/lib/logger';
 import Anthropic from '@anthropic-ai/sdk';
-import { withRateLimitAndTimeout, getEndpointUserKey } from '@/lib/rate-limit';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -108,7 +119,7 @@ IMPORTANT RULES:
 
 ${getCurriculumReference()}`;
 
-async function chatHandler(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const sessionUser = await getAuthenticatedUser();
 
@@ -265,10 +276,3 @@ ${
     }, { status: 500 });
   }
 }
-
-// Export with rate limiting (20 requests/minute) and timeout (60 seconds)
-export const POST = withRateLimitAndTimeout(
-  chatHandler,
-  getEndpointUserKey('chat'),
-  { limit: 20, windowSeconds: 60, timeoutMs: 60000 }
-);
