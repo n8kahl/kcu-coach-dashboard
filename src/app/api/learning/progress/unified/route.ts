@@ -1,6 +1,8 @@
 /**
- * Unified Learning Progress API Route
+ * @deprecated Use /api/learning/v2/progress instead
  *
+ * Unified Learning Progress API Route (Thinkific-focused)
+ * This route is maintained for backward compatibility only.
  * Returns combined progress data from Thinkific and local KCU Coach.
  */
 

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -25,13 +25,20 @@ import {
   GraduationCap,
   Target,
   Dumbbell,
-  Bot,
+  Sparkles,
   Youtube,
-  Command,
 } from 'lucide-react';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { useAIContext } from '@/components/ai';
+
+// Import AI Context hook (optional - will be available when provider is mounted)
+let useAIContext: (() => { togglePanel: () => void; isOpen: boolean }) | null = null;
+try {
+  const aiModule = require('@/components/ai/AIContextProvider');
+  useAIContext = aiModule.useAIContext;
+} catch {
+  // AI module not available yet
+}
 
 // Logout handler
 async function handleLogout() {
@@ -51,14 +58,14 @@ interface NavItem {
   icon: React.ElementType;
   badge?: string | number;
   children?: NavItem[];
-  isAIToggle?: boolean; // Special flag for AI Coach panel toggle
+  isAICoach?: boolean; // Special flag for AI Coach to toggle panel instead of navigating
 }
 
 const userNavItems: NavItem[] = [
   { label: 'Overview', href: '/overview', icon: LayoutDashboard },
   { label: 'Companion', href: '/companion', icon: Target },
   { label: 'Practice', href: '/practice', icon: Dumbbell, badge: 'New' },
-  { label: 'AI Coach', href: '#ai-panel', icon: Bot, isAIToggle: true, badge: '⌘J' },
+  { label: 'AI Coach', href: '#ai-coach', icon: Sparkles, isAICoach: true },
   { label: 'Learning', href: '/learning', icon: GraduationCap },
   { label: 'Resources', href: '/resources', icon: Youtube },
   { label: 'Progress', href: '/progress', icon: TrendingUp },
@@ -90,9 +97,15 @@ export function Sidebar({ user }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
 
-  // Get AI panel toggle function
-  const { togglePanel, panelState } = useAIContext();
-  const isAIPanelOpen = panelState.panelState !== 'collapsed';
+  // Try to use AI context if available
+  let aiContext: { togglePanel: () => void; isOpen: boolean } | null = null;
+  try {
+    if (useAIContext) {
+      aiContext = useAIContext();
+    }
+  } catch {
+    // AI context not available (not wrapped in provider)
+  }
 
   const toggleExpanded = (label: string) => {
     setExpandedItems((prev) =>
@@ -106,32 +119,33 @@ export function Sidebar({ user }: SidebarProps) {
 
   const renderNavItem = (item: NavItem) => {
     const Icon = item.icon;
-    const active = item.isAIToggle ? isAIPanelOpen : isActive(item.href);
+    const active = item.isAICoach ? aiContext?.isOpen : isActive(item.href);
     const hasChildren = item.children && item.children.length > 0;
     const isExpanded = expandedItems.includes(item.label);
 
-    // Special handling for AI Coach toggle
-    if (item.isAIToggle) {
+    // Special handling for AI Coach - render button instead of link
+    if (item.isAICoach) {
       return (
         <div key={item.href}>
           <button
-            onClick={togglePanel}
+            onClick={() => aiContext?.togglePanel()}
             className={cn(
-              'w-full flex items-center gap-3 px-4 py-3',
+              'flex items-center gap-3 px-4 py-3 w-full',
               'text-sm font-medium transition-all duration-150',
               'border-l-2',
               active
                 ? 'bg-[var(--accent-primary-glow)] text-[var(--accent-primary)] border-l-[var(--accent-primary)]'
                 : 'text-[var(--text-secondary)] border-l-transparent hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
             )}
+            title="Toggle AI Coach (Cmd+J)"
           >
-            <Icon className="w-5 h-5 flex-shrink-0" />
+            <Icon className={cn('w-5 h-5 flex-shrink-0', active && 'animate-pulse')} />
             {!isCollapsed && (
               <>
                 <span className="flex-1 text-left">{item.label}</span>
-                <span className="text-xs text-[var(--text-muted)] bg-[var(--bg-primary)] px-1.5 py-0.5 rounded">
-                  ⌘J
-                </span>
+                {active && (
+                  <span className="w-2 h-2 bg-[var(--accent-primary)] rounded-full animate-pulse" />
+                )}
               </>
             )}
           </button>
@@ -305,16 +319,17 @@ export function MobileSidebar({ user }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname();
 
-  // Get AI panel toggle function
-  const { togglePanel, panelState } = useAIContext();
-  const isAIPanelOpen = panelState.panelState !== 'collapsed';
+  // Try to use AI context if available
+  let aiContext: { togglePanel: () => void; isOpen: boolean } | null = null;
+  try {
+    if (useAIContext) {
+      aiContext = useAIContext();
+    }
+  } catch {
+    // AI context not available (not wrapped in provider)
+  }
 
   const isActive = (href: string) => pathname === href || pathname?.startsWith(href + '/');
-
-  const handleAIToggle = () => {
-    setIsOpen(false);
-    togglePanel();
-  };
 
   return (
     <>
@@ -367,16 +382,19 @@ export function MobileSidebar({ user }: SidebarProps) {
             <nav className="flex-1 py-4 overflow-y-auto">
               {userNavItems.map((item) => {
                 const Icon = item.icon;
-                const active = item.isAIToggle ? isAIPanelOpen : isActive(item.href);
+                const active = item.isAICoach ? aiContext?.isOpen : isActive(item.href);
 
-                // Special handling for AI Coach toggle
-                if (item.isAIToggle) {
+                // Special handling for AI Coach - render button instead of link
+                if (item.isAICoach) {
                   return (
                     <button
                       key={item.href}
-                      onClick={handleAIToggle}
+                      onClick={() => {
+                        setIsOpen(false);
+                        aiContext?.togglePanel();
+                      }}
                       className={cn(
-                        'w-full flex items-center gap-3 px-4 py-3',
+                        'flex items-center gap-3 px-4 py-3 w-full',
                         'text-sm font-medium transition-all duration-150',
                         'border-l-2',
                         active
@@ -384,11 +402,11 @@ export function MobileSidebar({ user }: SidebarProps) {
                           : 'text-[var(--text-secondary)] border-l-transparent hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
                       )}
                     >
-                      <Icon className="w-5 h-5" />
+                      <Icon className={cn('w-5 h-5', active && 'animate-pulse')} />
                       <span className="flex-1 text-left">{item.label}</span>
-                      <span className="text-xs text-[var(--text-muted)] bg-[var(--bg-primary)] px-1.5 py-0.5 rounded">
-                        ⌘J
-                      </span>
+                      {active && (
+                        <span className="w-2 h-2 bg-[var(--accent-primary)] rounded-full animate-pulse" />
+                      )}
                     </button>
                   );
                 }
@@ -409,7 +427,7 @@ export function MobileSidebar({ user }: SidebarProps) {
                   >
                     <Icon className="w-5 h-5" />
                     <span className="flex-1">{item.label}</span>
-                    {item.badge && !item.isAIToggle && (
+                    {item.badge && (
                       <Badge variant="gold" size="sm">
                         {item.badge}
                       </Badge>

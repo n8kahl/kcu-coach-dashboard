@@ -40,7 +40,7 @@ export function ContinueLearning({
     >
       <Card variant="glow" className="overflow-hidden">
         <CardContent className="p-0">
-          <Link href={`/learning/${courseSlug}/${module.slug}/${lesson.slug}`}>
+          <Link href={`/learn/${courseSlug}/${module.slug}/${lesson.slug}`}>
             <div className="flex flex-col md:flex-row">
               {/* Thumbnail */}
               <div className="relative w-full md:w-64 h-40 md:h-auto bg-[var(--bg-tertiary)] flex-shrink-0">

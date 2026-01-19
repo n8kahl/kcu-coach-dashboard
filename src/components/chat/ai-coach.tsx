@@ -1,3 +1,16 @@
+/**
+ * Floating AI Coach Button - DEPRECATED
+ *
+ * @deprecated This component has been replaced by the AI Command Center panel.
+ * New users should use:
+ * - AICommandCenter (right-side panel)
+ * - useAIContext().openPanel() to open programmatically
+ * - Cmd+J keyboard shortcut to toggle
+ *
+ * This file is kept for reference but is no longer rendered in the dashboard layout.
+ * See: src/components/ai/AICommandCenter.tsx
+ */
+
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
