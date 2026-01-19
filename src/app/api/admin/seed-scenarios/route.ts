@@ -9,12 +9,13 @@ import { supabaseAdmin } from '@/lib/supabase';
 import logger from '@/lib/logger';
 
 // Sample scenarios using only the base table columns
+// scenario_type must be: 'reversal', 'breakout', 'range', 'continuation', 'custom'
 const SEED_SCENARIOS = [
   {
     title: 'Support Bounce Setup - AAPL',
     description: 'Price has pulled back to a clear support level after an uptrend. Identify the correct action at this key level.',
     symbol: 'AAPL',
-    scenario_type: 'level_test',
+    scenario_type: 'reversal',
     difficulty: 'beginner',
     chart_data: {
       candles: [
@@ -35,7 +36,7 @@ const SEED_SCENARIOS = [
       { type: 'vwap', price: 184.80, strength: 70, label: 'VWAP' },
       { type: 'ema', price: 185.00, strength: 60, label: '21 EMA' }
     ],
-    decision_point: new Date('2024-01-10T14:30:00Z'),
+    decision_point: '2024-01-10T14:30:00Z',
     correct_action: 'long',
     outcome_data: { result: 'win', exit_price: 185.80, pnl_percent: 0.85, candles_to_target: 8 },
     ltp_analysis: {
@@ -51,7 +52,7 @@ const SEED_SCENARIOS = [
     title: 'Resistance Rejection - MSFT',
     description: 'Price rallying into overhead resistance. Determine if this is a short opportunity or if you should wait.',
     symbol: 'MSFT',
-    scenario_type: 'level_test',
+    scenario_type: 'reversal',
     difficulty: 'beginner',
     chart_data: {
       candles: [
@@ -72,7 +73,7 @@ const SEED_SCENARIOS = [
       { type: 'vwap', price: 376.50, strength: 70, label: 'VWAP' },
       { type: 'round_number', price: 378.00, strength: 65, label: 'Round Number' }
     ],
-    decision_point: new Date('2024-01-10T14:25:00Z'),
+    decision_point: '2024-01-10T14:25:00Z',
     correct_action: 'short',
     outcome_data: { result: 'win', exit_price: 376.20, pnl_percent: 0.45, candles_to_target: 6 },
     ltp_analysis: {
@@ -109,7 +110,7 @@ const SEED_SCENARIOS = [
       { type: 'ema', price: 480.00, strength: 70, label: '9 EMA' },
       { type: 'support', price: 478.50, strength: 75, label: 'Morning Low' }
     ],
-    decision_point: new Date('2024-01-10T14:25:00Z'),
+    decision_point: '2024-01-10T14:25:00Z',
     correct_action: 'long',
     outcome_data: { result: 'win', exit_price: 484.50, pnl_percent: 0.73, candles_to_target: 10 },
     ltp_analysis: {
@@ -146,7 +147,7 @@ const SEED_SCENARIOS = [
       { type: 'vwap', price: 142.00, strength: 70, label: 'VWAP' },
       { type: 'round_number', price: 141.00, strength: 60, label: '$141 Psych Level' }
     ],
-    decision_point: new Date('2024-01-10T14:20:00Z'),
+    decision_point: '2024-01-10T14:20:00Z',
     correct_action: 'long',
     outcome_data: { result: 'win', exit_price: 143.80, pnl_percent: 1.48, candles_to_target: 12 },
     ltp_analysis: {
@@ -183,7 +184,7 @@ const SEED_SCENARIOS = [
       { type: 'ema', price: 246.00, strength: 75, label: '21 EMA' },
       { type: 'vwap', price: 248.00, strength: 70, label: 'VWAP' }
     ],
-    decision_point: new Date('2024-01-10T14:30:00Z'),
+    decision_point: '2024-01-10T14:30:00Z',
     correct_action: 'long',
     outcome_data: { result: 'win', exit_price: 253.00, pnl_percent: 2.22, candles_to_target: 15 },
     ltp_analysis: {
@@ -220,7 +221,7 @@ const SEED_SCENARIOS = [
       { type: 'weekly_vwap', price: 355.00, strength: 85, label: 'Weekly VWAP' },
       { type: 'fib', price: 356.00, strength: 75, label: '50% Fib Retracement' }
     ],
-    decision_point: new Date('2024-01-10T14:30:00Z'),
+    decision_point: '2024-01-10T14:30:00Z',
     correct_action: 'long',
     outcome_data: { result: 'win', exit_price: 360.00, pnl_percent: 1.21, candles_to_target: 18 },
     ltp_analysis: {
@@ -257,7 +258,7 @@ const SEED_SCENARIOS = [
       { type: 'vwap', price: 142.80, strength: 70, label: 'VWAP' },
       { type: 'open', price: 142.00, strength: 65, label: 'Open' }
     ],
-    decision_point: new Date('2024-01-10T14:30:00Z'),
+    decision_point: '2024-01-10T14:30:00Z',
     correct_action: 'wait',
     outcome_data: { result: 'wait_correct', exit_price: null, pnl_percent: 0, candles_to_target: 0 },
     ltp_analysis: {
@@ -294,7 +295,7 @@ const SEED_SCENARIOS = [
       { type: 'stop_hunt', price: 469.50, strength: 85, label: 'Stop Hunt Zone' },
       { type: 'vwap', price: 471.50, strength: 70, label: 'VWAP' }
     ],
-    decision_point: new Date('2024-01-10T14:20:00Z'),
+    decision_point: '2024-01-10T14:20:00Z',
     correct_action: 'long',
     outcome_data: { result: 'win', exit_price: 474.00, pnl_percent: 0.57, candles_to_target: 10 },
     ltp_analysis: {
@@ -331,7 +332,7 @@ const SEED_SCENARIOS = [
       { type: 'resistance', price: 399.50, strength: 85, label: 'Prior High' },
       { type: 'vwap', price: 398.50, strength: 70, label: 'VWAP' }
     ],
-    decision_point: new Date('2024-01-10T14:20:00Z'),
+    decision_point: '2024-01-10T14:20:00Z',
     correct_action: 'short',
     outcome_data: { result: 'win', exit_price: 396.00, pnl_percent: 0.85, candles_to_target: 12 },
     ltp_analysis: {
@@ -368,7 +369,7 @@ const SEED_SCENARIOS = [
       { type: 'vwap', price: 150.00, strength: 75, label: 'VWAP' },
       { type: 'ema', price: 148.00, strength: 70, label: '9 EMA' }
     ],
-    decision_point: new Date('2024-01-10T14:25:00Z'),
+    decision_point: '2024-01-10T14:25:00Z',
     correct_action: 'wait',
     outcome_data: { result: 'wait_correct', exit_price: null, pnl_percent: 0, candles_to_target: 0 },
     ltp_analysis: {
@@ -390,9 +391,17 @@ export async function POST(request: Request) {
     }
 
     // Check existing scenarios count
-    const { count: existingCount } = await supabaseAdmin
+    const { count: existingCount, error: countError } = await supabaseAdmin
       .from('practice_scenarios')
       .select('*', { count: 'exact', head: true });
+
+    if (countError) {
+      return NextResponse.json({
+        error: 'Failed to check existing scenarios',
+        details: countError.message,
+        code: countError.code
+      }, { status: 500 });
+    }
 
     if (existingCount && existingCount >= 10) {
       return NextResponse.json({
@@ -402,26 +411,44 @@ export async function POST(request: Request) {
       });
     }
 
-    // Insert scenarios
-    const { data, error } = await supabaseAdmin
-      .from('practice_scenarios')
-      .insert(SEED_SCENARIOS)
-      .select('id, title, difficulty');
+    // Insert scenarios one by one to identify which one fails
+    const inserted = [];
+    const errors = [];
 
-    if (error) {
-      logger.error('Error seeding scenarios', { error: error.message });
-      return NextResponse.json({ error: 'Failed to seed scenarios', details: error.message }, { status: 500 });
+    for (const scenario of SEED_SCENARIOS) {
+      const { data, error } = await supabaseAdmin
+        .from('practice_scenarios')
+        .insert(scenario)
+        .select('id, title, difficulty')
+        .single();
+
+      if (error) {
+        errors.push({ title: scenario.title, error: error.message, code: error.code });
+      } else if (data) {
+        inserted.push(data);
+      }
+    }
+
+    if (errors.length > 0 && inserted.length === 0) {
+      return NextResponse.json({
+        error: 'Failed to seed any scenarios',
+        details: errors
+      }, { status: 500 });
     }
 
     return NextResponse.json({
       success: true,
-      message: `Seeded ${data?.length || 0} practice scenarios`,
-      scenarios: data
+      message: `Seeded ${inserted.length} practice scenarios`,
+      scenarios: inserted,
+      errors: errors.length > 0 ? errors : undefined
     });
 
   } catch (error) {
     logger.error('Error in seed scenarios', error instanceof Error ? error : { message: String(error) });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
   }
 }
 
