@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { usePageContext } from '@/components/ai';
 import { cn } from '@/lib/utils';
 import { useCompanionStream, type CompanionEvent } from '@/hooks/useCompanionStream';
 import { Button } from '@/components/ui/button';
@@ -98,6 +99,7 @@ interface CompanionMessage {
 }
 
 export default function CompanionPage() {
+  usePageContext();
   const [watchlist, setWatchlist] = useState<WatchlistSymbol[]>([]);
   const [setups, setSetups] = useState<DetectedSetup[]>([]);
   const [newSymbol, setNewSymbol] = useState('');

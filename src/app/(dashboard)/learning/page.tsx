@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { usePageContext } from '@/components/ai';
 import { Header } from '@/components/layout/header';
 import { PageShell } from '@/components/layout/page-shell';
 import { Card, CardContent } from '@/components/ui/card';
@@ -70,6 +71,7 @@ interface LearningStats {
 type ModuleProgress = Record<string, { completed: number; total: number }>;
 
 export default function LearningPage() {
+  usePageContext();
   const [modules, setModules] = useState<LearningModule[]>([]);
   const [stats, setStats] = useState<LearningStats | null>(null);
   const [dataSource, setDataSource] = useState<'thinkific' | 'local'>('local');
@@ -94,15 +96,15 @@ export default function LearningPage() {
         setStats(modulesData.stats);
         setDataSource(modulesData.source || 'local');
 
-        // Fetch user progress
-        const progressRes = await fetch('/api/learning/progress');
+        // Fetch user progress from v2 API
+        const progressRes = await fetch('/api/learning/v2/progress');
         if (progressRes.ok) {
           const progressData = await progressRes.json();
 
-          // Convert API response to module progress format
+          // v2 API returns { modules: { [moduleId]: { completed, total } } }
           const progress: ModuleProgress = {};
           (modulesData.modules || []).forEach((module: LearningModule) => {
-            const moduleProgress = progressData.progress?.[module.id] || {
+            const moduleProgress = progressData.modules?.[module.id] || {
               completed: 0,
               total: module.lessonsCount,
             };

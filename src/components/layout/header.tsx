@@ -159,15 +159,16 @@ export function Header({ title, subtitle, breadcrumbs, actions }: HeaderProps) {
   );
 }
 
-// Market Status Bar - shows live market info
+// Market Status Bar - shows live market info from Massive.com API
 interface MarketStatusProps {
   spyPrice: number;
   spyChange: number;
   qqqPrice: number;
   qqqChange: number;
   vix: number;
-  marketStatus: 'pre-market' | 'open' | 'closed';
+  marketStatus: 'premarket' | 'open' | 'afterhours' | 'closed';
   lastUpdated: string;
+  isLive?: boolean;
 }
 
 export function MarketStatusBar({
@@ -178,16 +179,19 @@ export function MarketStatusBar({
   vix,
   marketStatus,
   lastUpdated,
+  isLive = false,
 }: MarketStatusProps) {
   const statusColors = {
-    'pre-market': 'bg-[var(--warning)]',
+    premarket: 'bg-[var(--warning)]',
     open: 'bg-[var(--success)]',
+    afterhours: 'bg-[var(--warning)]',
     closed: 'bg-[var(--text-tertiary)]',
   };
 
   const statusLabels = {
-    'pre-market': 'Pre-Market',
+    premarket: 'Pre-Market',
     open: 'Market Open',
+    afterhours: 'After Hours',
     closed: 'Market Closed',
   };
 
@@ -201,6 +205,11 @@ export function MarketStatusBar({
             <span className="text-xs font-medium text-[var(--text-secondary)]">
               {statusLabels[marketStatus]}
             </span>
+            {isLive && (
+              <span className="text-[10px] font-medium text-[var(--success)] bg-[var(--success)]/10 px-1.5 py-0.5 rounded">
+                LIVE
+              </span>
+            )}
           </div>
 
           {/* SPY */}
@@ -251,7 +260,7 @@ export function MarketStatusBar({
 
         {/* Last updated */}
         <div className="flex items-center gap-2 text-[var(--text-tertiary)]">
-          <RefreshCw className="w-3 h-3" />
+          <RefreshCw className={cn('w-3 h-3', isLive && 'animate-spin')} />
           <span className="text-xs">{lastUpdated}</span>
         </div>
       </div>

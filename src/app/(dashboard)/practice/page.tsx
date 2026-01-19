@@ -20,8 +20,12 @@ import { DecisionPanel, TradePlan } from '@/components/practice/DecisionPanel';
 import { ComparisonPanel } from '@/components/practice/ComparisonPanel';
 import { AICoachFeedback, AIFeedback } from '@/components/practice/AICoachFeedback';
 import { MarketContextCard, ScenarioContext } from '@/components/practice/MarketContextCard';
+import { PaperTradingPanel } from '@/components/practice/paper-trading-panel';
+import { OptionsChain } from '@/components/practice/options-chain';
+import { ReplayController, useReplayState } from '@/components/practice/replay-controller';
+import { SkillExercises } from '@/components/practice/skill-exercises';
 import { cn } from '@/lib/utils';
-import { motion, AnimatePresence } from 'framer-motion';
+import { usePageContext } from '@/components/ai';
 import {
   Target,
   TrendingUp,
@@ -50,7 +54,9 @@ import {
   MessageSquare,
   Wand2,
   LayoutGrid,
-  Star,
+  Wallet,
+  Layers,
+  GraduationCap,
 } from 'lucide-react';
 
 // Types
@@ -135,19 +141,6 @@ interface CoachingFeedback {
 
 type PracticeMode = 'standard' | 'quick_drill' | 'deep_analysis' | 'replay' | 'ai_generated' | 'multi_timeframe';
 
-interface LeaderboardEntry {
-  rank: number;
-  userId: string;
-  userName: string;
-  userAvatar?: string;
-  totalXp: number;
-  currentLevel: number;
-  accuracy: number;
-  streak: number;
-  scenariosCompleted: number;
-  isCurrentUser?: boolean;
-}
-
 // Practice Mode Definitions
 const PRACTICE_MODES = [
   {
@@ -195,6 +188,9 @@ const PRACTICE_MODES = [
 ];
 
 export default function PracticePage() {
+  // AI Context - update page context
+  usePageContext();
+
   // Core state
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioDetail | null>(null);
@@ -242,24 +238,15 @@ export default function PracticePage() {
   });
   const [showMTFChart, setShowMTFChart] = useState(false);
 
-  // Enhanced features state
-  const [useAdvancedChart, setUseAdvancedChart] = useState(true);
-  const [currentAchievement, setCurrentAchievement] = useState<Achievement | null>(null);
-  const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
-  const [leaderboardTimeRange, setLeaderboardTimeRange] = useState<'daily' | 'weekly' | 'monthly' | 'all_time'>('weekly');
-  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
-  const [marketContext, setMarketContext] = useState<MarketContext | null>(null);
-  const [userPlacements, setUserPlacements] = useState<{
-    entry: number | null;
-    stopLoss: number | null;
-    target1: number | null;
-    target2: number | null;
-  }>({
-    entry: null,
-    stopLoss: null,
-    target1: null,
-    target2: null,
-  });
+  // Right panel state for tools
+  type RightPanelTab = 'none' | 'paper_trading' | 'options' | 'exercises';
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('none');
+
+  // Replay state (for enhanced replay mode)
+  const replayState = useReplayState(
+    selectedScenario?.chartData?.candles?.length || 0,
+    0
+  );
 
   // Trade Plan state (for full trade analysis)
   const [tradePlan, setTradePlan] = useState<TradePlan>({
@@ -352,44 +339,15 @@ export default function PracticePage() {
     }
   }, []);
 
-  // Fetch leaderboard
-  const fetchLeaderboard = useCallback(async () => {
-    setLeaderboardLoading(true);
-    try {
-      const res = await fetch(`/api/practice/leaderboard?timeRange=${leaderboardTimeRange}`);
-      if (res.ok) {
-        const data = await res.json();
-        setLeaderboardData(data.leaderboard || []);
-      }
-    } catch (error) {
-      console.error('Error fetching leaderboard:', error);
-      // Mock data for development
-      setLeaderboardData([
-        { rank: 1, userId: '1', userName: 'TradeMaster', totalXp: 12500, currentLevel: 15, accuracy: 82, streak: 12, scenariosCompleted: 156 },
-        { rank: 2, userId: '2', userName: 'LTPKing', totalXp: 10200, currentLevel: 13, accuracy: 78, streak: 7, scenariosCompleted: 134 },
-        { rank: 3, userId: '3', userName: 'ChartNinja', totalXp: 8900, currentLevel: 11, accuracy: 75, streak: 5, scenariosCompleted: 112 },
-        { rank: 4, userId: '4', userName: 'PatientTrader', totalXp: 7600, currentLevel: 10, accuracy: 72, streak: 3, scenariosCompleted: 98 },
-        { rank: 5, userId: '5', userName: 'LevelHunter', totalXp: 6200, currentLevel: 9, accuracy: 70, streak: 2, scenariosCompleted: 85 },
-      ]);
-    } finally {
-      setLeaderboardLoading(false);
-    }
-  }, [leaderboardTimeRange]);
-
   // Initialize
   useEffect(() => {
     async function init() {
       setLoading(true);
-      await Promise.all([fetchScenarios(), fetchStats(), fetchLeaderboard()]);
+      await Promise.all([fetchScenarios(), fetchStats()]);
       setLoading(false);
     }
     init();
-  }, [fetchScenarios, fetchStats, fetchLeaderboard]);
-
-  // Refetch leaderboard when time range changes
-  useEffect(() => {
-    fetchLeaderboard();
-  }, [leaderboardTimeRange, fetchLeaderboard]);
+  }, [fetchScenarios, fetchStats]);
 
   // Start a new practice session
   const startSession = async () => {
@@ -983,14 +941,9 @@ export default function PracticePage() {
 
   if (loading) {
     return (
-      <>
-        <Header
-          title="Practice Simulator"
-          subtitle="Master the LTP framework through interactive scenarios"
-          breadcrumbs={[{ label: 'Practice' }]}
-        />
-        <PracticePageSkeleton />
-      </>
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-primary)]" />
+      </div>
     );
   }
 
@@ -1352,58 +1305,128 @@ export default function PracticePage() {
                           showOutcome={showOutcome}
                         />
                       ) : selectedScenario.chartData?.candles?.length > 0 ? (
-                        useAdvancedChart ? (
-                          <AdvancedPracticeChart
-                            chartData={selectedScenario.chartData}
-                            keyLevels={selectedScenario.keyLevels || []}
-                            decisionPoint={selectedScenario.decisionPoint}
-                            symbol={selectedScenario.symbol}
-                            timeframe={selectedScenario.chartTimeframe || '5m'}
-                            showOutcome={showOutcome}
-                            replayMode={practiceMode === 'replay'}
-                            enableInteraction={!result}
-                            onDecisionPointReached={() => setDecisionReached(true)}
-                            onPlacementChange={(placements) => setUserPlacements(placements)}
-                            className="rounded-lg"
-                          />
-                        ) : (
-                          <PracticeChart
-                            chartData={selectedScenario.chartData}
-                            keyLevels={selectedScenario.keyLevels || []}
-                            decisionPoint={selectedScenario.decisionPoint}
-                            outcomeData={selectedScenario.outcomeData}
-                            symbol={selectedScenario.symbol}
-                            timeframe={selectedScenario.chartTimeframe || '5m'}
-                            showOutcome={showOutcome}
-                            replayMode={practiceMode === 'replay'}
-                            onDecisionPointReached={() => setDecisionReached(true)}
-                            className="h-[400px]"
-                          />
-                        )
+                        <PracticeChart
+                          chartData={selectedScenario.chartData}
+                          keyLevels={selectedScenario.keyLevels || []}
+                          decisionPoint={selectedScenario.decisionPoint}
+                          outcomeData={selectedScenario.outcomeData}
+                          symbol={selectedScenario.symbol}
+                          timeframe={selectedScenario.chartTimeframe || '5m'}
+                          showOutcome={showOutcome}
+                          replayMode={practiceMode === 'replay'}
+                          onDecisionPointReached={() => setDecisionReached(true)}
+                          className="h-[400px]"
+                        />
                       ) : (
-                        <ChartSkeleton className="h-[450px]" />
+                        <div className="bg-[var(--bg-tertiary)] p-6">
+                          <div className="aspect-video bg-[var(--bg-primary)] border border-[var(--border-primary)] flex items-center justify-center">
+                            <div className="text-center text-[var(--text-tertiary)]">
+                              <BarChart3 className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                              <p>Chart data loading...</p>
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
 
-                    {/* Market Context Panel */}
-                    {selectedScenario.ltpAnalysis && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="mb-6"
-                      >
-                        <ContextPanel
-                          marketContext={marketContext || {
-                            spyTrend: 'bullish',
-                            vixLevel: 15.5,
-                            volumeProfile: 'normal',
-                            timeOfDay: 'Morning Session',
-                          }}
-                          ltpAnalysis={result ? selectedScenario.ltpAnalysis : undefined}
-                          decisionContext={selectedScenario.decisionPoint?.context}
-                          collapsed={!result}
+                    {/* Replay Controller (Replay Mode) */}
+                    {practiceMode === 'replay' && selectedScenario?.chartData?.candles?.length > 0 && (
+                      <div className="mb-4">
+                        <ReplayController
+                          totalCandles={selectedScenario.chartData.candles.length}
+                          currentIndex={replayState.currentIndex}
+                          onIndexChange={replayState.setCurrentIndex}
+                          isPlaying={replayState.isPlaying}
+                          onPlayPause={replayState.togglePlayPause}
+                          playbackSpeed={replayState.playbackSpeed}
+                          onSpeedChange={replayState.setPlaybackSpeed}
+                          decisionPointIndex={selectedScenario.decisionPoint ? Math.floor(selectedScenario.chartData.candles.length * 0.7) : undefined}
+                          onShowOutcome={() => setShowOutcome(true)}
                         />
-                      </motion.div>
+                      </div>
+                    )}
+
+                    {/* Tools Toolbar */}
+                    <div className="flex items-center gap-2 mb-4 pb-4 border-b border-[var(--border-primary)]">
+                      <span className="text-xs text-[var(--text-tertiary)] mr-2">Tools:</span>
+                      <button
+                        onClick={() => setRightPanelTab(rightPanelTab === 'paper_trading' ? 'none' : 'paper_trading')}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
+                          rightPanelTab === 'paper_trading'
+                            ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
+                        )}
+                        title="Practice with simulated $25,000 account"
+                      >
+                        <Wallet className="w-3.5 h-3.5" />
+                        Paper Trading
+                      </button>
+                      <button
+                        onClick={() => setRightPanelTab(rightPanelTab === 'options' ? 'none' : 'options')}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
+                          rightPanelTab === 'options'
+                            ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
+                        )}
+                        title="View options chain with Greeks (0DTE supported)"
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        Options Chain
+                      </button>
+                      <button
+                        onClick={() => setRightPanelTab(rightPanelTab === 'exercises' ? 'none' : 'exercises')}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-all duration-200 rounded',
+                          rightPanelTab === 'exercises'
+                            ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                            : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--bg-tertiary)]'
+                        )}
+                        title="Targeted exercises to improve specific skills"
+                      >
+                        <GraduationCap className="w-3.5 h-3.5" />
+                        Skill Exercises
+                      </button>
+                    </div>
+
+                    {/* Right Panel Content (Collapsible with animation) */}
+                    {rightPanelTab !== 'none' && (
+                      <div className="mb-6 border border-[var(--border-primary)] rounded bg-[var(--bg-secondary)] animate-in slide-in-from-top-2 duration-300 ease-out">
+                        {rightPanelTab === 'paper_trading' && (
+                          <PaperTradingPanel
+                            symbol={selectedScenario?.symbol || 'SPY'}
+                            currentPrice={
+                              selectedScenario?.chartData?.candles?.length
+                                ? selectedScenario.chartData.candles[selectedScenario.chartData.candles.length - 1].c
+                                : 0
+                            }
+                            userId="demo-user"
+                          />
+                        )}
+                        {rightPanelTab === 'options' && (
+                          <OptionsChain
+                            symbol={selectedScenario?.symbol || 'SPY'}
+                            currentPrice={
+                              selectedScenario?.chartData?.candles?.length
+                                ? selectedScenario.chartData.candles[selectedScenario.chartData.candles.length - 1].c
+                                : 450
+                            }
+                            onOptionSelect={(option) => {
+                              console.log('Selected option:', option);
+                            }}
+                          />
+                        )}
+                        {rightPanelTab === 'exercises' && (
+                          <SkillExercises
+                            onExerciseComplete={(result) => {
+                              console.log('Exercise completed:', result);
+                              fetchStats();
+                            }}
+                            className="border-0"
+                          />
+                        )}
+                      </div>
                     )}
 
                     {/* LTP Checklist (Deep Analysis Mode) */}
@@ -1721,99 +1744,7 @@ export default function PracticePage() {
             </Card>
           </PageSection>
         </div>
-
-        {/* Leaderboard Section */}
-        <PageSection>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Leaderboard
-              entries={leaderboardData}
-              timeRange={leaderboardTimeRange}
-              onTimeRangeChange={setLeaderboardTimeRange}
-              isLoading={leaderboardLoading}
-              onRefresh={fetchLeaderboard}
-            />
-
-            {/* XP Progress Card */}
-            <Card>
-              <CardHeader
-                title="Your Progress"
-                icon={<Award className="w-5 h-5 text-[var(--accent-primary)]" />}
-              />
-              <CardContent>
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div className="p-4 bg-[var(--bg-tertiary)] rounded-lg text-center">
-                    <div className="text-3xl font-bold text-[var(--accent-primary)]">
-                      {userStats?.totalAttempts || 0}
-                    </div>
-                    <div className="text-xs text-[var(--text-tertiary)]">Total Attempts</div>
-                  </div>
-                  <div className="p-4 bg-[var(--bg-tertiary)] rounded-lg text-center">
-                    <div className="text-3xl font-bold text-[var(--profit)]">
-                      {userStats?.accuracyPercent?.toFixed(0) || 0}%
-                    </div>
-                    <div className="text-xs text-[var(--text-tertiary)]">Accuracy</div>
-                  </div>
-                </div>
-
-                {/* Current Streak */}
-                {userStats?.currentStreak && userStats.currentStreak > 0 && (
-                  <motion.div
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="flex items-center justify-center gap-3 p-4 bg-gradient-to-r from-orange-500/20 to-yellow-500/20 border border-orange-500/30 rounded-lg mb-4"
-                  >
-                    <Flame className="w-8 h-8 text-orange-400" />
-                    <div>
-                      <div className="text-2xl font-bold text-orange-400">
-                        {userStats.currentStreak} Day Streak!
-                      </div>
-                      <div className="text-xs text-[var(--text-tertiary)]">
-                        Best: {userStats.bestStreak || 0} days
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
-                {/* Quick Actions */}
-                <div className="space-y-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="w-full justify-start"
-                    onClick={() => {
-                      setPracticeMode('ai_generated');
-                      setSelectedScenario(null);
-                    }}
-                  >
-                    <Sparkles className="w-4 h-4 mr-2" />
-                    Try AI-Generated Scenario
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="w-full justify-start"
-                    onClick={() => {
-                      setPracticeMode('quick_drill');
-                      setSelectedScenario(null);
-                    }}
-                  >
-                    <Zap className="w-4 h-4 mr-2" />
-                    Start Quick Drill
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </PageSection>
       </PageShell>
-
-      {/* Achievement Popup */}
-      <AchievementPopup
-        achievement={currentAchievement}
-        onClose={() => setCurrentAchievement(null)}
-        autoClose={true}
-        autoCloseDelay={5000}
-      />
     </>
   );
 }

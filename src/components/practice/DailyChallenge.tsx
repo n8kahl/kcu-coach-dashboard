@@ -272,7 +272,7 @@ export function DailyChallenges({ onStartChallenge, className }: DailyChallenges
               value={100 - (userXp.xpToNextLevel / ((userXp.currentLevel + 1) * 50)) * 100}
               max={100}
               size="sm"
-              variant="default"
+              variant="gold"
             />
           </div>
         )}

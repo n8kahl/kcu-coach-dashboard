@@ -59,21 +59,34 @@ export async function POST(request: Request) {
 
     const body = await request.json();
 
-    // Calculate LTP grade
-    const ltpScore =
-      (body.had_level ? 25 : 0) +
-      (body.had_trend ? 25 : 0) +
-      (body.had_patience_candle ? 25 : 0) +
-      (body.followed_rules ? 25 : 0);
+    // Accept field aliases for backward compatibility
+    // shares = body.shares ?? body.quantity ?? 1
+    const shares = body.shares ?? body.quantity ?? 1;
+    // is_options = body.is_options ?? body.isOptions ?? false
+    const isOptions = body.is_options ?? body.isOptions ?? false;
 
+    // Calculate LTP grade from checklist fields
+    // Each field is worth 25 points for a max score of 100
+    const hadLevel = body.had_level ?? false;
+    const hadTrend = body.had_trend ?? false;
+    const hadPatienceCandle = body.had_patience_candle ?? false;
+    const followedRules = body.followed_rules ?? false;
+
+    const ltpScore =
+      (hadLevel ? 25 : 0) +
+      (hadTrend ? 25 : 0) +
+      (hadPatienceCandle ? 25 : 0) +
+      (followedRules ? 25 : 0);
+
+    // Grade thresholds: A=100, B=75, C=50, D=25, F=0
     const ltpGrade =
-      ltpScore >= 90 ? 'A' : ltpScore >= 75 ? 'B' : ltpScore >= 50 ? 'C' : ltpScore >= 25 ? 'D' : 'F';
+      ltpScore >= 100 ? 'A' : ltpScore >= 75 ? 'B' : ltpScore >= 50 ? 'C' : ltpScore >= 25 ? 'D' : 'F';
 
     const feedback: string[] = [];
-    if (!body.had_level) feedback.push('Consider waiting for a key support/resistance level');
-    if (!body.had_trend) feedback.push('Trading with the trend increases probability of success');
-    if (!body.had_patience_candle) feedback.push('Patience candles confirm entry setups');
-    if (!body.followed_rules) feedback.push('Following your trading rules is crucial for consistency');
+    if (!hadLevel) feedback.push('Consider waiting for a key support/resistance level');
+    if (!hadTrend) feedback.push('Trading with the trend increases probability of success');
+    if (!hadPatienceCandle) feedback.push('Patience candles confirm entry setups');
+    if (!followedRules) feedback.push('Following your trading rules is crucial for consistency');
 
     const tradeData = {
       user_id: userId,
@@ -81,8 +94,8 @@ export async function POST(request: Request) {
       direction: body.direction,
       entry_price: body.entry_price,
       exit_price: body.exit_price,
-      shares: body.shares || 1,
-      is_options: body.is_options || false,
+      shares,
+      is_options: isOptions,
       option_type: body.option_type || null,
       strike: body.strike || null,
       expiration: body.expiration || null,
@@ -91,10 +104,10 @@ export async function POST(request: Request) {
       pnl: body.pnl,
       pnl_percent: body.pnl_percent,
       setup_type: body.setup_type,
-      had_level: body.had_level || false,
-      had_trend: body.had_trend || false,
-      had_patience_candle: body.had_patience_candle || false,
-      followed_rules: body.followed_rules || false,
+      had_level: hadLevel,
+      had_trend: hadTrend,
+      had_patience_candle: hadPatienceCandle,
+      followed_rules: followedRules,
       emotions: body.emotions || 'calm',
       notes: body.notes || null,
       screenshot_url: body.screenshot_url || null,
@@ -103,6 +116,19 @@ export async function POST(request: Request) {
         grade: ltpGrade,
         feedback,
       },
+      // Phase 1: New fields for screenshot analysis and quick entry
+      chart_screenshot: body.chart_screenshot || null,
+      ai_analysis: body.ai_analysis || null,
+      entry_mode: body.entry_mode || 'full',
+      r_multiple: body.r_multiple || null,
+      // Phase 2: Psychology tracking fields
+      pre_trade_confidence: body.pre_trade_confidence || null,
+      pre_trade_sleep: body.pre_trade_sleep || null,
+      pre_trade_stress: body.pre_trade_stress || null,
+      during_emotions: body.during_emotions || null,
+      post_satisfaction: body.post_satisfaction || null,
+      would_take_again: body.would_take_again || null,
+      lesson_learned: body.lesson_learned || null,
     };
 
     const { data: trade, error } = await supabaseAdmin
