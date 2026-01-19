@@ -10,10 +10,11 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { parseAIResponse } from '@/lib/rich-content-parser';
 import { getEnhancedRAGContext } from '@/lib/rag';
-import { marketDataService } from '@/lib/market-data';
 import { generateSystemPrompt } from '@/lib/ai-context';
+import { getMarketDataTools, executeMarketDataTool } from '@/lib/market-data-tools';
 import logger from '@/lib/logger';
 import Anthropic from '@anthropic-ai/sdk';
+import type { MessageParam, ContentBlock, ToolResultBlockParam } from '@anthropic-ai/sdk/resources/messages';
 import type { UnifiedAIRequest, UnifiedAIResponse, AIContext } from '@/types/ai';
 
 const anthropic = new Anthropic({
@@ -103,7 +104,7 @@ async function buildFullContext(
 }
 
 /**
- * Handle chat mode - standard conversation
+ * Handle chat mode - standard conversation with market data tool use
  */
 async function handleChatMode(
   message: string,
@@ -143,8 +144,18 @@ async function handleChatMode(
     systemPrompt += `\n\n=== RELEVANT KNOWLEDGE ===\n${ragContext}`;
   }
 
-  // Build messages array
-  const messages = [
+  // Add today's date for relative date parsing
+  const today = new Date().toISOString().split('T')[0];
+  systemPrompt += `\n\n=== MARKET DATA ACCESS ===
+Today's date is ${today}. You have access to real-time market data tools.
+When users ask about stock prices, market conditions, or trading setups:
+1. Use the appropriate market data tool to get current/historical data
+2. Parse relative dates (e.g., "last Friday" = calculate from today)
+3. Present the data clearly and apply LTP Framework analysis when relevant
+4. For questions about specific dates, convert to YYYY-MM-DD format`;
+
+  // Build messages array for tool use
+  const messages: MessageParam[] = [
     ...conversationHistory.map((msg) => ({
       role: msg.role as 'user' | 'assistant',
       content: msg.content,
@@ -155,16 +166,79 @@ async function handleChatMode(
     },
   ];
 
-  // Call Claude API
-  const response = await anthropic.messages.create({
+  // Get market data tools
+  const tools = getMarketDataTools();
+
+  // Call Claude API with tools
+  let response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: options?.maxTokens || 1024,
     system: systemPrompt,
     messages,
+    tools,
   });
 
-  const rawMessage =
-    response.content[0].type === 'text' ? response.content[0].text : '';
+  let totalInputTokens = response.usage.input_tokens;
+  let totalOutputTokens = response.usage.output_tokens;
+
+  // Handle tool use loop
+  while (response.stop_reason === 'tool_use') {
+    // Find all tool use blocks
+    const toolUseBlocks = response.content.filter(
+      (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use'
+    );
+
+    if (toolUseBlocks.length === 0) break;
+
+    // Execute all tools in parallel
+    const toolResults: ToolResultBlockParam[] = await Promise.all(
+      toolUseBlocks.map(async (toolUse) => {
+        logger.info('Executing market data tool', {
+          tool: toolUse.name,
+          input: toolUse.input,
+        });
+
+        const result = await executeMarketDataTool(
+          toolUse.name,
+          toolUse.input as Record<string, unknown>
+        );
+
+        return {
+          type: 'tool_result' as const,
+          tool_use_id: toolUse.id,
+          content: result,
+        };
+      })
+    );
+
+    // Add assistant response and tool results to messages
+    messages.push({
+      role: 'assistant',
+      content: response.content as ContentBlock[],
+    });
+    messages.push({
+      role: 'user',
+      content: toolResults,
+    });
+
+    // Continue the conversation
+    response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: options?.maxTokens || 1024,
+      system: systemPrompt,
+      messages,
+      tools,
+    });
+
+    totalInputTokens += response.usage.input_tokens;
+    totalOutputTokens += response.usage.output_tokens;
+  }
+
+  // Extract final text response
+  const textBlock = response.content.find(
+    (block): block is Anthropic.TextBlock => block.type === 'text'
+  );
+  const rawMessage = textBlock?.text || '';
 
   // Parse rich content markers from the response
   const { cleanText, richContent } = parseAIResponse(rawMessage);
@@ -175,8 +249,8 @@ async function handleChatMode(
     richContent: options?.includeRichContent !== false ? richContent : undefined,
     sources: ragSources.length > 0 ? ragSources : undefined,
     usage: {
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      inputTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
     },
   };
 }
