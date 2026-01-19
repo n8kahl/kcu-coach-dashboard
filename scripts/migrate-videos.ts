@@ -17,6 +17,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as dotenv from 'dotenv';
+
+// Load environment variables from .env.local
+dotenv.config({ path: '.env.local' });
+dotenv.config({ path: '.env' });
 import { createClient } from '@supabase/supabase-js';
 
 // Configuration
