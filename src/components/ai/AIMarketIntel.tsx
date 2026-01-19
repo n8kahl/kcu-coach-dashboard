@@ -14,6 +14,9 @@ import {
   ChevronUp,
   AlertCircle,
   CheckCircle2,
+  Activity,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 
 // ============================================
@@ -32,7 +35,7 @@ interface MarketData {
 }
 
 interface KeyLevel {
-  type: 'support' | 'resistance' | 'pdh' | 'pdl' | 'orb_high' | 'orb_low' | 'vwap';
+  type: 'support' | 'resistance' | 'pdh' | 'pdl' | 'orb_high' | 'orb_low' | 'vwap' | 'ema9' | 'ema21' | 'sma200';
   price: number;
   distance: number;
   strength: number;
@@ -43,13 +46,21 @@ interface PatienceCandle {
   forming: boolean;
   confirmed: boolean;
   direction: 'bullish' | 'bearish';
-  timestamp: string;
+  timestamp?: string;
 }
 
 interface MarketStatus {
   status: 'premarket' | 'open' | 'afterhours' | 'closed';
   nextEvent: string;
   nextEventTime: string;
+}
+
+interface MarketAPIResponse {
+  symbols: MarketData[];
+  marketStatus: MarketStatus;
+  vix?: number;
+  lastUpdated: string;
+  error?: string;
 }
 
 // ============================================
@@ -69,43 +80,81 @@ export function AIMarketIntel({
 }: AIMarketIntelProps) {
   const [marketData, setMarketData] = useState<MarketData[]>([]);
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
+  const [vix, setVix] = useState<number | null>(null);
   const [isExpanded, setIsExpanded] = useState(!compact);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLive, setIsLive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   // Fetch market data
   useEffect(() => {
     const fetchMarketData = async () => {
       try {
-        setIsLoading(true);
         const response = await fetch(`/api/ai/market?symbols=${symbols.join(',')}`);
-        if (!response.ok) throw new Error('Failed to fetch market data');
-        const data = await response.json();
+        const data: MarketAPIResponse = await response.json();
+
+        if (!response.ok) {
+          if (response.status === 503) {
+            // Service not configured - API key missing
+            setError('Market data service not configured');
+            setIsLive(false);
+          } else {
+            throw new Error(data.error || 'Failed to fetch market data');
+          }
+          return;
+        }
+
         setMarketData(data.symbols || []);
         setMarketStatus(data.marketStatus);
+        setVix(data.vix || null);
+        setLastUpdated(new Date(data.lastUpdated));
+        setIsLive(true);
         setError(null);
       } catch (err) {
-        // Use mock data in development or on error
-        setMarketData(getMockMarketData(symbols));
-        setMarketStatus(getMockMarketStatus());
-        setError(null); // Don't show error, use mock data
+        console.error('Market data fetch error:', err);
+        setError(err instanceof Error ? err.message : 'Connection error');
+        setIsLive(false);
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchMarketData();
-    // Refresh every 30 seconds during market hours
-    const interval = setInterval(fetchMarketData, 30000);
+    // Refresh every 15 seconds during market hours for live data
+    const interval = setInterval(fetchMarketData, 15000);
     return () => clearInterval(interval);
   }, [symbols]);
 
-  if (isLoading && marketData.length === 0) {
+  if (isLoading) {
     return (
       <div className={cn('p-3 border-t border-[var(--border-primary)]', className)}>
         <div className="animate-pulse space-y-2">
           <div className="h-4 bg-[var(--bg-tertiary)] rounded w-24" />
           <div className="h-8 bg-[var(--bg-tertiary)] rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state if not configured
+  if (error && marketData.length === 0) {
+    return (
+      <div className={cn('border-t border-[var(--border-primary)]', className)}>
+        <div className="p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <WifiOff className="w-4 h-4 text-[var(--text-muted)]" />
+            <span className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
+              Market Intel
+            </span>
+          </div>
+          <div className="text-xs text-[var(--text-muted)] bg-[var(--bg-tertiary)] p-2 rounded">
+            {error === 'Market data service not configured' ? (
+              <>Set <code className="text-[var(--accent-primary)]">MASSIVE_API_KEY</code> for live data</>
+            ) : (
+              error
+            )}
+          </div>
         </div>
       </div>
     );
@@ -123,6 +172,17 @@ export function AIMarketIntel({
           <span className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
             Market Intel
           </span>
+          {/* Live indicator */}
+          {isLive ? (
+            <span className="flex items-center gap-1 text-[10px] text-[var(--success)]">
+              <Wifi className="w-3 h-3" />
+              <span className="hidden sm:inline">LIVE</span>
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+              <WifiOff className="w-3 h-3" />
+            </span>
+          )}
           {marketStatus && (
             <MarketStatusBadge status={marketStatus.status} />
           )}
@@ -145,6 +205,11 @@ export function AIMarketIntel({
             className="overflow-hidden"
           >
             <div className="px-3 pb-3 space-y-3">
+              {/* VIX Display */}
+              {vix !== null && (
+                <VixDisplay vix={vix} />
+              )}
+
               {/* Symbol Cards */}
               {marketData.map((data) => (
                 <SymbolCard key={data.symbol} data={data} compact={compact} />
@@ -157,13 +222,53 @@ export function AIMarketIntel({
                     <Clock className="w-3 h-3" />
                     <span>{marketStatus.nextEvent}</span>
                   </div>
-                  <span>{marketStatus.nextEventTime}</span>
+                  <div className="flex items-center gap-2">
+                    <span>{marketStatus.nextEventTime}</span>
+                    {lastUpdated && (
+                      <span className="text-[var(--text-muted)]">
+                        Updated {formatTimeAgo(lastUpdated)}
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// ============================================
+// VIX Display
+// ============================================
+
+function VixDisplay({ vix }: { vix: number }) {
+  const getVixLevel = (value: number): { label: string; color: string } => {
+    if (value < 15) return { label: 'Low Vol', color: 'text-[var(--success)]' };
+    if (value < 20) return { label: 'Normal', color: 'text-[var(--text-secondary)]' };
+    if (value < 25) return { label: 'Elevated', color: 'text-[var(--warning)]' };
+    if (value < 30) return { label: 'High', color: 'text-[var(--error)]' };
+    return { label: 'Extreme', color: 'text-[var(--error)]' };
+  };
+
+  const { label, color } = getVixLevel(vix);
+
+  return (
+    <div className="flex items-center justify-between bg-[var(--bg-tertiary)] border border-[var(--border-primary)] p-2">
+      <div className="flex items-center gap-2">
+        <Activity className="w-4 h-4 text-[var(--accent-primary)]" />
+        <span className="text-xs font-semibold text-[var(--text-secondary)]">VIX</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-sm text-[var(--text-primary)]">
+          {vix.toFixed(2)}
+        </span>
+        <span className={cn('text-[10px] font-medium', color)}>
+          {label}
+        </span>
+      </div>
     </div>
   );
 }
@@ -216,7 +321,7 @@ function SymbolCard({ data, compact }: { data: MarketData; compact: boolean }) {
                 <span className="text-[10px] text-[var(--text-tertiary)] uppercase">Key Levels</span>
               </div>
               <div className="flex flex-wrap gap-1">
-                {data.keyLevels.slice(0, 3).map((level, idx) => (
+                {data.keyLevels.slice(0, 4).map((level, idx) => (
                   <KeyLevelBadge key={idx} level={level} />
                 ))}
               </div>
@@ -264,6 +369,9 @@ function KeyLevelBadge({ level }: { level: KeyLevel }) {
     orb_high: 'ORB↑',
     orb_low: 'ORB↓',
     vwap: 'VWAP',
+    ema9: 'EMA9',
+    ema21: 'EMA21',
+    sma200: 'SMA200',
   };
 
   const isNearby = Math.abs(level.distance) < 0.5;
@@ -278,7 +386,7 @@ function KeyLevelBadge({ level }: { level: KeyLevel }) {
           : 'bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-tertiary)]'
       )}
     >
-      <span className="font-semibold">{typeLabels[level.type]}</span>
+      <span className="font-semibold">{typeLabels[level.type] || level.type}</span>
       <span>${level.price.toFixed(2)}</span>
       <span className="text-[var(--text-muted)]">({level.distance > 0 ? '+' : ''}{level.distance.toFixed(2)}%)</span>
     </span>
@@ -324,45 +432,14 @@ function PatienceCandleStatus({ candle }: { candle: PatienceCandle }) {
 }
 
 // ============================================
-// Mock Data (for development/fallback)
+// Helper Functions
 // ============================================
 
-function getMockMarketData(symbols: string[]): MarketData[] {
-  return symbols.map((symbol) => ({
-    symbol,
-    price: symbol === 'SPY' ? 483.50 : 418.25,
-    change: symbol === 'SPY' ? 3.75 : 2.10,
-    changePercent: symbol === 'SPY' ? 0.78 : 0.50,
-    trend: 'bullish' as const,
-    vwap: symbol === 'SPY' ? 482.00 : 417.00,
-    keyLevels: [
-      { type: 'resistance' as const, price: symbol === 'SPY' ? 485.00 : 420.00, distance: 0.31, strength: 85 },
-      { type: 'vwap' as const, price: symbol === 'SPY' ? 482.00 : 417.00, distance: -0.31, strength: 90 },
-      { type: 'support' as const, price: symbol === 'SPY' ? 480.00 : 415.00, distance: -0.72, strength: 75 },
-    ],
-    patienceCandle: {
-      timeframe: '15m',
-      forming: true,
-      confirmed: false,
-      direction: 'bullish' as const,
-      timestamp: new Date().toISOString(),
-    },
-  }));
-}
-
-function getMockMarketStatus(): MarketStatus {
-  const now = new Date();
-  const hour = now.getHours();
-  const isWeekend = now.getDay() === 0 || now.getDay() === 6;
-
-  if (isWeekend) {
-    return { status: 'closed', nextEvent: 'Opens Monday', nextEventTime: '9:30 AM ET' };
-  }
-  if (hour < 9 || (hour === 9 && now.getMinutes() < 30)) {
-    return { status: 'premarket', nextEvent: 'Market opens', nextEventTime: '9:30 AM ET' };
-  }
-  if (hour >= 16) {
-    return { status: 'afterhours', nextEvent: 'AH closes', nextEventTime: '8:00 PM ET' };
-  }
-  return { status: 'open', nextEvent: 'Market closes', nextEventTime: '4:00 PM ET' };
+function formatTimeAgo(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 10) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ago`;
 }
