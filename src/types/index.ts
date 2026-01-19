@@ -194,6 +194,73 @@ export interface TradeEntry {
   status?: 'open' | 'closed';
   created_at: string;
   updated_at: string;
+
+  // Phase 1: Screenshot & Quick Entry fields
+  chart_screenshot?: string; // Base64 or URL of chart screenshot
+  ai_analysis?: ScreenshotAnalysis; // AI analysis of screenshot
+  entry_mode?: 'quick' | 'full'; // How the trade was entered
+  r_multiple?: number; // Risk/Reward multiple
+
+  // Phase 2: Psychology & Emotion Tracking
+  pre_trade_confidence?: number; // 1-5
+  pre_trade_sleep?: number; // 1-5
+  pre_trade_stress?: 'low' | 'medium' | 'high';
+  during_emotions?: string[]; // Array of emotion tags
+  post_satisfaction?: number; // 1-5
+  would_take_again?: boolean;
+  lesson_learned?: string;
+
+  // Phase 2: AI Feedback
+  ai_feedback?: TradeFeedback;
+  feedback_reviewed?: boolean;
+}
+
+// Screenshot analysis result from Claude Vision
+export interface ScreenshotAnalysis {
+  symbol: string | null;
+  timeframe: string | null;
+  trend: 'bullish' | 'bearish' | 'sideways';
+  levels: {
+    support: number[];
+    resistance: number[];
+  };
+  pattern: string | null;
+  candlestickPatterns: string[];
+  indicators: string[];
+  ltpAssessment: {
+    level: { compliant: boolean; reason: string };
+    trend: { compliant: boolean; reason: string };
+    patience: { compliant: boolean; reason: string };
+  };
+  setupType: string;
+  riskLevel: 'conservative' | 'moderate' | 'aggressive';
+  analysis: string;
+  confidence: number;
+  suggestedDirection: 'long' | 'short' | null;
+  entryPrice: number | null;
+  stopLoss: number | null;
+  targets: number[];
+}
+
+// AI-generated trade feedback
+export interface TradeFeedback {
+  overallGrade: 'A' | 'B' | 'C' | 'D' | 'F';
+  entryAnalysis: {
+    score: number;
+    feedback: string;
+  };
+  exitAnalysis: {
+    score: number;
+    feedback: string;
+  };
+  ruleAdherence: {
+    score: number;
+    feedback: string;
+  };
+  keyLesson: string;
+  improvement: string;
+  pattern?: string;
+  encouragement?: string;
 }
 
 export interface TradeStats {

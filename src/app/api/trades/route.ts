@@ -116,6 +116,19 @@ export async function POST(request: Request) {
         grade: ltpGrade,
         feedback,
       },
+      // Phase 1: New fields for screenshot analysis and quick entry
+      chart_screenshot: body.chart_screenshot || null,
+      ai_analysis: body.ai_analysis || null,
+      entry_mode: body.entry_mode || 'full',
+      r_multiple: body.r_multiple || null,
+      // Phase 2: Psychology tracking fields
+      pre_trade_confidence: body.pre_trade_confidence || null,
+      pre_trade_sleep: body.pre_trade_sleep || null,
+      pre_trade_stress: body.pre_trade_stress || null,
+      during_emotions: body.during_emotions || null,
+      post_satisfaction: body.post_satisfaction || null,
+      would_take_again: body.would_take_again || null,
+      lesson_learned: body.lesson_learned || null,
     };
 
     const { data: trade, error } = await supabaseAdmin
