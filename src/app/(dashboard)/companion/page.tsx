@@ -21,6 +21,14 @@ import {
 } from '@/lib/kcu-coaching-rules';
 import type { LTPAnalysis } from '@/lib/market-data';
 import {
+  calculateLTP2Score,
+  createMarketContext,
+  calculateEMA,
+  type LTP2Score,
+  type MarketContext,
+} from '@/lib/ltp-gamma-engine';
+import { useSomeshVoice, type VoiceTrigger } from '@/hooks/useSomeshVoice';
+import {
   Plus,
   X,
   TrendingUp,
@@ -191,10 +199,34 @@ export default function CompanionTerminal() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [lastAlertType, setLastAlertType] = useState<'patience' | 'entry' | 'warning' | null>(null);
 
+  // LTP 2.0 state
+  const [ltp2Score, setLtp2Score] = useState<LTP2Score | null>(null);
+  const [flashEffect, setFlashEffect] = useState<'sniper' | 'warning' | 'gamma' | null>(null);
+  const prevGammaStateRef = useRef<{ nearCallWall: boolean; nearPutWall: boolean; crossedZeroGamma: boolean }>({
+    nearCallWall: false,
+    nearPutWall: false,
+    crossedZeroGamma: false,
+  });
+  const prevVwapStateRef = useRef<boolean | null>(null);
+
   const { showToast } = useToast();
+
+  // Somesh Voice Integration
+  const someshVoice = useSomeshVoice({
+    enabled: soundEnabled,
+    volume: 0.8,
+    rate: 1.0,
+    cooldownMs: 30000,
+  });
 
   // Get current market session
   const marketSession = useMemo(() => getMarketSession(), []);
+
+  // Current quote (needed for LTP 2.0 effects)
+  const currentQuote = useMemo(() => {
+    if (!selectedSymbol) return null;
+    return watchlist.find(w => w.symbol === selectedSymbol)?.quote || null;
+  }, [selectedSymbol, watchlist]);
 
   // ============================================================================
   // SSE EVENT HANDLER - LIVE UPDATES
@@ -530,6 +562,111 @@ export default function CompanionTerminal() {
     }
   }, [selectedSymbol, ltpAnalysis, updateCoachingMessages]);
 
+  // LTP 2.0 Score Calculation Effect
+  useEffect(() => {
+    if (!selectedSymbol || !gammaData || chartData.length < 21) {
+      setLtp2Score(null);
+      return;
+    }
+
+    const currentPrice = currentQuote?.last_price || chartData[chartData.length - 1]?.close || 0;
+    if (currentPrice === 0) return;
+
+    // Calculate EMAs from chart data
+    const closePrices = chartData.map(c => c.close);
+    const ema8 = calculateEMA(closePrices, 8);
+    const ema21 = calculateEMA(closePrices, 21);
+    const vwap = currentQuote?.vwap || currentPrice;
+
+    // Check for patience candle (inside bar)
+    const hasPatienceCandle = chartData.length >= 2 &&
+      chartData[chartData.length - 1].high < chartData[chartData.length - 2].high &&
+      chartData[chartData.length - 1].low > chartData[chartData.length - 2].low;
+
+    const patienceDirection = hasPatienceCandle
+      ? (chartData[chartData.length - 1].close > chartData[chartData.length - 1].open ? 'bullish' : 'bearish')
+      : undefined;
+
+    // Create market context
+    const marketContext = createMarketContext(
+      {
+        close: currentPrice,
+        high: chartData[chartData.length - 1]?.high || currentPrice,
+        low: chartData[chartData.length - 1]?.low || currentPrice,
+        open: chartData[chartData.length - 1]?.open || currentPrice,
+        previousClose: chartData[chartData.length - 2]?.close,
+        previousHigh: chartData[chartData.length - 2]?.high,
+        previousLow: chartData[chartData.length - 2]?.low,
+      },
+      { ema8, ema21 },
+      vwap,
+      {
+        callWall: gammaData.callWall,
+        putWall: gammaData.putWall,
+        zeroGamma: gammaData.gammaFlip,
+        gammaExposure: gammaData.regime === 'positive' ? 1 : gammaData.regime === 'negative' ? -1 : 0,
+      },
+      hasPatienceCandle ? { detected: true, direction: patienceDirection! } : undefined
+    );
+
+    // Calculate LTP 2.0 score
+    const newScore = calculateLTP2Score(marketContext);
+    setLtp2Score(newScore);
+
+    // Trigger voice alerts based on score
+    someshVoice.checkScore(newScore);
+
+    // Check for flash effects
+    if (newScore.grade === 'Sniper') {
+      setFlashEffect('sniper');
+      setTimeout(() => setFlashEffect(null), 2000);
+    } else if (newScore.grade === 'Dumb Shit' && newScore.score < 30) {
+      setFlashEffect('warning');
+      setTimeout(() => setFlashEffect(null), 1500);
+    }
+  }, [selectedSymbol, gammaData, chartData, currentQuote, someshVoice]);
+
+  // Gamma Proximity & VWAP Cross Voice Triggers
+  useEffect(() => {
+    if (!selectedSymbol || !gammaData || !currentQuote?.last_price) return;
+
+    const currentPrice = currentQuote.last_price;
+    const vwap = currentQuote.vwap || currentPrice;
+
+    // Check Call Wall proximity (within 1%)
+    const nearCallWall = currentPrice > gammaData.callWall * 0.99;
+    const wasNearCallWall = prevGammaStateRef.current.nearCallWall;
+
+    // Check Put Wall proximity (within 1%)
+    const nearPutWall = currentPrice < gammaData.putWall * 1.01;
+    const wasNearPutWall = prevGammaStateRef.current.nearPutWall;
+
+    // Check Zero Gamma cross
+    const crossedZeroGamma = Math.abs(currentPrice - gammaData.gammaFlip) / currentPrice < 0.005; // Within 0.5%
+    const wasCrossedZeroGamma = prevGammaStateRef.current.crossedZeroGamma;
+
+    // Trigger voice alerts
+    someshVoice.onCallWallProximity(nearCallWall, wasNearCallWall);
+    someshVoice.onPutWallProximity(nearPutWall, wasNearPutWall);
+    someshVoice.onZeroGammaCross(crossedZeroGamma, wasCrossedZeroGamma);
+
+    // Check VWAP cross
+    const aboveVwap = currentPrice > vwap;
+    if (prevVwapStateRef.current !== null) {
+      someshVoice.onVWAPCross(aboveVwap, prevVwapStateRef.current);
+    }
+
+    // Flash effect for gamma events
+    if (crossedZeroGamma && !wasCrossedZeroGamma) {
+      setFlashEffect('gamma');
+      setTimeout(() => setFlashEffect(null), 1500);
+    }
+
+    // Update prev state
+    prevGammaStateRef.current = { nearCallWall, nearPutWall, crossedZeroGamma };
+    prevVwapStateRef.current = aboveVwap;
+  }, [selectedSymbol, gammaData, currentQuote, someshVoice]);
+
   // ============================================================================
   // ACTIONS
   // ============================================================================
@@ -593,11 +730,6 @@ export default function CompanionTerminal() {
 
   const readySetups = setups.filter(s => s.setup_stage === 'ready');
   const formingSetups = setups.filter(s => s.setup_stage === 'forming');
-
-  const currentQuote = useMemo(() => {
-    if (!selectedSymbol) return null;
-    return watchlist.find(w => w.symbol === selectedSymbol)?.quote || null;
-  }, [selectedSymbol, watchlist]);
 
   // Convert gamma data to chart gamma levels
   const chartGammaLevels: GammaLevel[] = useMemo(() => {
@@ -725,10 +857,21 @@ export default function CompanionTerminal() {
       </div>
 
       {/* MAIN CONTENT - CHART + OVERLAYS */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 relative overflow-hidden min-h-[400px]">
+        {/* FLASH EFFECTS */}
+        {flashEffect && (
+          <div className={cn(
+            'absolute inset-0 z-50 pointer-events-none transition-opacity duration-300',
+            flashEffect === 'sniper' && 'animate-pulse bg-[var(--success)]/20',
+            flashEffect === 'warning' && 'animate-pulse bg-[var(--error)]/20',
+            flashEffect === 'gamma' && 'animate-pulse bg-[#00ffff]/15',
+          )} />
+        )}
+
         {/* CHART AREA (Full Screen) */}
-        <div className="absolute inset-0">
-          {selectedSymbol && chartData.length > 0 ? (
+        <div className="absolute inset-0 z-0">
+          {selectedSymbol ? (
+            // Always render KCUChart when symbol selected - it handles empty data state internally
             <KCUChart
               mode="live"
               data={chartData}
@@ -754,14 +897,16 @@ export default function CompanionTerminal() {
           )}
         </div>
 
-        {/* LTP SCORE HUD (Top Left Overlay) */}
-        {selectedSymbol && ltpAnalysis && (
+        {/* LTP 2.0 SCORE HUD (Top Left Overlay) */}
+        {selectedSymbol && (ltp2Score || ltpAnalysis) && (
           <div className="absolute top-4 left-4 z-10">
-            <LTPScoreHUD
+            <LTP2ScoreHUD
+              ltp2Score={ltp2Score}
               ltpAnalysis={ltpAnalysis}
               gammaRegime={gammaData?.regime || null}
               currentPrice={currentQuote?.last_price || 0}
               vwap={currentQuote?.vwap || 0}
+              isSpeaking={someshVoice.isSpeaking}
             />
           </div>
         )}
@@ -809,27 +954,39 @@ export default function CompanionTerminal() {
 }
 
 // ============================================================================
-// LTP SCORE HUD OVERLAY
+// LTP 2.0 SCORE HUD OVERLAY
 // ============================================================================
 
-function LTPScoreHUD({
+function LTP2ScoreHUD({
+  ltp2Score,
   ltpAnalysis,
   gammaRegime,
   currentPrice,
   vwap,
+  isSpeaking,
 }: {
-  ltpAnalysis: LTPAnalysis;
+  ltp2Score: LTP2Score | null;
+  ltpAnalysis: LTPAnalysis | null;
   gammaRegime: 'positive' | 'negative' | 'neutral' | null;
   currentPrice: number;
   vwap: number;
+  isSpeaking: boolean;
 }) {
+  // LTP 2.0 grade colors
+  const ltp2GradeColors: Record<string, string> = {
+    'Sniper': 'text-[var(--success)] bg-[var(--success)]/20 border border-[var(--success)]/50',
+    'Decent': 'text-[var(--warning)] bg-[var(--warning)]/15 border border-[var(--warning)]/30',
+    'Dumb Shit': 'text-[var(--error)] bg-[var(--error)]/20 border border-[var(--error)]/50',
+  };
+
+  // Legacy grade colors
   const gradeColors: Record<string, string> = {
-    'A+': 'text-[var(--success)] bg-[var(--success)]/20',
-    'A': 'text-[var(--success)] bg-[var(--success)]/15',
-    'B': 'text-[var(--accent-primary)] bg-[var(--accent-primary)]/15',
-    'C': 'text-[var(--warning)] bg-[var(--warning)]/15',
-    'D': 'text-[var(--error)] bg-[var(--error)]/15',
-    'F': 'text-[var(--error)] bg-[var(--error)]/20',
+    'A+': 'text-[var(--success)]',
+    'A': 'text-[var(--success)]',
+    'B': 'text-[var(--accent-primary)]',
+    'C': 'text-[var(--warning)]',
+    'D': 'text-[var(--error)]',
+    'F': 'text-[var(--error)]',
   };
 
   const gammaColors: Record<string, string> = {
@@ -838,29 +995,100 @@ function LTPScoreHUD({
     'neutral': 'text-[var(--text-secondary)]',
   };
 
+  const directionColors: Record<string, string> = {
+    'bullish': 'text-[var(--success)]',
+    'bearish': 'text-[var(--error)]',
+    'neutral': 'text-[var(--text-tertiary)]',
+  };
+
   const aboveVwap = currentPrice > vwap;
 
   return (
-    <div className="bg-[#0d0d0d]/90 backdrop-blur border border-[var(--border-primary)] rounded-lg p-3 min-w-[180px]">
-      {/* Grade Badge */}
+    <div className="bg-[#0d0d0d]/90 backdrop-blur border border-[var(--border-primary)] rounded-lg p-3 min-w-[200px]">
+      {/* LTP 2.0 Header with Grade */}
       <div className="flex items-center justify-between mb-3">
-        <span className={cn(
-          'text-lg font-black px-2 py-0.5 rounded',
-          gradeColors[ltpAnalysis.grade] || 'text-[var(--text-secondary)] bg-[var(--bg-tertiary)]'
-        )}>
-          {ltpAnalysis.grade}
-        </span>
-        <span className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
-          LTP Grade
-        </span>
+        {ltp2Score ? (
+          <span className={cn(
+            'text-sm font-black px-2 py-1 rounded',
+            ltp2GradeColors[ltp2Score.grade] || 'text-[var(--text-secondary)] bg-[var(--bg-tertiary)]'
+          )}>
+            {ltp2Score.grade === 'Dumb Shit' ? '💩 DUMB' : ltp2Score.grade === 'Sniper' ? '🎯 SNIPER' : '📊 DECENT'}
+          </span>
+        ) : ltpAnalysis ? (
+          <span className={cn(
+            'text-lg font-black px-2 py-0.5 rounded bg-[var(--bg-tertiary)]',
+            gradeColors[ltpAnalysis.grade] || 'text-[var(--text-secondary)]'
+          )}>
+            {ltpAnalysis.grade}
+          </span>
+        ) : null}
+        <div className="flex items-center gap-2">
+          {isSpeaking && (
+            <div className="flex items-center gap-1 text-[10px] text-[var(--accent-primary)] animate-pulse">
+              <Volume2 className="w-3 h-3" />
+            </div>
+          )}
+          <span className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
+            LTP 2.0
+          </span>
+        </div>
       </div>
 
-      {/* Score Bars */}
-      <div className="space-y-2 mb-3">
-        <ScoreBar label="L" value={ltpAnalysis.levels.levelScore} color="var(--accent-primary)" />
-        <ScoreBar label="T" value={ltpAnalysis.trend.trendScore} color="var(--success)" />
-        <ScoreBar label="P" value={ltpAnalysis.patience.patienceScore} color="var(--warning)" />
-      </div>
+      {/* LTP 2.0 Score & Breakdown */}
+      {ltp2Score && (
+        <>
+          {/* Score Circle */}
+          <div className="flex items-center justify-center mb-3">
+            <div className={cn(
+              'relative w-16 h-16 rounded-full border-4 flex items-center justify-center',
+              ltp2Score.score >= 75 ? 'border-[var(--success)]' :
+              ltp2Score.score >= 50 ? 'border-[var(--warning)]' :
+              'border-[var(--error)]'
+            )}>
+              <span className="text-xl font-black text-[var(--text-primary)]">{ltp2Score.score}</span>
+              <span className={cn(
+                'absolute -bottom-1 text-[8px] font-bold px-1 rounded',
+                directionColors[ltp2Score.direction]
+              )}>
+                {ltp2Score.direction.toUpperCase()}
+              </span>
+            </div>
+          </div>
+
+          {/* Breakdown Bars */}
+          <div className="space-y-1.5 mb-3">
+            <ScoreBar label="Cloud" value={ltp2Score.breakdown.cloudScore} max={25} color="var(--accent-primary)" />
+            <ScoreBar label="VWAP" value={ltp2Score.breakdown.vwapScore} max={20} color="var(--success)" />
+            <ScoreBar label="Gamma" value={ltp2Score.breakdown.gammaWallScore + ltp2Score.breakdown.gammaRegimeScore} max={35} color="#00ffff" />
+            <ScoreBar label="Patience" value={ltp2Score.breakdown.patienceScore} max={10} color="var(--warning)" />
+            {ltp2Score.breakdown.resistancePenalty < 0 && (
+              <ScoreBar label="Penalty" value={Math.abs(ltp2Score.breakdown.resistancePenalty)} max={20} color="var(--error)" />
+            )}
+          </div>
+
+          {/* Recommendation */}
+          <div className="text-[10px] text-[var(--text-secondary)] leading-relaxed mb-2 px-1">
+            {ltp2Score.recommendation}
+          </div>
+
+          {/* Warnings */}
+          {ltp2Score.warnings.length > 0 && (
+            <div className="flex items-start gap-1 text-[9px] text-[var(--warning)] bg-[var(--warning)]/10 rounded px-2 py-1">
+              <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+              <span>{ltp2Score.warnings[0]}</span>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Legacy LTP Scores (fallback) */}
+      {!ltp2Score && ltpAnalysis && (
+        <div className="space-y-2 mb-3">
+          <ScoreBar label="L" value={ltpAnalysis.levels.levelScore} color="var(--accent-primary)" />
+          <ScoreBar label="T" value={ltpAnalysis.trend.trendScore} color="var(--success)" />
+          <ScoreBar label="P" value={ltpAnalysis.patience.patienceScore} color="var(--warning)" />
+        </div>
+      )}
 
       {/* Context Row */}
       <div className="flex items-center justify-between text-[10px] pt-2 border-t border-[var(--border-primary)]">
@@ -868,7 +1096,7 @@ function LTPScoreHUD({
         <div className="flex items-center gap-1">
           <span className="text-[var(--text-tertiary)]">VWAP</span>
           <span className={aboveVwap ? 'text-[var(--success)]' : 'text-[var(--error)]'}>
-            {aboveVwap ? '▲ Above' : '▼ Below'}
+            {aboveVwap ? '▲' : '▼'}
           </span>
         </div>
 
@@ -881,22 +1109,36 @@ function LTPScoreHUD({
             </span>
           </div>
         )}
+
+        {/* Direction Indicator */}
+        {ltp2Score && (
+          <div className="flex items-center gap-1">
+            {ltp2Score.direction === 'bullish' ? (
+              <TrendingUp className="w-3 h-3 text-[var(--success)]" />
+            ) : ltp2Score.direction === 'bearish' ? (
+              <TrendingDown className="w-3 h-3 text-[var(--error)]" />
+            ) : (
+              <Activity className="w-3 h-3 text-[var(--text-tertiary)]" />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function ScoreBar({ label, value, color }: { label: string; value: number; color: string }) {
+function ScoreBar({ label, value, max = 100, color }: { label: string; value: number; max?: number; color: string }) {
+  const percentage = max > 0 ? (value / max) * 100 : 0;
   return (
     <div className="flex items-center gap-2">
-      <span className="w-4 text-[10px] font-bold text-[var(--text-tertiary)]">{label}</span>
+      <span className="w-12 text-[10px] font-bold text-[var(--text-tertiary)] truncate">{label}</span>
       <div className="flex-1 h-1.5 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${value}%`, backgroundColor: color }}
+          style={{ width: `${Math.min(percentage, 100)}%`, backgroundColor: color }}
         />
       </div>
-      <span className="w-8 text-[10px] font-mono text-right text-[var(--text-secondary)]">{value}%</span>
+      <span className="w-8 text-[10px] font-mono text-right text-[var(--text-secondary)]">{value}</span>
     </div>
   );
 }

@@ -27,6 +27,15 @@ import {
   PracticePageSkeleton,
   ScenarioChartSkeleton,
 } from '@/components/practice/PracticeSkeletons';
+import { PracticeGameLoop, type GameLoopPhase } from '@/components/practice/PracticeGameLoop';
+import { PracticeWinCard } from '@/components/practice/PracticeWinCard';
+import {
+  calculateLTP2Score,
+  createMarketContext,
+  calculateEMA,
+  type LTP2Score,
+} from '@/lib/ltp-gamma-engine';
+import { useSomeshVoice } from '@/hooks/useSomeshVoice';
 import {
   Target,
   TrendingUp,
@@ -63,6 +72,7 @@ import {
   Rewind,
   Square,
   AlertTriangle,
+  Shield,
 } from 'lucide-react';
 
 // =============================================================================
@@ -314,6 +324,164 @@ function LTPScoreHUD({ ltpAnalysis, grade, className }: LTPScoreHUDProps) {
           <span className="text-[10px] font-mono text-[var(--text-secondary)] w-6">{ltpAnalysis.patience.score}%</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// LTP 2.0 Score HUD (Gamma-Enhanced)
+// =============================================================================
+
+interface LTP2ScoreHUDProps {
+  ltp2Score: LTP2Score;
+  gammaGhostingEnabled?: boolean;
+  onToggleGhosting?: () => void;
+  className?: string;
+}
+
+function LTP2ScoreHUD({ ltp2Score, gammaGhostingEnabled, onToggleGhosting, className }: LTP2ScoreHUDProps) {
+  const getGradeStyle = () => {
+    if (ltp2Score.grade === 'Sniper') {
+      return {
+        bg: 'bg-green-500/20',
+        border: 'border-green-500',
+        text: 'text-green-400',
+        glow: 'shadow-[0_0_20px_rgba(34,197,94,0.3)]',
+      };
+    }
+    if (ltp2Score.grade === 'Decent') {
+      return {
+        bg: 'bg-yellow-500/20',
+        border: 'border-yellow-500',
+        text: 'text-yellow-400',
+        glow: '',
+      };
+    }
+    return {
+      bg: 'bg-red-500/20',
+      border: 'border-red-500',
+      text: 'text-red-400',
+      glow: '',
+    };
+  };
+
+  const style = getGradeStyle();
+
+  return (
+    <div className={cn(
+      'absolute top-4 left-4 z-20 bg-[var(--bg-secondary)]/95 backdrop-blur-sm border p-3 rounded-lg',
+      style.border,
+      style.glow,
+      className
+    )}>
+      {/* Header */}
+      <div className="flex items-center justify-between gap-4 mb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-mono text-[var(--text-tertiary)] uppercase">LTP 2.0</span>
+          <span className={cn('px-2 py-0.5 text-sm font-black rounded', style.bg, style.text)}>
+            {ltp2Score.grade}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-2xl font-black text-white">{ltp2Score.score}</span>
+          <span className="text-xs text-[var(--text-tertiary)]">/100</span>
+        </div>
+      </div>
+
+      {/* Direction Badge */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className={cn(
+          'px-2 py-0.5 text-[10px] font-bold uppercase rounded',
+          ltp2Score.direction === 'bullish' ? 'bg-green-500/30 text-green-400' :
+          ltp2Score.direction === 'bearish' ? 'bg-red-500/30 text-red-400' :
+          'bg-gray-500/30 text-gray-400'
+        )}>
+          {ltp2Score.direction === 'bullish' ? <TrendingUp className="w-3 h-3 inline mr-1" /> :
+           ltp2Score.direction === 'bearish' ? <TrendingDown className="w-3 h-3 inline mr-1" /> :
+           <Pause className="w-3 h-3 inline mr-1" />}
+          {ltp2Score.direction}
+        </span>
+        {ltp2Score.confidence >= 80 && (
+          <span className="text-[10px] text-cyan-400 flex items-center gap-1">
+            <Zap className="w-3 h-3" />
+            HIGH CONFIDENCE
+          </span>
+        )}
+      </div>
+
+      {/* Score Breakdown */}
+      <div className="space-y-1.5 text-[10px]">
+        <div className="flex items-center gap-2">
+          <span className="text-cyan-400 w-12">Cloud</span>
+          <div className="flex-1 h-1.5 bg-white/10 rounded overflow-hidden">
+            <div
+              className="h-full bg-blue-500 rounded transition-all duration-500"
+              style={{ width: `${(ltp2Score.breakdown.cloudScore / 25) * 100}%` }}
+            />
+          </div>
+          <span className="text-[var(--text-secondary)] w-6 text-right">{ltp2Score.breakdown.cloudScore}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-cyan-400 w-12">VWAP</span>
+          <div className="flex-1 h-1.5 bg-white/10 rounded overflow-hidden">
+            <div
+              className="h-full bg-green-500 rounded transition-all duration-500"
+              style={{ width: `${(ltp2Score.breakdown.vwapScore / 20) * 100}%` }}
+            />
+          </div>
+          <span className="text-[var(--text-secondary)] w-6 text-right">{ltp2Score.breakdown.vwapScore}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-cyan-400 w-12">Gamma</span>
+          <div className="flex-1 h-1.5 bg-white/10 rounded overflow-hidden">
+            <div
+              className="h-full bg-cyan-500 rounded transition-all duration-500"
+              style={{ width: `${((ltp2Score.breakdown.gammaWallScore + ltp2Score.breakdown.gammaRegimeScore) / 35) * 100}%` }}
+            />
+          </div>
+          <span className="text-[var(--text-secondary)] w-6 text-right">
+            {ltp2Score.breakdown.gammaWallScore + ltp2Score.breakdown.gammaRegimeScore}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-cyan-400 w-12">Patience</span>
+          <div className="flex-1 h-1.5 bg-white/10 rounded overflow-hidden">
+            <div
+              className="h-full bg-yellow-500 rounded transition-all duration-500"
+              style={{ width: `${(ltp2Score.breakdown.patienceScore / 10) * 100}%` }}
+            />
+          </div>
+          <span className="text-[var(--text-secondary)] w-6 text-right">{ltp2Score.breakdown.patienceScore}</span>
+        </div>
+        {ltp2Score.breakdown.resistancePenalty < 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-red-400 w-12">Penalty</span>
+            <div className="flex-1 h-1.5 bg-white/10 rounded overflow-hidden">
+              <div
+                className="h-full bg-red-500 rounded transition-all duration-500"
+                style={{ width: `${Math.abs(ltp2Score.breakdown.resistancePenalty) * 5}%` }}
+              />
+            </div>
+            <span className="text-red-400 w-6 text-right">{ltp2Score.breakdown.resistancePenalty}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Gamma Ghosting Toggle */}
+      {onToggleGhosting && (
+        <button
+          onClick={onToggleGhosting}
+          className={cn(
+            'mt-3 w-full flex items-center justify-center gap-2 px-2 py-1 text-[10px] rounded transition-colors',
+            gammaGhostingEnabled
+              ? 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30'
+              : 'bg-gray-500/20 text-gray-400 hover:bg-gray-500/30'
+          )}
+        >
+          {gammaGhostingEnabled ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+          Gamma Ghosting {gammaGhostingEnabled ? 'ON' : 'OFF'}
+        </button>
+      )}
     </div>
   );
 }
@@ -664,6 +832,29 @@ export default function PracticePage() {
   });
 
   // =============================================================================
+  // Phase 4: Practice Mode Overhaul - Gamma Ghosting & Game Loop
+  // =============================================================================
+
+  // Game Loop phase for step-by-step wizard
+  const [gameLoopPhase, setGameLoopPhase] = useState<GameLoopPhase>('analyze');
+
+  // LTP 2.0 Score for current scenario
+  const [ltp2Score, setLtp2Score] = useState<LTP2Score | null>(null);
+
+  // Win Card visibility
+  const [showWinCard, setShowWinCard] = useState(false);
+
+  // Gamma Ghosting - Hide gamma levels until decision point in Hard Mode
+  const [gammaGhostingEnabled, setGammaGhostingEnabled] = useState(true);
+  const [gammaLevels, setGammaLevels] = useState<GammaLevel[]>([]);
+
+  // Digital Somesh voice alerts
+  const someshVoice = useSomeshVoice({
+    enabled: practiceMode === 'hard_mode',
+    cooldownMs: 20000,
+  });
+
+  // =============================================================================
   // Convert scenario candles to KCUChart format
   // =============================================================================
 
@@ -738,6 +929,18 @@ export default function PracticePage() {
 
     return levels;
   }, [activeTrade]);
+
+  // Gamma Ghosting: In hard mode, hide gamma levels until decision point
+  const ghostedGammaLevels = useMemo((): GammaLevel[] => {
+    if (!gammaLevels.length) return [];
+
+    // In hard mode with ghosting enabled, hide until decision point reached
+    if (practiceMode === 'hard_mode' && gammaGhostingEnabled && !decisionReached) {
+      return []; // Ghost the gamma levels
+    }
+
+    return gammaLevels;
+  }, [gammaLevels, practiceMode, gammaGhostingEnabled, decisionReached]);
 
   // Get current price
   const currentPrice = useMemo(() => {
@@ -841,6 +1044,100 @@ export default function PracticePage() {
   }, [chartCandles, activeTrade, replayIndex]);
 
   // =============================================================================
+  // Phase 4: LTP 2.0 Calculation & Game Loop Management
+  // =============================================================================
+
+  // Calculate LTP 2.0 Score when chart has enough data
+  useEffect(() => {
+    if (!chartCandles.length || chartCandles.length < 21) return;
+
+    const closes = chartCandles.map((c) => c.close);
+    const highs = chartCandles.map((c) => c.high);
+    const lows = chartCandles.map((c) => c.low);
+    const lastCandle = chartCandles[chartCandles.length - 1];
+    const prevCandle = chartCandles.length > 1 ? chartCandles[chartCandles.length - 2] : lastCandle;
+
+    // Calculate EMAs
+    const ema8 = calculateEMA(closes, 8);
+    const ema21 = calculateEMA(closes, 21);
+
+    // Get VWAP from key levels if available
+    const vwapLevel = selectedScenario?.keyLevels?.find((l) => l.type === 'vwap');
+    const vwap = vwapLevel?.price || (closes.reduce((a, b) => a + b, 0) / closes.length);
+
+    // Get gamma levels
+    const callWall = gammaLevels.find((g) => g.type === 'call_wall')?.price || lastCandle.close * 1.05;
+    const putWall = gammaLevels.find((g) => g.type === 'put_wall')?.price || lastCandle.close * 0.95;
+    const zeroGamma = gammaLevels.find((g) => g.type === 'zero_gamma')?.price || lastCandle.close;
+    const gammaExposure = lastCandle.close > zeroGamma ? 100 : -100; // Simplified
+
+    // Create market context for LTP 2.0 scoring
+    const context = createMarketContext(
+      {
+        close: lastCandle.close,
+        high: lastCandle.high,
+        low: lastCandle.low,
+        open: lastCandle.open,
+        previousClose: prevCandle.close,
+        previousHigh: prevCandle.high,
+        previousLow: prevCandle.low,
+      },
+      { ema8, ema21 },
+      vwap,
+      { callWall, putWall, zeroGamma, gammaExposure }
+    );
+
+    const score = calculateLTP2Score(context);
+    setLtp2Score(score);
+
+    // Trigger Somesh voice for sniper setups or dumb trades
+    if (practiceMode === 'hard_mode') {
+      someshVoice.checkScore(score);
+    }
+  }, [chartCandles, gammaLevels, selectedScenario?.keyLevels, practiceMode, someshVoice]);
+
+  // Game Loop phase transitions
+  useEffect(() => {
+    if (!selectedScenario) {
+      setGameLoopPhase('analyze');
+      return;
+    }
+
+    // Move to commit phase when decision point is reached
+    if (decisionReached && gameLoopPhase === 'analyze') {
+      setGameLoopPhase('commit');
+    }
+
+    // Move to execute phase when trade is placed
+    if (activeTrade && activeTrade.status === 'active' && gameLoopPhase === 'commit') {
+      setGameLoopPhase('execute');
+    }
+
+    // Move to review phase when trade closes
+    if (activeTrade && (activeTrade.status === 'won' || activeTrade.status === 'lost')) {
+      setGameLoopPhase('review');
+    }
+
+    // Also move to review when result is received (for wait decisions)
+    if (result && gameLoopPhase !== 'review') {
+      setGameLoopPhase('review');
+    }
+  }, [selectedScenario, decisionReached, activeTrade, result, gameLoopPhase]);
+
+  // Win Card trigger when trade closes
+  useEffect(() => {
+    if (!activeTrade) return;
+
+    if (activeTrade.status === 'won' || activeTrade.status === 'lost') {
+      // Delay showing win card for dramatic effect
+      const timer = setTimeout(() => {
+        setShowWinCard(true);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTrade?.status]);
+
+  // =============================================================================
   // Data Fetching
   // =============================================================================
 
@@ -937,6 +1234,12 @@ export default function PracticePage() {
     setIsPlaying(false);
     setLtpChecklist({ levelScore: 50, trendScore: 50, patienceScore: 50, notes: '' });
     resetTradePlan();
+
+    // Reset Phase 4 state
+    setGameLoopPhase('analyze');
+    setLtp2Score(null);
+    setShowWinCard(false);
+    setGammaLevels([]);
 
     try {
       const res = await fetch(`/api/practice/scenarios/${id}`);
@@ -1734,6 +2037,7 @@ export default function PracticePage() {
                             mode={practiceMode === 'replay' || practiceMode === 'hard_mode' ? 'replay' : 'live'}
                             data={chartCandles}
                             levels={[...chartLevels, ...tradeLevels]}
+                            gammaLevels={ghostedGammaLevels}
                             symbol={selectedScenario.symbol}
                             height={500}
                             showVolume={true}
@@ -1742,8 +2046,17 @@ export default function PracticePage() {
                             replayIndex={(practiceMode === 'replay' || practiceMode === 'hard_mode') && !showOutcome ? replayIndex : undefined}
                           />
 
-                          {/* LTP Score HUD */}
-                          {selectedScenario.ltpAnalysis && (
+                          {/* LTP 2.0 Score HUD */}
+                          {ltp2Score && (
+                            <LTP2ScoreHUD
+                              ltp2Score={ltp2Score}
+                              gammaGhostingEnabled={gammaGhostingEnabled && practiceMode === 'hard_mode'}
+                              onToggleGhosting={() => setGammaGhostingEnabled(!gammaGhostingEnabled)}
+                            />
+                          )}
+
+                          {/* Legacy LTP Score HUD (fallback) */}
+                          {!ltp2Score && selectedScenario.ltpAnalysis && (
                             <LTPScoreHUD
                               ltpAnalysis={selectedScenario.ltpAnalysis}
                               grade={scoringResult?.grade}
@@ -1994,6 +2307,58 @@ export default function PracticePage() {
             </Card>
           </PageSection>
         </div>
+
+        {/* Practice Win Card Modal */}
+        <PracticeWinCard
+          isOpen={showWinCard}
+          onClose={() => setShowWinCard(false)}
+          onNextScenario={() => {
+            setShowWinCard(false);
+            getNextScenario();
+          }}
+          onViewDetails={() => {
+            setShowWinCard(false);
+            setShowOutcome(true);
+          }}
+          symbol={selectedScenario?.symbol || ''}
+          direction={activeTrade?.direction || 'wait'}
+          isCorrect={activeTrade?.status === 'won'}
+          pnlPercent={activeTrade?.currentPnl}
+          tradeStatus={activeTrade?.status === 'won' ? 'won' : activeTrade?.status === 'lost' ? 'lost' : undefined}
+          ltp2Score={ltp2Score || undefined}
+          grade={scoringResult?.grade}
+          score={scoringResult?.overall_score}
+        />
+
+        {/* Game Loop Wizard Overlay (for replay/hard mode) */}
+        {selectedScenario && (practiceMode === 'replay' || practiceMode === 'hard_mode') && (
+          <PracticeGameLoop
+            phase={gameLoopPhase}
+            ltpScore={ltp2Score ? {
+              level: Math.round((ltp2Score.breakdown.cloudScore + ltp2Score.breakdown.gammaWallScore) / 0.6),
+              trend: Math.round((ltp2Score.breakdown.vwapScore + ltp2Score.breakdown.gammaRegimeScore) / 0.35),
+              patience: Math.round(ltp2Score.breakdown.patienceScore * 10),
+            } : undefined}
+            onAnalyzeComplete={() => {
+              // Move to commit phase manually if needed
+              setGameLoopPhase('commit');
+            }}
+            onCommitLong={() => submitDecision('long')}
+            onCommitShort={() => submitDecision('short')}
+            onCommitWait={() => submitDecision('wait')}
+            tradeStatus={activeTrade?.status === 'won' ? 'won' : activeTrade?.status === 'lost' ? 'lost' : undefined}
+            currentPnl={activeTrade?.currentPnl}
+            grade={ltp2Score?.grade}
+            score={ltp2Score?.score}
+            isCorrect={activeTrade?.status === 'won'}
+            onNextScenario={() => {
+              setShowWinCard(false);
+              getNextScenario();
+            }}
+            onReviewDetails={() => setShowOutcome(true)}
+            className="fixed bottom-0 left-0 right-0 z-40"
+          />
+        )}
       </PageShell>
     </>
   );

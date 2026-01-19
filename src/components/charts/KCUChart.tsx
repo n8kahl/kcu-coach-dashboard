@@ -26,7 +26,7 @@
  * ```
  */
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useLayoutEffect } from 'react';
 import {
   createChart,
   ColorType,
@@ -41,6 +41,7 @@ import {
   SeriesMarker,
   SeriesMarkerShape,
 } from 'lightweight-charts';
+import { Loader2 } from 'lucide-react';
 
 // =============================================================================
 // Types
@@ -136,11 +137,11 @@ const CHART_COLORS = {
   cloudBullish: 'rgba(34, 197, 94, 0.15)',   // Green tint when EMA8 > EMA21
   cloudBearish: 'rgba(239, 68, 68, 0.15)',   // Red tint when EMA8 < EMA21
 
-  // Gamma Levels
-  callWall: '#00ffff',    // CYAN
-  putWall: '#ff00ff',     // MAGENTA
-  zeroGamma: '#fbbf24',   // AMBER
-  maxPain: '#8b5cf6',     // PURPLE
+  // Gamma Levels (Institutional)
+  callWall: '#ff00ff',    // MAGENTA - Resistance (MM selling calls)
+  putWall: '#00ffff',     // CYAN - Support (MM selling puts)
+  zeroGamma: '#ffffff',   // WHITE - Gamma flip point
+  maxPain: '#8b5cf6',     // PURPLE - Max pain strike
 
   // FVG Zones
   fvgBullish: 'rgba(34, 197, 94, 0.2)',
@@ -260,6 +261,11 @@ function toChartTime(time: number | string): Time {
 // Main Component
 // =============================================================================
 
+// Minimum height fallback when container has 0 height
+const MIN_CHART_HEIGHT = 400;
+// Enable visual debugging (set to true to show red border)
+const DEBUG_CHART = false;
+
 export function KCUChart({
   mode,
   data,
@@ -267,7 +273,7 @@ export function KCUChart({
   gammaLevels = [],
   fvgZones = [],
   symbol,
-  height = 500,
+  height,
   showVolume = true,
   showIndicators = true,
   showPatienceCandles = true,
@@ -288,6 +294,72 @@ export function KCUChart({
   const levelSeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
 
   const [isInitialized, setIsInitialized] = useState(false);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+  // Gamma level refs for cleanup
+  const gammaSeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
+  // FVG area series refs
+  const fvgSeriesRef = useRef<Map<string, ISeriesApi<'Area'>>>(new Map());
+
+  // Pulsing overlay state - tracks which levels price is near
+  const [proximityAlerts, setProximityAlerts] = useState<{
+    type: 'call_wall' | 'put_wall' | 'zero_gamma';
+    price: number;
+    yCoordinate: number;
+  }[]>([]);
+
+  // =========================================================================
+  // Dimension Detection with ResizeObserver
+  // =========================================================================
+
+  useLayoutEffect(() => {
+    if (!containerRef.current) return;
+
+    const updateDimensions = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const newWidth = rect.width || containerRef.current.clientWidth;
+        const newHeight = height || rect.height || containerRef.current.clientHeight || MIN_CHART_HEIGHT;
+
+        // Only update if dimensions actually changed
+        setDimensions(prev => {
+          if (prev.width !== newWidth || prev.height !== newHeight) {
+            return { width: newWidth, height: Math.max(newHeight, MIN_CHART_HEIGHT) };
+          }
+          return prev;
+        });
+      }
+    };
+
+    // Initial measurement
+    updateDimensions();
+
+    // Use ResizeObserver for responsive updates
+    const resizeObserver = new ResizeObserver((entries) => {
+      // Use requestAnimationFrame to avoid resize loop issues
+      window.requestAnimationFrame(() => {
+        if (entries[0]) {
+          updateDimensions();
+        }
+      });
+    });
+
+    resizeObserver.observe(containerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [height]);
+
+  // Update chart dimensions when they change
+  useEffect(() => {
+    if (chartRef.current && dimensions.width > 0 && dimensions.height > 0) {
+      chartRef.current.applyOptions({
+        width: dimensions.width,
+        height: dimensions.height,
+      });
+    }
+  }, [dimensions]);
 
   // =========================================================================
   // Chart Initialization
@@ -295,11 +367,16 @@ export function KCUChart({
 
   useEffect(() => {
     if (!containerRef.current) return;
+    // Wait for valid dimensions before creating chart
+    if (dimensions.width <= 0 || dimensions.height <= 0) return;
 
-    // Create chart
+    // Create chart with measured dimensions
+    const chartHeight = dimensions.height;
+    const chartWidth = dimensions.width;
+
     const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
-      height,
+      width: chartWidth,
+      height: chartHeight,
       layout: {
         background: { type: ColorType.Solid, color: CHART_COLORS.background },
         textColor: CHART_COLORS.textColor,
@@ -437,23 +514,16 @@ export function KCUChart({
       });
     }
 
-    // Resize handler
-    const handleResize = () => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    };
-    window.addEventListener('resize', handleResize);
+    // Note: ResizeObserver handles resize events, no need for window listener
 
     setIsInitialized(true);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
       chart.remove();
       chartRef.current = null;
       setIsInitialized(false);
     };
-  }, [height, showVolume, showIndicators]);
+  }, [dimensions.width, dimensions.height, showVolume, showIndicators]);
 
   // =========================================================================
   // Data Updates
@@ -635,101 +705,347 @@ export function KCUChart({
   }, [levels, data, isInitialized]);
 
   // =========================================================================
-  // Gamma Levels
+  // Gamma Levels - Institutional Walls
   // =========================================================================
 
   useEffect(() => {
-    if (!isInitialized || !chartRef.current || gammaLevels.length === 0) return;
+    if (!isInitialized || !chartRef.current) return;
 
-    // Add gamma level lines
+    // Clear existing gamma level lines
+    gammaSeriesRef.current.forEach((series) => {
+      try {
+        chartRef.current?.removeSeries(series);
+      } catch {
+        // Series may already be removed
+      }
+    });
+    gammaSeriesRef.current.clear();
+
+    if (gammaLevels.length === 0 || data.length === 0) return;
+
+    // Add gamma level lines with proper institutional styling
     gammaLevels.forEach((gamma, index) => {
-      const color = gamma.type === 'call_wall' ? CHART_COLORS.callWall :
-                    gamma.type === 'put_wall' ? CHART_COLORS.putWall :
-                    gamma.type === 'zero_gamma' ? CHART_COLORS.zeroGamma :
-                    CHART_COLORS.maxPain;
+      // Determine color and line style based on type
+      let color: string;
+      let lineWidth: number;
+      let lineStyle: LineStyle;
+      let title: string;
+
+      switch (gamma.type) {
+        case 'call_wall':
+          color = CHART_COLORS.callWall; // Magenta
+          lineWidth = 3;
+          lineStyle = LineStyle.Solid;
+          title = gamma.label || '📈 CALL WALL';
+          break;
+        case 'put_wall':
+          color = CHART_COLORS.putWall; // Cyan
+          lineWidth = 3;
+          lineStyle = LineStyle.Solid;
+          title = gamma.label || '📉 PUT WALL';
+          break;
+        case 'zero_gamma':
+          color = CHART_COLORS.zeroGamma; // White
+          lineWidth = 2;
+          lineStyle = LineStyle.Dashed;
+          title = gamma.label || '⚡ ZERO GAMMA';
+          break;
+        case 'max_pain':
+          color = CHART_COLORS.maxPain; // Purple
+          lineWidth = 2;
+          lineStyle = LineStyle.Dotted;
+          title = gamma.label || '💀 MAX PAIN';
+          break;
+        default:
+          color = '#6b7280';
+          lineWidth = 1;
+          lineStyle = LineStyle.Dotted;
+          title = gamma.label || 'LEVEL';
+      }
 
       const series = chartRef.current!.addLineSeries({
         color,
-        lineWidth: 2,
-        lineStyle: LineStyle.Dashed,
+        lineWidth: lineWidth as 1 | 2 | 3 | 4,
+        lineStyle,
         priceLineVisible: true,
         lastValueVisible: true,
-        title: gamma.label || gamma.type.replace('_', ' ').toUpperCase(),
+        title,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 6,
       });
 
-      if (data.length > 0) {
-        const lineData: LineData[] = [
-          { time: toChartTime(data[0].time), value: gamma.price },
-          { time: toChartTime(data[data.length - 1].time), value: gamma.price },
-        ];
-        series.setData(lineData);
-      }
+      // Create horizontal line across the full visible range
+      const lineData: LineData[] = [
+        { time: toChartTime(data[0].time), value: gamma.price },
+        { time: toChartTime(data[data.length - 1].time), value: gamma.price },
+      ];
+      series.setData(lineData);
 
-      levelSeriesRef.current.set(`gamma-${index}`, series);
+      gammaSeriesRef.current.set(`gamma-${gamma.type}-${index}`, series);
     });
+
+    // Cleanup function
+    return () => {
+      gammaSeriesRef.current.forEach((series) => {
+        try {
+          chartRef.current?.removeSeries(series);
+        } catch {
+          // Ignore cleanup errors
+        }
+      });
+      gammaSeriesRef.current.clear();
+    };
   }, [gammaLevels, data, isInitialized]);
 
   // =========================================================================
-  // FVG Zones (rendered as price range highlights)
+  // Proximity Alert Detection - Check if price is within 1% of gamma walls
   // =========================================================================
 
   useEffect(() => {
-    if (!isInitialized || !chartRef.current || fvgZones.length === 0) return;
+    if (!isInitialized || !chartRef.current || !candleSeriesRef.current) return;
+    if (data.length === 0 || gammaLevels.length === 0) {
+      setProximityAlerts([]);
+      return;
+    }
 
-    // FVG zones are rendered using area series between high and low
-    fvgZones.forEach((zone, index) => {
-      const color = zone.direction === 'bullish'
-        ? CHART_COLORS.fvgBullish
-        : CHART_COLORS.fvgBearish;
+    // Get current price (last close)
+    const currentPrice = data[data.length - 1].close;
+    const alerts: typeof proximityAlerts = [];
 
-      // Upper boundary
-      const upperSeries = chartRef.current!.addLineSeries({
-        color: zone.direction === 'bullish' ? CHART_COLORS.upColor : CHART_COLORS.downColor,
-        lineWidth: 1,
-        lineStyle: LineStyle.Dotted,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
+    // Check each gamma level for proximity
+    gammaLevels.forEach((gamma) => {
+      if (gamma.type === 'max_pain') return; // Don't pulse for max pain
 
-      // Lower boundary
-      const lowerSeries = chartRef.current!.addLineSeries({
-        color: zone.direction === 'bullish' ? CHART_COLORS.upColor : CHART_COLORS.downColor,
-        lineWidth: 1,
-        lineStyle: LineStyle.Dotted,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
+      const distance = Math.abs(currentPrice - gamma.price) / gamma.price;
+      const proximityThreshold = 0.01; // 1%
 
-      const startTime = toChartTime(zone.startTime);
-      const endTime = toChartTime(zone.endTime);
+      if (distance <= proximityThreshold) {
+        // Convert price to Y coordinate for the overlay
+        const priceScale = chartRef.current!.priceScale('right');
+        // Use candlestick series to get coordinate
+        const yCoordinate = candleSeriesRef.current!.priceToCoordinate(gamma.price);
 
-      upperSeries.setData([
-        { time: startTime, value: zone.high },
-        { time: endTime, value: zone.high },
-      ]);
-
-      lowerSeries.setData([
-        { time: startTime, value: zone.low },
-        { time: endTime, value: zone.low },
-      ]);
-
-      levelSeriesRef.current.set(`fvg-upper-${index}`, upperSeries);
-      levelSeriesRef.current.set(`fvg-lower-${index}`, lowerSeries);
+        if (yCoordinate !== null) {
+          alerts.push({
+            type: gamma.type as 'call_wall' | 'put_wall' | 'zero_gamma',
+            price: gamma.price,
+            yCoordinate,
+          });
+        }
+      }
     });
-  }, [fvgZones, isInitialized]);
+
+    setProximityAlerts(alerts);
+  }, [data, gammaLevels, isInitialized, dimensions]);
+
+  // =========================================================================
+  // FVG Zones - Fair Value Gap Boxes
+  // =========================================================================
+
+  useEffect(() => {
+    if (!isInitialized || !chartRef.current) return;
+
+    // Clear existing FVG series
+    fvgSeriesRef.current.forEach((series) => {
+      try {
+        chartRef.current?.removeSeries(series);
+      } catch {
+        // Series may already be removed
+      }
+    });
+    fvgSeriesRef.current.clear();
+
+    if (fvgZones.length === 0 || data.length === 0) return;
+
+    // Get the last timestamp for extending boxes to the right
+    const lastTime = toChartTime(data[data.length - 1].time);
+
+    // Render each FVG as a filled area (box)
+    fvgZones.forEach((zone, index) => {
+      const isBullish = zone.direction === 'bullish';
+      const fillColor = isBullish
+        ? 'rgba(34, 197, 94, 0.25)'  // Green with more opacity
+        : 'rgba(239, 68, 68, 0.25)'; // Red with more opacity
+      const lineColor = isBullish
+        ? 'rgba(34, 197, 94, 0.6)'
+        : 'rgba(239, 68, 68, 0.6)';
+
+      // Create area series for the FVG box
+      // We'll use two line series (top and bottom) + visual indicator
+      const startTime = toChartTime(zone.startTime);
+      // Extend to right edge if not filled
+      const endTime = zone.filled ? toChartTime(zone.endTime) : lastTime;
+
+      // Top boundary line
+      const topSeries = chartRef.current!.addLineSeries({
+        color: lineColor,
+        lineWidth: 1,
+        lineStyle: LineStyle.Solid,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+
+      // Bottom boundary line
+      const bottomSeries = chartRef.current!.addLineSeries({
+        color: lineColor,
+        lineWidth: 1,
+        lineStyle: LineStyle.Solid,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+
+      // Area fill between boundaries
+      // We use an area series from the top price down
+      const areaSeries = chartRef.current!.addAreaSeries({
+        topColor: fillColor,
+        bottomColor: fillColor,
+        lineColor: 'transparent',
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+
+      // Create data points for each series
+      // For proper box rendering, we need multiple points
+      const numPoints = 10;
+      const timeStep = ((endTime as number) - (startTime as number)) / numPoints;
+
+      const topData: LineData[] = [];
+      const bottomData: LineData[] = [];
+      const areaData: AreaData[] = [];
+
+      for (let i = 0; i <= numPoints; i++) {
+        const time = ((startTime as number) + timeStep * i) as Time;
+        topData.push({ time, value: zone.high });
+        bottomData.push({ time, value: zone.low });
+        areaData.push({ time, value: zone.high });
+      }
+
+      topSeries.setData(topData);
+      bottomSeries.setData(bottomData);
+
+      // Set area data
+      areaSeries.setData(areaData);
+
+      // Store refs for cleanup
+      fvgSeriesRef.current.set(`fvg-top-${index}`, topSeries as unknown as ISeriesApi<'Area'>);
+      fvgSeriesRef.current.set(`fvg-bottom-${index}`, bottomSeries as unknown as ISeriesApi<'Area'>);
+      fvgSeriesRef.current.set(`fvg-area-${index}`, areaSeries);
+    });
+
+    // Cleanup function
+    return () => {
+      fvgSeriesRef.current.forEach((series) => {
+        try {
+          chartRef.current?.removeSeries(series);
+        } catch {
+          // Ignore cleanup errors
+        }
+      });
+      fvgSeriesRef.current.clear();
+    };
+  }, [fvgZones, data, isInitialized]);
 
   // =========================================================================
   // Render
   // =========================================================================
 
+  // Determine if we should show loading state
+  const safeData = data || [];
+  const isDataEmpty = safeData.length === 0;
+  const showLoadingState = isDataEmpty || !isInitialized || dimensions.width <= 0;
+
   return (
-    <div className={`relative ${className}`}>
+    <div
+      className={`relative ${className}`}
+      style={{
+        minHeight: MIN_CHART_HEIGHT,
+        // Debug border - set DEBUG_CHART to true to see chart bounds
+        ...(DEBUG_CHART ? { border: '1px solid red' } : {}),
+      }}
+    >
       {/* Chart Container */}
       <div
         ref={containerRef}
-        className="w-full"
-        style={{ height }}
+        className="w-full h-full"
+        style={{
+          minHeight: MIN_CHART_HEIGHT,
+          height: height || '100%',
+          position: 'relative',
+          zIndex: 1,
+        }}
       />
+
+      {/* Loading / No Data State Overlay */}
+      {showLoadingState && (
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center bg-[#0d0d0d]/90 z-10"
+          style={{ minHeight: MIN_CHART_HEIGHT }}
+        >
+          <Loader2 className="w-8 h-8 text-[var(--accent-primary)] animate-spin mb-3" />
+          <p className="text-sm text-[var(--text-secondary)] font-mono">
+            {isDataEmpty ? 'Waiting for Market Data...' : 'Initializing Chart...'}
+          </p>
+          {symbol && (
+            <p className="text-xs text-[var(--text-tertiary)] mt-1">{symbol}</p>
+          )}
+          {DEBUG_CHART && (
+            <p className="text-xs text-red-500 mt-2">
+              Debug: {dimensions.width}x{dimensions.height} | Data: {safeData.length}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Pulsing Gamma Level Proximity Alerts */}
+      {proximityAlerts.map((alert, index) => {
+        const color = alert.type === 'call_wall'
+          ? CHART_COLORS.callWall
+          : alert.type === 'put_wall'
+          ? CHART_COLORS.putWall
+          : CHART_COLORS.zeroGamma;
+
+        const label = alert.type === 'call_wall'
+          ? '📈 CALL WALL'
+          : alert.type === 'put_wall'
+          ? '📉 PUT WALL'
+          : '⚡ ZERO γ';
+
+        return (
+          <div
+            key={`proximity-${alert.type}-${index}`}
+            className="absolute left-0 right-12 pointer-events-none z-20"
+            style={{
+              top: alert.yCoordinate - 2,
+              height: 4,
+            }}
+          >
+            {/* Glowing bar */}
+            <div
+              className="w-full h-full animate-pulse"
+              style={{
+                background: `linear-gradient(90deg, transparent, ${color}40, ${color}80, ${color}40, transparent)`,
+                boxShadow: `0 0 20px ${color}, 0 0 40px ${color}60, 0 0 60px ${color}30`,
+              }}
+            />
+            {/* Label badge */}
+            <div
+              className="absolute right-0 top-1/2 -translate-y-1/2 px-2 py-0.5 text-[10px] font-bold font-mono animate-pulse rounded"
+              style={{
+                backgroundColor: `${color}30`,
+                color: color,
+                border: `1px solid ${color}60`,
+                boxShadow: `0 0 10px ${color}40`,
+              }}
+            >
+              {label} ${alert.price.toFixed(2)}
+            </div>
+          </div>
+        );
+      })}
 
       {/* Symbol Badge */}
       {symbol && (
@@ -749,7 +1065,7 @@ export function KCUChart({
 
       {/* Legend */}
       {showIndicators && (
-        <div className="absolute bottom-3 left-3 flex gap-4 text-xs font-mono">
+        <div className="absolute bottom-3 left-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono max-w-[70%]">
           <span className="flex items-center gap-1">
             <span className="w-3 h-0.5 bg-[#22c55e]"></span>
             <span className="text-[#22c55e]">EMA 8</span>
@@ -770,6 +1086,37 @@ export function KCUChart({
             <span className="flex items-center gap-1">
               <span className="text-[#fbbf24]">◆</span>
               <span className="text-[#fbbf24]">Patience</span>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Gamma/Institutional Levels Legend */}
+      {gammaLevels.length > 0 && (
+        <div className="absolute bottom-3 right-3 flex flex-col gap-1 text-[10px] font-mono bg-[#0d0d0d]/80 px-2 py-1.5 rounded border border-[var(--border-primary)]">
+          <span className="text-[var(--text-tertiary)] uppercase tracking-wider mb-0.5">Institutional</span>
+          {gammaLevels.some(g => g.type === 'call_wall') && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-4 h-0.5" style={{ backgroundColor: CHART_COLORS.callWall }}></span>
+              <span style={{ color: CHART_COLORS.callWall }}>Call Wall</span>
+            </span>
+          )}
+          {gammaLevels.some(g => g.type === 'put_wall') && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-4 h-0.5" style={{ backgroundColor: CHART_COLORS.putWall }}></span>
+              <span style={{ color: CHART_COLORS.putWall }}>Put Wall</span>
+            </span>
+          )}
+          {gammaLevels.some(g => g.type === 'zero_gamma') && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-4 h-0.5 border-t border-dashed" style={{ borderColor: CHART_COLORS.zeroGamma }}></span>
+              <span style={{ color: CHART_COLORS.zeroGamma }}>Zero γ</span>
+            </span>
+          )}
+          {gammaLevels.some(g => g.type === 'max_pain') && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-4 h-0.5 border-t border-dotted" style={{ borderColor: CHART_COLORS.maxPain }}></span>
+              <span style={{ color: CHART_COLORS.maxPain }}>Max Pain</span>
             </span>
           )}
         </div>
