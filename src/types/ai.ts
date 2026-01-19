@@ -308,6 +308,7 @@ export interface QuickAction {
   id: QuickActionId;
   label: string;
   description: string;
+  prompt: string;
   icon: string;
   pages: DashboardPage[];
   requiresSelection?: boolean;
