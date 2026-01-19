@@ -320,3 +320,190 @@ export async function requireAdmin(): Promise<Session & { user: SessionUser; use
 
   return session as Session & { user: SessionUser; userId: string; isAdmin: true };
 }
+
+// ============================================================================
+// User Management Helpers (for OAuth callback)
+// ============================================================================
+
+export interface DiscordUserData {
+  id: string;
+  username: string;
+  email?: string | null;
+  avatar?: string | null;
+}
+
+export interface UserProfile {
+  id: string;
+  discord_id: string;
+  username: string;
+  discord_username: string;
+  email: string | null;
+  avatar_url: string | null;
+  is_admin: boolean;
+  experience_level: string;
+  subscription_tier: string;
+  streak_days: number;
+  total_quizzes: number;
+  total_questions: number;
+  current_module: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * Find existing user by Discord ID, or create a new one if not found.
+ * NEVER deletes existing data - preserves user ID across logins.
+ *
+ * @param discordId - The Discord user ID
+ * @param newUserId - UUID to use if creating a new user
+ * @param discordData - Discord user data for creating new user
+ * @returns The user ID (existing or newly created)
+ */
+export async function findOrCreateUserInUsersTable(
+  discordId: string,
+  newUserId: string,
+  discordData: { username: string; email?: string | null }
+): Promise<{ userId: string; isNew: boolean }> {
+  // First, check if user already exists in users table
+  const { data: existingUser, error: fetchError } = await supabaseAdmin
+    .from('users')
+    .select('id')
+    .eq('discord_id', discordId)
+    .single();
+
+  if (existingUser && !fetchError) {
+    // User exists - return existing ID
+    return { userId: existingUser.id, isNew: false };
+  }
+
+  // User doesn't exist - create new entry
+  // Note: PGRST116 means "no rows found" which is expected for new users
+  if (fetchError && fetchError.code !== 'PGRST116') {
+    throw new Error(`Database error checking user: ${fetchError.message}`);
+  }
+
+  const { data: createdUser, error: insertError } = await supabaseAdmin
+    .from('users')
+    .insert({
+      id: newUserId,
+      discord_id: discordId,
+      username: discordData.username,
+      email: discordData.email || null,
+    })
+    .select('id')
+    .single();
+
+  if (insertError) {
+    // Handle unique constraint violation (race condition - user was created by another request)
+    if (insertError.code === '23505') {
+      const { data: raceUser } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('discord_id', discordId)
+        .single();
+
+      if (raceUser) {
+        return { userId: raceUser.id, isNew: false };
+      }
+    }
+    throw new Error(`Failed to create user: ${insertError.message}`);
+  }
+
+  if (!createdUser) {
+    throw new Error('User creation returned no data');
+  }
+
+  return { userId: createdUser.id, isNew: true };
+}
+
+/**
+ * Upsert user profile - creates if not exists, updates if exists.
+ * NEVER deletes existing data.
+ *
+ * @param userId - The user's UUID (from users table)
+ * @param discordData - Discord user data
+ * @returns The user profile
+ */
+export async function upsertUserProfile(
+  userId: string,
+  discordData: DiscordUserData
+): Promise<UserProfile> {
+  const avatarUrl = discordData.avatar
+    ? `https://cdn.discordapp.com/avatars/${discordData.id}/${discordData.avatar}.png`
+    : null;
+
+  // Check if profile exists
+  const { data: existingProfile, error: fetchError } = await supabaseAdmin
+    .from('user_profiles')
+    .select('*')
+    .eq('id', userId)
+    .single();
+
+  if (existingProfile && !fetchError) {
+    // Profile exists - update only Discord-related fields (preserve user data)
+    const { data: updatedProfile, error: updateError } = await supabaseAdmin
+      .from('user_profiles')
+      .update({
+        discord_username: discordData.username,
+        avatar_url: avatarUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (updateError) {
+      throw new Error(`Failed to update profile: ${updateError.message}`);
+    }
+
+    return updatedProfile as UserProfile;
+  }
+
+  // Profile doesn't exist - create new one with defaults
+  // Note: PGRST116 means "no rows found" which is expected
+  if (fetchError && fetchError.code !== 'PGRST116') {
+    throw new Error(`Database error checking profile: ${fetchError.message}`);
+  }
+
+  const { data: newProfile, error: insertError } = await supabaseAdmin
+    .from('user_profiles')
+    .insert({
+      id: userId,
+      discord_id: discordData.id,
+      username: discordData.username,
+      discord_username: discordData.username,
+      email: discordData.email || null,
+      avatar_url: avatarUrl,
+      experience_level: 'beginner',
+      subscription_tier: 'free',
+      is_admin: false,
+      streak_days: 0,
+      total_quizzes: 0,
+      total_questions: 0,
+      current_module: 'fundamentals',
+    })
+    .select()
+    .single();
+
+  if (insertError) {
+    // Handle race condition - profile was created by another request
+    if (insertError.code === '23505') {
+      const { data: raceProfile, error: raceError } = await supabaseAdmin
+        .from('user_profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (raceProfile && !raceError) {
+        return raceProfile as UserProfile;
+      }
+    }
+    throw new Error(`Failed to create profile: ${insertError.message}`);
+  }
+
+  if (!newProfile) {
+    throw new Error('Profile creation returned no data');
+  }
+
+  return newProfile as UserProfile;
+}
