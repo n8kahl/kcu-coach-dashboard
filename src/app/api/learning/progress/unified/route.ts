@@ -1,19 +1,17 @@
 /**
- * @deprecated Use /api/learning/v2/progress instead
+ * Unified Learning Progress API Route
  *
- * Unified Learning Progress API Route (Thinkific-focused)
- * This route is maintained for backward compatibility only.
- * Returns combined progress data from Thinkific and local KCU Coach.
+ * Returns combined progress data from the native course_* schema.
+ * This route now uses the unified native schema after migration 030.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import { supabaseAdmin } from '@/lib/supabase';
 import {
   getUserCourseProgress,
   getUserLearningStats,
   getRecentLearningActivity,
-  getModuleProgressWithThinkific,
+  getModuleProgress,
 } from '@/lib/learning-progress';
 
 // ============================================
@@ -61,7 +59,7 @@ export async function GET(request: NextRequest) {
 
     if (include.includes('modules')) {
       promises.push(
-        getModuleProgressWithThinkific(userId).then(modules => {
+        getModuleProgress(userId).then(modules => {
           result.modules = modules;
         })
       );
@@ -94,7 +92,7 @@ export async function GET(request: NextRequest) {
 
 // ============================================
 // POST /api/learning/progress/unified
-// Trigger sync between Thinkific and local progress
+// No longer syncs from Thinkific - returns success for compatibility
 // ============================================
 
 export async function POST() {
@@ -108,35 +106,16 @@ export async function POST() {
       );
     }
 
-    const userId = session.userId;
-
-    // Get user's Thinkific ID
-    const { data: profile } = await supabaseAdmin
-      .from('user_profiles')
-      .select('thinkific_user_id')
-      .eq('id', userId)
-      .single();
-
-    if (!profile?.thinkific_user_id) {
-      return NextResponse.json({
-        success: false,
-        message: 'No Thinkific account linked',
-      });
-    }
-
-    // Import and call sync function
-    const { syncThinkificToLocal } = await import('@/lib/learning-progress');
-    await syncThinkificToLocal(userId, profile.thinkific_user_id);
-
+    // Thinkific sync has been removed - return success for backward compatibility
     return NextResponse.json({
       success: true,
-      message: 'Progress synced successfully',
+      message: 'Progress is now tracked natively - no external sync needed',
     });
 
   } catch (error) {
     console.error('Progress sync error:', error);
     return NextResponse.json(
-      { error: 'Failed to sync progress' },
+      { error: 'Failed to process request' },
       { status: 500 }
     );
   }

@@ -763,7 +763,7 @@ export default function CompanionTerminal() {
       { price: gammaData.putWall, type: 'put_wall' as const, label: 'Put Wall' },
       { price: gammaData.maxPain, type: 'max_pain' as const, label: 'Max Pain' },
       { price: gammaData.gammaFlip, type: 'zero_gamma' as const, label: 'Gamma Flip' },
-    ].filter(l => l.price > 0);
+    ].filter(l => l.price != null && !isNaN(l.price) && l.price > 0);
   }, [gammaData]);
 
   // Convert FVG data to chart zones
@@ -772,7 +772,9 @@ export default function CompanionTerminal() {
     const zones: FVGZone[] = [];
     const now = Math.floor(Date.now() / 1000);
 
-    if (fvgData.nearestBullishFVG) {
+    if (fvgData.nearestBullishFVG &&
+        fvgData.nearestBullishFVG.topPrice != null && !isNaN(fvgData.nearestBullishFVG.topPrice) &&
+        fvgData.nearestBullishFVG.bottomPrice != null && !isNaN(fvgData.nearestBullishFVG.bottomPrice)) {
       zones.push({
         startTime: now - 86400,
         endTime: now,
@@ -781,7 +783,9 @@ export default function CompanionTerminal() {
         direction: 'bullish',
       });
     }
-    if (fvgData.nearestBearishFVG) {
+    if (fvgData.nearestBearishFVG &&
+        fvgData.nearestBearishFVG.topPrice != null && !isNaN(fvgData.nearestBearishFVG.topPrice) &&
+        fvgData.nearestBearishFVG.bottomPrice != null && !isNaN(fvgData.nearestBearishFVG.bottomPrice)) {
       zones.push({
         startTime: now - 86400,
         endTime: now,
@@ -1004,8 +1008,8 @@ export default function CompanionTerminal() {
 
         {/* COACH BOX (Bottom Right Floating Terminal) */}
         <div className={cn(
-          'absolute bottom-4 right-4 z-10 transition-all duration-300',
-          coachBoxExpanded ? 'w-80 max-w-[90vw]' : 'w-12'
+          'absolute bottom-16 right-4 z-10 transition-all duration-300',
+          coachBoxExpanded ? 'w-80 max-h-[50vh]' : 'w-12'
         )}>
           <CoachBox
             messages={coachingMessages}
