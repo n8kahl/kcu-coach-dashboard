@@ -370,11 +370,11 @@ export default function CompanionTerminal() {
 
   const fetchChartData = async (symbol: string) => {
     try {
-      const res = await fetch(`/api/market/candles?symbol=${symbol}&interval=5m&limit=200`);
+      const res = await fetch(`/api/market/bars?symbol=${symbol}&timespan=minute&multiplier=5&limit=200`);
       if (res.ok) {
         const data = await res.json();
-        if (data.candles) {
-          setChartData(data.candles.map((c: any) => ({
+        if (data.bars) {
+          setChartData(data.bars.map((c: any) => ({
             time: c.timestamp || c.time,
             timestamp: c.timestamp || c.time,
             open: c.open,
