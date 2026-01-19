@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Stat, StatGrid } from '@/components/ui/stat';
 import { ProgressBar } from '@/components/ui/progress';
 import { PracticeChart } from '@/components/practice/practice-chart';
+import { ChartGrid } from '@/components/practice/ChartGrid';
+import { DailyChallenges } from '@/components/practice/DailyChallenge';
 import { cn } from '@/lib/utils';
 import {
   Target,
@@ -36,6 +38,8 @@ import {
   ChevronDown,
   ChevronUp,
   MessageSquare,
+  Wand2,
+  LayoutGrid,
 } from 'lucide-react';
 
 // Types
@@ -118,7 +122,7 @@ interface CoachingFeedback {
   personalizedTip?: string;
 }
 
-type PracticeMode = 'standard' | 'quick_drill' | 'deep_analysis' | 'replay';
+type PracticeMode = 'standard' | 'quick_drill' | 'deep_analysis' | 'replay' | 'ai_generated' | 'multi_timeframe';
 
 // Practice Mode Definitions
 const PRACTICE_MODES = [
@@ -142,6 +146,20 @@ const PRACTICE_MODES = [
     description: 'Full AI coaching with LTP checklist',
     icon: Brain,
     color: 'success',
+  },
+  {
+    id: 'ai_generated' as PracticeMode,
+    name: 'AI Scenarios',
+    description: 'Unlimited AI-generated practice',
+    icon: Wand2,
+    color: 'info',
+  },
+  {
+    id: 'multi_timeframe' as PracticeMode,
+    name: 'Multi-TF',
+    description: '5-chart grid analysis',
+    icon: LayoutGrid,
+    color: 'default',
   },
   {
     id: 'replay' as PracticeMode,
@@ -190,6 +208,15 @@ export default function PracticePage() {
   const [showOutcome, setShowOutcome] = useState(false);
   const [showFeedbackDetails, setShowFeedbackDetails] = useState(false);
   const [decisionReached, setDecisionReached] = useState(false);
+
+  // AI Scenario state
+  const [generatingAI, setGeneratingAI] = useState(false);
+  const [aiScenarioParams, setAiScenarioParams] = useState({
+    symbol: 'SPY',
+    difficulty: 'intermediate',
+    focusArea: 'all',
+  });
+  const [showMTFChart, setShowMTFChart] = useState(false);
 
   // Filters
   const [difficultyFilter, setDifficultyFilter] = useState<string>('');
@@ -287,6 +314,69 @@ export default function PracticePage() {
       console.error('Error fetching scenario:', error);
     } finally {
       setScenarioLoading(false);
+    }
+  };
+
+  // Generate AI Scenario
+  const generateAIScenario = async () => {
+    setGeneratingAI(true);
+    setResult(null);
+    setShowOutcome(false);
+    setDecisionReached(false);
+    setShowFeedbackDetails(false);
+    setLtpChecklist({ levelScore: 50, trendScore: 50, patienceScore: 50, notes: '' });
+
+    try {
+      const res = await fetch('/api/practice/ai-scenario', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: aiScenarioParams.symbol,
+          difficulty: aiScenarioParams.difficulty,
+          focusArea: aiScenarioParams.focusArea,
+          adaptive: true,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const scenario = data.scenario;
+
+        // Transform to ScenarioDetail format
+        setSelectedScenario({
+          id: scenario.id || `ai-${Date.now()}`,
+          title: scenario.title,
+          description: scenario.description,
+          symbol: scenario.symbol,
+          scenarioType: scenario.scenarioType,
+          difficulty: scenario.difficulty,
+          chartTimeframe: '5m',
+          chartData: { candles: scenario.chartData || [] },
+          keyLevels: scenario.keyLevels || [],
+          decisionPoint: scenario.decisionPoint,
+          hasAttempted: false,
+          correctAction: scenario.correctAction,
+          outcomeData: scenario.outcomeData ? {
+            result: scenario.correctAction === 'long' ? 'win' : scenario.correctAction === 'short' ? 'win' : 'neutral',
+            pnl_percent: scenario.correctAction !== 'wait' ? 1.5 : 0,
+          } : undefined,
+          ltpAnalysis: scenario.ltpAnalysis,
+          explanation: scenario.explanation,
+        });
+
+        setStartTime(Date.now());
+
+        // Start session if not already started
+        if (!sessionId) {
+          startSession();
+        }
+      } else {
+        console.error('Failed to generate AI scenario');
+      }
+    } catch (error) {
+      console.error('Error generating AI scenario:', error);
+    } finally {
+      setGeneratingAI(false);
     }
   };
 
@@ -625,9 +715,97 @@ export default function PracticePage() {
           </PageSection>
         )}
 
+        {/* Daily Challenges Row */}
+        <PageSection>
+          <DailyChallenges
+            onStartChallenge={(challengeId, type) => {
+              // Focus the scenario list or start appropriate mode
+              if (type === 'accuracy_target') {
+                setPracticeMode('standard');
+              } else if (type === 'level_focus') {
+                setFocusFilter('level');
+              }
+            }}
+          />
+        </PageSection>
+
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Scenario List */}
+          {/* Scenario List / AI Generation */}
           <PageSection className="lg:col-span-1">
+            {practiceMode === 'ai_generated' ? (
+              <Card>
+                <CardHeader
+                  title="AI Scenario Generator"
+                  icon={<Wand2 className="w-5 h-5 text-[var(--accent-primary)]" />}
+                />
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Symbol</label>
+                    <select
+                      className="w-full text-sm bg-[var(--bg-tertiary)] border border-[var(--border-primary)] px-3 py-2"
+                      value={aiScenarioParams.symbol}
+                      onChange={(e) => setAiScenarioParams(prev => ({ ...prev, symbol: e.target.value }))}
+                    >
+                      <option value="SPY">SPY</option>
+                      <option value="QQQ">QQQ</option>
+                      <option value="AAPL">AAPL</option>
+                      <option value="NVDA">NVDA</option>
+                      <option value="TSLA">TSLA</option>
+                      <option value="META">META</option>
+                      <option value="MSFT">MSFT</option>
+                      <option value="AMZN">AMZN</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Difficulty</label>
+                    <select
+                      className="w-full text-sm bg-[var(--bg-tertiary)] border border-[var(--border-primary)] px-3 py-2"
+                      value={aiScenarioParams.difficulty}
+                      onChange={(e) => setAiScenarioParams(prev => ({ ...prev, difficulty: e.target.value }))}
+                    >
+                      <option value="beginner">Beginner</option>
+                      <option value="intermediate">Intermediate</option>
+                      <option value="advanced">Advanced</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Focus Area</label>
+                    <select
+                      className="w-full text-sm bg-[var(--bg-tertiary)] border border-[var(--border-primary)] px-3 py-2"
+                      value={aiScenarioParams.focusArea}
+                      onChange={(e) => setAiScenarioParams(prev => ({ ...prev, focusArea: e.target.value }))}
+                    >
+                      <option value="all">All Areas</option>
+                      <option value="level">Level</option>
+                      <option value="trend">Trend</option>
+                      <option value="patience">Patience</option>
+                    </select>
+                  </div>
+                  <Button
+                    variant="accent"
+                    size="lg"
+                    className="w-full"
+                    onClick={generateAIScenario}
+                    disabled={generatingAI}
+                  >
+                    {generatingAI ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 mr-2" />
+                        Generate Scenario
+                      </>
+                    )}
+                  </Button>
+                  <p className="text-xs text-[var(--text-tertiary)] text-center">
+                    AI generates unique practice scenarios tailored to your skill level
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
             <Card>
               <CardHeader
                 title="Scenarios"
@@ -709,6 +887,7 @@ export default function PracticePage() {
                 </div>
               </CardContent>
             </Card>
+            )}
           </PageSection>
 
           {/* Scenario Detail / Practice Area */}
@@ -736,9 +915,50 @@ export default function PracticePage() {
                     }
                   />
                   <CardContent>
+                    {/* Chart Toggle for Multi-TF */}
+                    {practiceMode === 'multi_timeframe' && (
+                      <div className="mb-4 flex items-center gap-2">
+                        <button
+                          onClick={() => setShowMTFChart(false)}
+                          className={cn(
+                            'px-3 py-1.5 text-sm border transition-colors',
+                            !showMTFChart
+                              ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                              : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50'
+                          )}
+                        >
+                          Single Chart
+                        </button>
+                        <button
+                          onClick={() => setShowMTFChart(true)}
+                          className={cn(
+                            'px-3 py-1.5 text-sm border transition-colors flex items-center gap-1',
+                            showMTFChart
+                              ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                              : 'bg-transparent border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-[var(--accent-primary)]/50'
+                          )}
+                        >
+                          <LayoutGrid className="w-4 h-4" />
+                          5-Chart Grid
+                        </button>
+                      </div>
+                    )}
+
                     {/* Chart */}
                     <div className="mb-6">
-                      {selectedScenario.chartData?.candles?.length > 0 ? (
+                      {practiceMode === 'multi_timeframe' && showMTFChart ? (
+                        <ChartGrid
+                          symbol={selectedScenario.symbol}
+                          dailyBars={selectedScenario.chartData?.candles?.slice(0, 20) || []}
+                          hourlyBars={selectedScenario.chartData?.candles?.slice(0, 40) || []}
+                          fifteenMinBars={selectedScenario.chartData?.candles?.slice(0, 60) || []}
+                          fiveMinBars={selectedScenario.chartData?.candles || []}
+                          twoMinBars={selectedScenario.chartData?.candles || []}
+                          keyLevels={selectedScenario.keyLevels || []}
+                          decisionPoint={selectedScenario.decisionPoint}
+                          showOutcome={showOutcome}
+                        />
+                      ) : selectedScenario.chartData?.candles?.length > 0 ? (
                         <PracticeChart
                           chartData={selectedScenario.chartData}
                           keyLevels={selectedScenario.keyLevels || []}
