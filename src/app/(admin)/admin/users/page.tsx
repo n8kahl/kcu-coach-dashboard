@@ -36,7 +36,9 @@ import {
   RefreshCw,
   ChevronLeft,
   ChevronRight,
+  FileText,
 } from 'lucide-react';
+import { UserTranscriptModal } from '@/components/admin/UserTranscriptModal';
 
 interface User {
   id: string;
@@ -85,6 +87,13 @@ export default function UsersPage() {
     totalUsers: 0,
     activeToday: 0,
   });
+
+  // Transcript modal state
+  const [transcriptModal, setTranscriptModal] = useState<{
+    isOpen: boolean;
+    userId: string;
+    userName: string;
+  }>({ isOpen: false, userId: '', userName: '' });
 
   // Debounce search input
   useEffect(() => {
@@ -424,6 +433,17 @@ export default function UsersPage() {
                         <TableCell>
                           <div className="flex items-center gap-1">
                             <button
+                              className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--info)] hover:bg-[var(--info)]/10 rounded"
+                              onClick={() => setTranscriptModal({
+                                isOpen: true,
+                                userId: user.id,
+                                userName: user.username,
+                              })}
+                              title={`View ${user.username}'s learning transcript`}
+                            >
+                              <FileText className="w-4 h-4" />
+                            </button>
+                            <button
                               className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
                               onClick={() => handleSendMail(user)}
                               title={user.email ? `Send email to ${user.username}` : 'No email available'}
@@ -493,6 +513,14 @@ export default function UsersPage() {
           </Card>
         </PageSection>
       </PageShell>
+
+      {/* User Transcript Modal */}
+      <UserTranscriptModal
+        isOpen={transcriptModal.isOpen}
+        onClose={() => setTranscriptModal({ isOpen: false, userId: '', userName: '' })}
+        userId={transcriptModal.userId}
+        userName={transcriptModal.userName}
+      />
     </>
   );
 }

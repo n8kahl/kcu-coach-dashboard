@@ -23,6 +23,13 @@ export { useLearnProgress, useComplianceReport } from './useLearnProgress';
 // Market Data Hooks
 export { useMarketData, useMarketStatusBar } from './useMarketData';
 
+// Learning Ledger (Compliance Audit Trail)
+export {
+  useLearningLedger,
+  useVideoLedger,
+  useQuizLedger,
+} from './useLearningLedger';
+
 // Re-export types
 export type {
   CourseProgress,
