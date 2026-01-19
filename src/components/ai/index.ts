@@ -7,6 +7,10 @@
 // Main components
 export { AICommandCenter } from './AICommandCenter';
 export { AIContextProvider, useAIContext } from './AIContextProvider';
+export { AIQuickActions } from './AIQuickActions';
+export { AIMarketIntel } from './AIMarketIntel';
+export { AISearchBar, type SearchResult, type SearchInterpretation } from './AISearchBar';
+export { AISuggestions, type SuggestionType, type AISuggestion } from './AISuggestions';
 
 // Hooks
 export { usePageContext } from './hooks/usePageContext';
@@ -18,7 +22,6 @@ export type {
   AICommandCenterState,
   AIMessage,
   AIMode,
-  AISuggestion,
   DashboardPage,
   PageSpecificData,
   PanelState,
