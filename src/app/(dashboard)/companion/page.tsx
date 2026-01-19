@@ -937,8 +937,8 @@ export default function CompanionTerminal() {
 
         {/* COACH BOX (Bottom Right Floating Terminal) */}
         <div className={cn(
-          'absolute bottom-4 right-4 z-10 transition-all duration-300',
-          coachBoxExpanded ? 'w-96' : 'w-12'
+          'absolute bottom-16 right-4 z-10 transition-all duration-300',
+          coachBoxExpanded ? 'w-80 max-h-[50vh]' : 'w-12'
         )}>
           <CoachBox
             messages={coachingMessages}

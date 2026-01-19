@@ -680,7 +680,20 @@ export function KCUChart({
 
     // Add new level lines (filter out invalid entries first)
     const validLevels = levels.filter(l => l.price != null && !isNaN(l.price) && l.price > 0);
-    validLevels.forEach((level, index) => {
+
+    // Calculate current price range to filter out far-away levels
+    let nearbyLevels = validLevels;
+    if (data.length > 0) {
+      const prices = data.map(c => [c.high, c.low]).flat();
+      const minPrice = Math.min(...prices);
+      const maxPrice = Math.max(...prices);
+      const priceRange = maxPrice - minPrice;
+      const midPrice = (maxPrice + minPrice) / 2;
+      const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
+      nearbyLevels = validLevels.filter(l => Math.abs(l.price - midPrice) <= maxDistance);
+    }
+
+    nearbyLevels.forEach((level, index) => {
       const series = chartRef.current!.addLineSeries({
         color: level.color || LEVEL_COLORS[level.type],
         lineWidth: 1,
@@ -726,8 +739,23 @@ export function KCUChart({
     const validGammaLevels = gammaLevels.filter(g => g.price != null && !isNaN(g.price) && g.price > 0);
     if (validGammaLevels.length === 0 || data.length === 0) return;
 
+    // Calculate current price range from candle data
+    const prices = data.map(c => [c.high, c.low]).flat();
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    const priceRange = maxPrice - minPrice;
+    const midPrice = (maxPrice + minPrice) / 2;
+
+    // Filter gamma levels to only show those within 15% of the current price range
+    // This prevents far-away levels from distorting the chart scale
+    const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
+    const nearbyGammaLevels = validGammaLevels.filter(g =>
+      Math.abs(g.price - midPrice) <= maxDistance
+    );
+
     // Add gamma level lines with proper institutional styling
-    validGammaLevels.forEach((gamma, index) => {
+    // Use nearbyGammaLevels to avoid distorting the chart scale
+    nearbyGammaLevels.forEach((gamma, index) => {
       // Determine color and line style based on type
       let color: string;
       let lineWidth: number;
@@ -865,11 +893,26 @@ export function KCUChart({
     );
     if (validFvgZones.length === 0 || data.length === 0) return;
 
+    // Calculate current price range to filter out far-away FVG zones
+    const prices = data.map(c => [c.high, c.low]).flat();
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    const priceRange = maxPrice - minPrice;
+    const midPrice = (maxPrice + minPrice) / 2;
+    const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
+
+    // Filter FVG zones to only show those within range
+    const nearbyFvgZones = validFvgZones.filter(z => {
+      const zoneMid = (z.high + z.low) / 2;
+      return Math.abs(zoneMid - midPrice) <= maxDistance;
+    });
+    if (nearbyFvgZones.length === 0) return;
+
     // Get the last timestamp for extending boxes to the right
     const lastTime = toChartTime(data[data.length - 1].time);
 
     // Render each FVG as a filled area (box)
-    validFvgZones.forEach((zone, index) => {
+    nearbyFvgZones.forEach((zone, index) => {
       const isBullish = zone.direction === 'bullish';
       const fillColor = isBullish
         ? 'rgba(34, 197, 94, 0.25)'  // Green with more opacity
