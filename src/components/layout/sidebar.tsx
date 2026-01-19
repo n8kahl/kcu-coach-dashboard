@@ -13,7 +13,6 @@ import {
   Medal,
   Share2,
   Users,
-  Database,
   BarChart3,
   Settings,
   ChevronDown,
@@ -27,6 +26,7 @@ import {
   Dumbbell,
   Sparkles,
   Youtube,
+  Layers,
 } from 'lucide-react';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -76,9 +76,9 @@ const userNavItems: NavItem[] = [
 ];
 
 const adminNavItems: NavItem[] = [
+  { label: 'Content Studio', href: '/admin/content-studio', icon: Layers },
   { label: 'Users', href: '/admin/users', icon: Users },
   { label: 'Card Builder', href: '/admin/card-builder', icon: Palette },
-  { label: 'Knowledge CMS', href: '/admin/knowledge', icon: Database },
   { label: 'Social Builder', href: '/admin/social-builder', icon: Share2 },
   { label: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
   { label: 'Settings', href: '/admin/settings', icon: Settings },

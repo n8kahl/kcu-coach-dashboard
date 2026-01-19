@@ -63,7 +63,10 @@ import {
   BookOpen,
   Layers,
   LayoutGrid,
+  Library,
+  Youtube,
 } from 'lucide-react';
+import { LibraryManager, VideoPickerModal, type LibraryVideo } from '@/components/admin/content/library-manager';
 
 // ============================================
 // Types
@@ -199,13 +202,16 @@ function SortableTreeItem({
 function VideoUploader({
   lesson,
   onUploadComplete,
+  onTranscriptGenerated,
 }: {
   lesson: CourseLesson | null;
   onUploadComplete: (videoUid: string, duration: number) => void;
+  onTranscriptGenerated?: (transcript: string) => void;
 }) {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [generatingTranscript, setGeneratingTranscript] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -229,8 +235,8 @@ function VideoUploader({
     setError(null);
 
     try {
-      // Step 1: Get upload URL from our API
-      const tokenRes = await fetch('/api/admin/knowledge/upload-token', {
+      // Step 1: Get upload URL from our API (centralized content endpoint)
+      const tokenRes = await fetch('/api/admin/content/video/upload-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -240,16 +246,18 @@ function VideoUploader({
       });
 
       if (!tokenRes.ok) {
-        throw new Error('Failed to get upload URL');
+        const errData = await tokenRes.json().catch(() => ({}));
+        throw new Error(errData.details || errData.error || 'Failed to get upload URL');
       }
 
       const { uploadURL, uid } = await tokenRes.json();
 
       // Step 2: Upload directly to Cloudflare using TUS protocol
+      // CRITICAL: Use uploadUrl (not endpoint) for Direct Creator Upload flow
       const { Upload } = await import('tus-js-client');
 
       const upload = new Upload(file, {
-        endpoint: uploadURL,
+        uploadUrl: uploadURL, // Direct Creator Upload uses uploadUrl, not endpoint
         chunkSize: 50 * 1024 * 1024, // 50MB chunks
         retryDelays: [0, 1000, 3000, 5000],
         metadata: {
@@ -287,6 +295,39 @@ function VideoUploader({
     }
   };
 
+  const handleGenerateTranscript = async () => {
+    if (!lesson?.videoUid) return;
+
+    setGeneratingTranscript(true);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/admin/content/video/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lessonId: lesson.id,
+          videoUid: lesson.videoUid,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to generate transcript');
+      }
+
+      const data = await res.json();
+      if (data.transcript && onTranscriptGenerated) {
+        onTranscriptGenerated(data.transcript);
+      }
+    } catch (err) {
+      console.error('Transcript error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to generate transcript');
+    } finally {
+      setGeneratingTranscript(false);
+    }
+  };
+
   if (lesson?.videoUid) {
     // Show Cloudflare Stream player
     const streamDomain =
@@ -320,6 +361,47 @@ function VideoUploader({
             </Button>
           </div>
         </div>
+
+        {/* Generate Transcript Button */}
+        <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-[var(--text-primary)]">
+                {lesson.transcriptText ? 'Transcript Available' : 'No Transcript'}
+              </p>
+              <p className="text-xs text-[var(--text-tertiary)]">
+                {lesson.transcriptText
+                  ? `${lesson.transcriptText.split(' ').length} words`
+                  : 'Generate using AI transcription'}
+              </p>
+            </div>
+            <Button
+              variant={lesson.transcriptText ? 'secondary' : 'primary'}
+              size="sm"
+              onClick={handleGenerateTranscript}
+              disabled={generatingTranscript}
+            >
+              {generatingTranscript ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <FileText className="w-4 h-4 mr-2" />
+                  {lesson.transcriptText ? 'Regenerate' : 'Generate'} Transcript
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-400">
+            {error}
+          </div>
+        )}
+
         <input
           ref={fileInputRef}
           type="file"
@@ -859,6 +941,9 @@ function ModuleEditorModal({
 export default function ContentStudioPage() {
   const { showToast } = useToast();
 
+  // Page Mode: 'courses' or 'library'
+  const [pageMode, setPageMode] = useState<'courses' | 'library'>('courses');
+
   // Data State
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
@@ -879,6 +964,9 @@ export default function ContentStudioPage() {
   const [moduleModalOpen, setModuleModalOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [editingModule, setEditingModule] = useState<CourseModule | null>(null);
+
+  // Video Library Picker Modal
+  const [videoPickerOpen, setVideoPickerOpen] = useState(false);
 
   // DnD Sensors
   const sensors = useSensors(
@@ -1207,6 +1295,38 @@ export default function ContentStudioPage() {
     }
   };
 
+  // Handle selecting a video from the library
+  const handleSelectLibraryVideo = (video: LibraryVideo) => {
+    if (!editedLesson) return;
+
+    if (video.type === 'youtube') {
+      // YouTube video - set videoUrl
+      setEditedLesson({
+        ...editedLesson,
+        videoUrl: video.url || `https://www.youtube.com/watch?v=${video.videoId}`,
+        videoUid: null, // Clear Cloudflare UID if switching to YouTube
+        videoDurationSeconds: video.duration ?? null,
+        videoStatus: video.status === 'ready' ? 'ready' : 'pending',
+      });
+    } else {
+      // Cloudflare video - set videoUid
+      setEditedLesson({
+        ...editedLesson,
+        videoUid: video.videoId,
+        videoUrl: null, // Clear YouTube URL if switching to Cloudflare
+        videoDurationSeconds: video.duration ?? null,
+        videoStatus: video.status === 'ready' ? 'ready' : 'pending',
+      });
+    }
+
+    setVideoPickerOpen(false);
+    showToast({
+      type: 'success',
+      title: 'Video Selected',
+      message: `Using "${video.title}"`,
+    });
+  };
+
   // ============================================
   // Render
   // ============================================
@@ -1219,57 +1339,97 @@ export default function ContentStudioPage() {
         breadcrumbs={[{ label: 'Admin' }, { label: 'Content Studio' }]}
         actions={
           <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              icon={<Layers className="w-4 h-4" />}
-              onClick={() => {
-                setEditingCourse(null);
-                setCourseModalOpen(true);
-              }}
-            >
-              New Course
-            </Button>
+            {/* Mode Toggle */}
+            <div className="flex items-center bg-[var(--bg-secondary)] rounded-lg p-1">
+              <button
+                onClick={() => setPageMode('courses')}
+                className={cn(
+                  'px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+                  pageMode === 'courses'
+                    ? 'bg-[var(--bg-card)] text-[var(--text-primary)] shadow-sm'
+                    : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                )}
+              >
+                <Layers className="w-4 h-4 inline mr-1.5" />
+                Courses
+              </button>
+              <button
+                onClick={() => setPageMode('library')}
+                className={cn(
+                  'px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+                  pageMode === 'library'
+                    ? 'bg-[var(--bg-card)] text-[var(--text-primary)] shadow-sm'
+                    : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                )}
+              >
+                <Library className="w-4 h-4 inline mr-1.5" />
+                Library
+              </button>
+            </div>
+
+            {pageMode === 'courses' && (
+              <Button
+                variant="secondary"
+                icon={<Layers className="w-4 h-4" />}
+                onClick={() => {
+                  setEditingCourse(null);
+                  setCourseModalOpen(true);
+                }}
+              >
+                New Course
+              </Button>
+            )}
           </div>
         }
       />
 
       <PageShell>
-        {/* Course Selector */}
-        <PageSection>
-          <div className="flex items-center gap-4">
-            <label className="text-sm font-medium text-[var(--text-secondary)]">Course:</label>
-            <select
-              value={selectedCourse?.id || ''}
-              onChange={(e) => {
-                const course = courses.find((c) => c.id === e.target.value);
-                setSelectedCourse(course || null);
-                setSelectedItem(null);
-                setEditedLesson(null);
-              }}
-              className="flex-1 max-w-xs px-3 py-2 rounded-md bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-sm text-[var(--text-primary)]"
-            >
-              <option value="">Select a course...</option>
-              {courses.map((course) => (
-                <option key={course.id} value={course.id}>
-                  {course.title}
-                </option>
-              ))}
-            </select>
-            {selectedCourse && (
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<Edit3 className="w-4 h-4" />}
-                onClick={() => {
-                  setEditingCourse(selectedCourse);
-                  setCourseModalOpen(true);
-                }}
-              >
-                Edit Course
-              </Button>
-            )}
-          </div>
-        </PageSection>
+        {/* Library Mode */}
+        {pageMode === 'library' && (
+          <PageSection>
+            <LibraryManager />
+          </PageSection>
+        )}
+
+        {/* Courses Mode */}
+        {pageMode === 'courses' && (
+          <>
+            {/* Course Selector */}
+            <PageSection>
+              <div className="flex items-center gap-4">
+                <label className="text-sm font-medium text-[var(--text-secondary)]">Course:</label>
+                <select
+                  value={selectedCourse?.id || ''}
+                  onChange={(e) => {
+                    const course = courses.find((c) => c.id === e.target.value);
+                    setSelectedCourse(course || null);
+                    setSelectedItem(null);
+                    setEditedLesson(null);
+                  }}
+                  className="flex-1 max-w-xs px-3 py-2 rounded-md bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-sm text-[var(--text-primary)]"
+                >
+                  <option value="">Select a course...</option>
+                  {courses.map((course) => (
+                    <option key={course.id} value={course.id}>
+                      {course.title}
+                    </option>
+                  ))}
+                </select>
+                {selectedCourse && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<Edit3 className="w-4 h-4" />}
+                    onClick={() => {
+                      setEditingCourse(selectedCourse);
+                      setCourseModalOpen(true);
+                    }}
+                  >
+                    Edit Course
+                  </Button>
+                )}
+              </div>
+            </PageSection>
 
         {/* Two-Pane Layout */}
         {selectedCourse ? (
@@ -1471,10 +1631,59 @@ export default function ContentStudioPage() {
 
                         <CardContent className="p-4">
                           <TabsContent value="video">
-                            <VideoUploader
-                              lesson={editedLesson}
-                              onUploadComplete={handleVideoUploadComplete}
-                            />
+                            <div className="space-y-4">
+                              {/* Video Source Options */}
+                              <div className="flex items-center gap-2 p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
+                                <span className="text-sm text-[var(--text-secondary)]">Video Source:</span>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  icon={<Library className="w-4 h-4" />}
+                                  onClick={() => setVideoPickerOpen(true)}
+                                >
+                                  Select from Library
+                                </Button>
+                                <span className="text-xs text-[var(--text-tertiary)]">or upload below</span>
+                              </div>
+
+                              {/* Show YouTube video if using videoUrl */}
+                              {editedLesson.videoUrl && !editedLesson.videoUid && (
+                                <div className="space-y-2">
+                                  <div className="aspect-video bg-black rounded-lg overflow-hidden">
+                                    <iframe
+                                      src={`https://www.youtube.com/embed/${new URL(editedLesson.videoUrl).searchParams.get('v') || editedLesson.videoUrl.split('/').pop()}`}
+                                      className="w-full h-full"
+                                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                      allowFullScreen
+                                    />
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <Youtube className="w-4 h-4 text-red-500" />
+                                      <span className="text-sm text-[var(--text-tertiary)]">YouTube Video</span>
+                                    </div>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setEditedLesson({ ...editedLesson, videoUrl: null })}
+                                    >
+                                      Remove
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Cloudflare Video Uploader */}
+                              {!editedLesson.videoUrl && (
+                                <VideoUploader
+                                  lesson={editedLesson}
+                                  onUploadComplete={handleVideoUploadComplete}
+                                  onTranscriptGenerated={(transcript) => {
+                                    setEditedLesson({ ...editedLesson, transcriptText: transcript });
+                                  }}
+                                />
+                              )}
+                            </div>
                           </TabsContent>
 
                           <TabsContent value="transcript">
@@ -1637,7 +1846,16 @@ export default function ContentStudioPage() {
             </Card>
           </PageSection>
         )}
+          </>
+        )}
       </PageShell>
+
+      {/* Video Picker Modal */}
+      <VideoPickerModal
+        isOpen={videoPickerOpen}
+        onClose={() => setVideoPickerOpen(false)}
+        onSelect={handleSelectLibraryVideo}
+      />
 
       {/* Course Editor Modal */}
       <CourseEditorModal
