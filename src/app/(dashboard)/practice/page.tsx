@@ -16,6 +16,7 @@ import { OptionsChain } from '@/components/practice/options-chain';
 import { ReplayController, useReplayState } from '@/components/practice/replay-controller';
 import { SkillExercises } from '@/components/practice/skill-exercises';
 import { cn } from '@/lib/utils';
+import { usePageContext } from '@/components/ai';
 import {
   Target,
   TrendingUp,
@@ -178,6 +179,9 @@ const PRACTICE_MODES = [
 ];
 
 export default function PracticePage() {
+  // AI Context - update page context
+  usePageContext();
+
   // Core state
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioDetail | null>(null);
