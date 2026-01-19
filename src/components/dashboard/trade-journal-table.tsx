@@ -54,7 +54,7 @@ function getTradeDisplay(trade: TradeEntry) {
     // Notes fields - map to existing fields
     setupNotes: trade.notes,
     exitNotes: trade.lessons,
-    emotionsList: trade.emotions?.join(', ') || null,
+    emotionsList: Array.isArray(trade.emotions) ? trade.emotions.join(', ') : trade.emotions || null,
 
     // Safe access for optional numeric fields
     pnl: trade.pnl ?? 0,

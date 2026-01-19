@@ -156,7 +156,9 @@ export interface TradeEntry {
   direction: 'long' | 'short';
   entry_price: number;
   exit_price?: number;
-  quantity: number;
+  quantity?: number; // UI field name
+  shares?: number; // DB field name (API accepts both)
+  is_options?: boolean;
   contract_type?: 'stock' | 'call' | 'put';
   strike_price?: number;
   expiration_date?: string;
@@ -166,18 +168,30 @@ export interface TradeEntry {
   pnl_percent?: number;
   setup_type?: string;
   notes?: string;
-  emotions?: string[];
+  emotions?: string | string[];
   mistakes?: string[];
   lessons?: string;
   screenshots?: string[];
   tags?: string[];
+  // LTP checklist fields (sent to API)
+  had_level?: boolean;
+  had_trend?: boolean;
+  had_patience_candle?: boolean;
+  followed_rules?: boolean;
+  // Legacy UI format (for backward compatibility)
   ltp_score?: {
     level: number;
     trend: number;
     patience: number;
     overall: number;
   };
-  status: 'open' | 'closed';
+  // API response format (server-computed)
+  ltp_grade?: {
+    score: number; // 0-100
+    grade: 'A' | 'B' | 'C' | 'D' | 'F';
+    feedback: string[];
+  };
+  status?: 'open' | 'closed';
   created_at: string;
   updated_at: string;
 }

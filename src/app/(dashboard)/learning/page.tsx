@@ -94,15 +94,15 @@ export default function LearningPage() {
         setStats(modulesData.stats);
         setDataSource(modulesData.source || 'local');
 
-        // Fetch user progress
-        const progressRes = await fetch('/api/learning/progress');
+        // Fetch user progress from v2 API
+        const progressRes = await fetch('/api/learning/v2/progress');
         if (progressRes.ok) {
           const progressData = await progressRes.json();
 
-          // Convert API response to module progress format
+          // v2 API returns { modules: { [moduleId]: { completed, total } } }
           const progress: ModuleProgress = {};
           (modulesData.modules || []).forEach((module: LearningModule) => {
-            const moduleProgress = progressData.progress?.[module.id] || {
+            const moduleProgress = progressData.modules?.[module.id] || {
               completed: 0,
               total: module.lessonsCount,
             };

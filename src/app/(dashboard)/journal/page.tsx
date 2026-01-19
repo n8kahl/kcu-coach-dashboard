@@ -104,7 +104,8 @@ export default function JournalPage() {
                   t.entry_price,
                   t.exit_price || '',
                   t.pnl || 0,
-                  t.ltp_score?.overall || 'N/A'
+                  // Use ltp_grade (API format) or fall back to ltp_score (legacy)
+                  t.ltp_grade?.grade || (t.ltp_score ? (t.ltp_score.overall >= 8 ? 'A' : t.ltp_score.overall >= 6 ? 'B' : 'C') : 'N/A')
                 ]);
                 const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
                 const blob = new Blob([csv], { type: 'text/csv' });
@@ -210,7 +211,7 @@ export default function JournalPage() {
                 exitPrice={selectedTrade.exit_price ?? selectedTrade.entry_price}
                 pnl={selectedTrade.pnl ?? 0}
                 pnlPercent={selectedTrade.pnl_percent ?? 0}
-                ltpGrade={selectedTrade.ltp_score ? (selectedTrade.ltp_score.overall >= 8 ? 'A' : selectedTrade.ltp_score.overall >= 6 ? 'B' : 'C') : 'N/A'}
+                ltpGrade={selectedTrade.ltp_grade?.grade || (selectedTrade.ltp_score ? (selectedTrade.ltp_score.overall >= 8 ? 'A' : selectedTrade.ltp_score.overall >= 6 ? 'B' : 'C') : 'N/A')}
                 username="TraderJoe"
               />
             </div>
@@ -293,9 +294,22 @@ function AIInsightsSection({
     const winningTrades = trades.filter((t) => (t.pnl ?? 0) > 0);
     const losingTrades = trades.filter((t) => (t.pnl ?? 0) < 0);
 
-    // Analyze LTP compliance on winners vs losers (if ltp_score exists)
-    const winnersWithLTP = winningTrades.filter((t) => t.ltp_score && t.ltp_score.overall >= 7);
-    const losersWithLTP = losingTrades.filter((t) => t.ltp_score && t.ltp_score.overall >= 7);
+    // Analyze LTP compliance on winners vs losers
+    // Helper to get LTP score (0-100) from either ltp_grade or legacy ltp_score
+    const getLtpScore = (t: TradeEntry) => {
+      if (t.ltp_grade?.score !== undefined) return t.ltp_grade.score;
+      if (t.ltp_score?.overall !== undefined) return t.ltp_score.overall * 10; // Convert 0-10 to 0-100
+      return null;
+    };
+
+    const winnersWithLTP = winningTrades.filter((t) => {
+      const score = getLtpScore(t);
+      return score !== null && score >= 70; // 70% = B grade or better
+    });
+    const losersWithLTP = losingTrades.filter((t) => {
+      const score = getLtpScore(t);
+      return score !== null && score >= 70;
+    });
 
     if (winningTrades.length > 0 && winnersWithLTP.length / winningTrades.length > 0.6) {
       const ltpWinRate = Math.round((winnersWithLTP.length / winningTrades.length) * 100);
@@ -303,7 +317,10 @@ function AIInsightsSection({
     }
 
     if (losingTrades.length > 0) {
-      const losersWithoutLTP = losingTrades.filter((t) => !t.ltp_score || t.ltp_score.overall < 5);
+      const losersWithoutLTP = losingTrades.filter((t) => {
+        const score = getLtpScore(t);
+        return score === null || score < 50; // Below 50% = C grade or worse
+      });
       if (losersWithoutLTP.length / losingTrades.length > 0.5) {
         const noLTPRate = Math.round((losersWithoutLTP.length / losingTrades.length) * 100);
         improvements.push(`${noLTPRate}% of losing trades lacked LTP confirmation - wait for proper setups`);
@@ -493,13 +510,18 @@ function TradeFormModal({
       direction: formData.direction,
       entry_price: entryPrice,
       exit_price: exitPrice,
-      quantity,
+      shares: quantity, // API accepts both 'shares' and 'quantity'
       entry_time: formData.entry_time,
       exit_time: formData.exit_time,
       setup_type: formData.setup_type,
       notes: formData.notes,
       pnl,
       pnl_percent: pnlPercent,
+      // LTP checklist fields - used by API to compute LTP grade
+      had_level: formData.had_level,
+      had_trend: formData.had_trend,
+      had_patience_candle: formData.had_patience_candle,
+      followed_rules: formData.followed_rules,
     });
 
     setSubmitting(false);

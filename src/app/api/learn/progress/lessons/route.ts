@@ -1,8 +1,13 @@
+/**
+ * @deprecated Use /api/learning/v2/progress instead
+ * This route is part of the Thinkific-based learning system.
+ * The v2 API uses local curriculum instead.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getAuthenticatedUser } from '@/lib/auth';
 
-// GET - Fetch lesson progress
+// GET - Fetch lesson progress (DEPRECATED)
 export async function GET(request: NextRequest) {
   try {
     const sessionUser = await getAuthenticatedUser();

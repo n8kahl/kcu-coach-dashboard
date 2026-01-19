@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { getAuthenticatedUserId } from '@/lib/auth';
+import { withRateLimitAndTimeout, getEndpointUserKey } from '@/lib/rate-limit';
 
 const anthropic = new Anthropic();
 
@@ -30,7 +31,7 @@ When reviewing trades, look for:
 - Did they wait for patience candles?
 - Was risk managed properly?`;
 
-export async function POST(request: NextRequest) {
+async function coachChatHandler(request: NextRequest) {
   try {
     const userId = await getAuthenticatedUserId();
     if (!userId) {
@@ -66,3 +67,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
+// Export with rate limiting (30 requests/minute) and timeout (60 seconds)
+export const POST = withRateLimitAndTimeout(
+  coachChatHandler,
+  getEndpointUserKey('coach-chat'),
+  { limit: 30, windowSeconds: 60, timeoutMs: 60000 }
+);
