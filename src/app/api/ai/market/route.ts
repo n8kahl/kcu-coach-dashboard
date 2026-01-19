@@ -115,8 +115,8 @@ export async function POST(request: Request) {
 
     // Build context for AI
     const marketContext = symbolData
-      .map((d) => `${d.symbol}: $${d.price.toFixed(2)} (${d.changePercent >= 0 ? '+' : ''}${d.changePercent.toFixed(2)}%) - Trend: ${d.trend}
-  Key Levels: ${d.keyLevels.map((l) => `${l.type}: $${l.price.toFixed(2)} (${l.distance.toFixed(2)}% away)`).join(', ')}
+      .map((d: MarketData) => `${d.symbol}: $${d.price.toFixed(2)} (${d.changePercent >= 0 ? '+' : ''}${d.changePercent.toFixed(2)}%) - Trend: ${d.trend}
+  Key Levels: ${d.keyLevels.map((l: KeyLevel) => `${l.type}: $${l.price.toFixed(2)} (${l.distance.toFixed(2)}% away)`).join(', ')}
   Patience Candle: ${d.patienceCandle?.confirmed ? 'Confirmed' : d.patienceCandle?.forming ? 'Forming' : 'None'} on ${d.patienceCandle?.timeframe || 'N/A'}`)
       .join('\n\n');
 

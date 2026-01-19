@@ -21,18 +21,18 @@ export default function CoachPage() {
   const router = useRouter();
 
   // Try to use AI context to open the panel
-  let openPanel: (() => void) | null = null;
+  let setPanel: ((state: 'collapsed' | 'expanded' | 'focused') => void) | null = null;
   try {
     const context = useAIContext();
-    openPanel = context.openPanel;
+    setPanel = context.setPanel;
   } catch {
     // Context not available
   }
 
   useEffect(() => {
     // Open the AI Command Center panel
-    if (openPanel) {
-      openPanel();
+    if (setPanel) {
+      setPanel('expanded');
     }
 
     // Redirect to overview after a brief delay
@@ -41,7 +41,7 @@ export default function CoachPage() {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [router, openPanel]);
+  }, [router, setPanel]);
 
   return (
     <div className="flex flex-col items-center justify-center h-[calc(100vh-12rem)]">

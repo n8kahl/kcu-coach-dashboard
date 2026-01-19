@@ -24,13 +24,13 @@ import {
   Minimize2,
   Maximize2,
 } from 'lucide-react';
-import type { AIMessage, AIPage } from '@/types/ai';
+import type { AIMessage, DashboardPage } from '@/types/ai';
 
 // ============================================
 // Page Display Names
 // ============================================
 
-const PAGE_DISPLAY_NAMES: Record<AIPage, string> = {
+const PAGE_DISPLAY_NAMES: Record<DashboardPage, string> = {
   overview: 'Overview',
   journal: 'Trade Journal',
   learning: 'Learning Hub',
@@ -42,7 +42,12 @@ const PAGE_DISPLAY_NAMES: Record<AIPage, string> = {
   leaderboard: 'Leaderboard',
   'win-cards': 'Win Cards',
   resources: 'Resources',
-  admin: 'Admin',
+  'admin/users': 'Admin: Users',
+  'admin/social-builder': 'Admin: Social Builder',
+  'admin/knowledge': 'Admin: Knowledge CMS',
+  'admin/analytics': 'Admin: Analytics',
+  'admin/settings': 'Admin: Settings',
+  'admin/card-builder': 'Admin: Card Builder',
 };
 
 // ============================================
@@ -63,15 +68,21 @@ const SUGGESTED_PROMPTS = [
 export function AICommandCenter() {
   const {
     context,
-    isOpen,
-    isCollapsed,
-    messages,
-    isLoading,
-    closePanel,
-    toggleCollapsed,
+    panelState,
+    setPanel,
+    togglePanel,
     sendMessage,
-    clearMessages,
+    clearHistory,
   } = useAIContext();
+
+  // Derive state from panelState
+  const isOpen = panelState.panelState !== 'collapsed';
+  const isCollapsed = false; // We don't use mini-collapsed mode
+  const messages = panelState.messages;
+  const isLoading = panelState.isLoading;
+  const closePanel = () => setPanel('collapsed');
+  const toggleCollapsed = closePanel; // Toggle just closes
+  const clearMessages = clearHistory;
 
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);

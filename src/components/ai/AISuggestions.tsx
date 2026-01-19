@@ -160,7 +160,7 @@ export function AISuggestions({
     .slice(0, maxSuggestions);
 
   const handleDismiss = (id: string) => {
-    setDismissedIds((prev) => new Set([...prev, id]));
+    setDismissedIds((prev) => new Set([...Array.from(prev), id]));
   };
 
   const handleAction = (suggestion: AISuggestion) => {
@@ -455,11 +455,11 @@ function generateMockSuggestions(context: ReturnType<typeof useAIContext>['conte
   }
 
   // Global suggestions
-  if (context.user?.streakDays && context.user.streakDays >= 5) {
+  if (context.stats?.currentStreak && context.stats.currentStreak >= 5) {
     suggestions.push({
       id: 'streak',
       type: 'streak_reminder',
-      title: `${context.user.streakDays} day streak!`,
+      title: `${context.stats.currentStreak} day streak!`,
       message: 'Keep it up! Log in tomorrow to maintain your streak.',
       priority: 'low',
       dismissable: true,
