@@ -1,0 +1,56 @@
+# Gitleaks configuration for KCU Coach Dashboard
+# https://github.com/gitleaks/gitleaks
+
+title = "KCU Secret Detection Rules"
+
+[extend]
+# Use default gitleaks rules as base
+useDefault = true
+
+# Allowlist specific paths and patterns that are NOT secrets
+[allowlist]
+description = "Allowlist for non-secret patterns"
+
+paths = [
+    '''node_modules''',
+    '''\.next''',
+    '''package-lock\.json''',
+    '''\.env\.example''',
+    '''supabase/.*\.sql''',
+]
+
+# Allow placeholder values in example files
+regexes = [
+    '''your[-_]?.*[-_]?key''',
+    '''placeholder[-_]?.*[-_]?key''',
+    '''sk-ant-your-api-key''',
+    '''sk-your-openai-api-key''',
+    '''your_supabase.*key''',
+    '''your_discord.*''',
+    '''your[-_].*[-_]secret''',
+]
+
+# Additional rules for project-specific secrets
+[[rules]]
+id = "supabase-service-key"
+description = "Supabase Service Role Key"
+regex = '''eyJ[a-zA-Z0-9_-]{50,}\.eyJ[a-zA-Z0-9_-]{100,}'''
+keywords = ["supabase", "service_role"]
+
+[[rules]]
+id = "discord-client-secret"
+description = "Discord Client Secret"
+regex = '''[a-zA-Z0-9_-]{32,40}'''
+keywords = ["DISCORD_CLIENT_SECRET", "discord_secret"]
+
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API Key"
+regex = '''sk-ant-[a-zA-Z0-9-]{90,}'''
+keywords = ["anthropic", "claude"]
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API Key"
+regex = '''sk-[a-zA-Z0-9]{48,}'''
+keywords = ["openai", "OPENAI_API_KEY"]

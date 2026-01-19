@@ -1,8 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
+import { withRateLimitAndTimeout, getEndpointUserKey } from '@/lib/rate-limit';
 
 // GET - Fetch OHLCV bars from Massive.com
-export async function GET(request: Request) {
+async function barsHandler(request: NextRequest) {
   try {
     const session = await getSession();
     if (!session?.userId) {
@@ -66,3 +67,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
+// Export with rate limiting (30 requests/minute) and timeout (15 seconds)
+export const GET = withRateLimitAndTimeout(
+  barsHandler,
+  getEndpointUserKey('market-bars'),
+  { limit: 30, windowSeconds: 60, timeoutMs: 15000 }
+);

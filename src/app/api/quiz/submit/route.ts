@@ -1,8 +1,13 @@
+/**
+ * @deprecated Use /api/learning/v2/quizzes/[id] POST instead
+ * This route expects quizzes stored in a database table.
+ * The v2 API uses local curriculum quizzes instead.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 
-// POST - Submit quiz attempt
+// POST - Submit quiz attempt (DEPRECATED)
 export async function POST(request: NextRequest) {
   try {
     const session = await getSession();

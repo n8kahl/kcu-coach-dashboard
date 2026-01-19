@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Stat, StatGrid } from '@/components/ui/stat';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { useToast } from '@/components/ui/toast';
 import {
   Table,
   TableHeader,
@@ -17,7 +18,7 @@ import {
   TableHead,
   TableCell,
 } from '@/components/ui/table';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateTime, getRelativeTime } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import {
   Database,
@@ -97,10 +98,24 @@ interface YouTubeAPIStats {
 }
 
 interface ThinkificStats {
-  totalUsers: number;
-  totalEnrollments: number;
-  courseCompletions: number;
-  webhooksActive: boolean;
+  configured: boolean;
+  last_sync: string | null;
+  courses_count: number;
+  chapters_count: number;
+  contents_count: number;
+  is_syncing: boolean;
+  sync_logs?: Array<{
+    id: string;
+    sync_type: string;
+    status: string;
+    courses_synced: number;
+    chapters_synced: number;
+    contents_synced: number;
+    errors: string[];
+    started_at: string;
+    completed_at: string | null;
+  }>;
+  error?: string;
 }
 
 // ============================================
@@ -108,6 +123,8 @@ interface ThinkificStats {
 // ============================================
 
 export default function KnowledgeCMSPage() {
+  const { showToast, updateToast, dismissToast } = useToast();
+
   // Knowledge Base State
   const [stats, setStats] = useState<KnowledgeStats | null>(null);
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
@@ -128,6 +145,15 @@ export default function KnowledgeCMSPage() {
   // Thinkific State
   const [thinkificStats, setThinkificStats] = useState<ThinkificStats | null>(null);
   const [thinkificSyncing, setThinkificSyncing] = useState(false);
+  const [availableCourses, setAvailableCourses] = useState<Array<{
+    id: number;
+    name: string;
+    slug: string;
+    description: string | null;
+    image_url: string | null;
+  }>>([]);
+  const [selectedCourseIds, setSelectedCourseIds] = useState<Set<number>>(new Set());
+  const [loadingCourses, setLoadingCourses] = useState(false);
 
   // Active tab
   const [activeTab, setActiveTab] = useState('youtube');
@@ -194,13 +220,12 @@ export default function KnowledgeCMSPage() {
         });
       }
 
-      // Set Thinkific stats (webhooks are always active)
-      setThinkificStats({
-        totalUsers: 0,
-        totalEnrollments: 0,
-        courseCompletions: 0,
-        webhooksActive: true,
-      });
+      // Fetch Thinkific sync status
+      const thinkificRes = await fetch('/api/admin/thinkific/sync');
+      if (thinkificRes.ok) {
+        const thinkificData = await thinkificRes.json();
+        setThinkificStats(thinkificData);
+      }
 
     } catch (err) {
       console.error('Error fetching data:', err);
@@ -223,6 +248,13 @@ export default function KnowledgeCMSPage() {
 
   const handleYouTubeSync = async () => {
     setYoutubeSyncStatus(prev => ({ ...prev, status: 'syncing', error: undefined }));
+    const toastId = showToast({
+      type: 'loading',
+      title: 'Syncing YouTube',
+      message: 'Fetching videos and transcripts...',
+      persistent: true,
+    });
+
     try {
       const response = await fetch('/api/youtube/sync', {
         method: 'POST',
@@ -241,6 +273,11 @@ export default function KnowledgeCMSPage() {
           videosIndexed: data.stats?.indexedVideos,
           transcriptsProcessed: data.stats?.transcriptsProcessed,
         });
+        updateToast(toastId, {
+          type: 'success',
+          title: 'YouTube Sync Complete',
+          message: `${data.stats?.indexedVideos || 0} videos indexed, ${data.stats?.transcriptsProcessed || 0} transcripts processed`,
+        });
         fetchData();
       } else {
         const err = await response.json();
@@ -249,6 +286,11 @@ export default function KnowledgeCMSPage() {
           status: 'error',
           error: err.error || err.details || 'Sync failed',
         }));
+        updateToast(toastId, {
+          type: 'error',
+          title: 'YouTube Sync Failed',
+          message: err.error || err.details || 'Sync failed',
+        });
       }
     } catch (err) {
       setYoutubeSyncStatus(prev => ({
@@ -256,22 +298,156 @@ export default function KnowledgeCMSPage() {
         status: 'error',
         error: err instanceof Error ? err.message : 'Unknown error',
       }));
+      updateToast(toastId, {
+        type: 'error',
+        title: 'YouTube Sync Failed',
+        message: err instanceof Error ? err.message : 'Unknown error',
+      });
     }
   };
 
   const handleThinkificSync = async () => {
     setThinkificSyncing(true);
+    const toastId = showToast({
+      type: 'loading',
+      title: 'Syncing Thinkific',
+      message: 'Fetching courses and content...',
+      persistent: true,
+    });
+
     try {
-      // Thinkific syncs via webhooks, this is a placeholder for manual sync
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      fetchData();
+      const response = await fetch('/api/admin/thinkific/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'full' }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        updateToast(toastId, {
+          type: 'success',
+          title: 'Thinkific Sync Complete',
+          message: result.message || `${result.courses_synced} courses, ${result.chapters_synced} chapters, ${result.contents_synced} contents`,
+        });
+        fetchData();
+      } else {
+        const err = await response.json();
+        updateToast(toastId, {
+          type: 'error',
+          title: 'Sync Failed',
+          message: err.error || err.detail || 'Unknown error',
+        });
+      }
+    } catch (err) {
+      console.error('Error syncing Thinkific:', err);
+      updateToast(toastId, {
+        type: 'error',
+        title: 'Sync Failed',
+        message: 'Failed to sync Thinkific content',
+      });
     } finally {
       setThinkificSyncing(false);
     }
   };
 
+  const fetchAvailableCourses = async () => {
+    setLoadingCourses(true);
+    try {
+      const response = await fetch('/api/admin/thinkific/sync?action=available');
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableCourses(data.courses || []);
+      }
+    } catch (err) {
+      console.error('Error fetching available courses:', err);
+    } finally {
+      setLoadingCourses(false);
+    }
+  };
+
+  const handleSyncSelectedCourses = async () => {
+    if (selectedCourseIds.size === 0) {
+      showToast({
+        type: 'warning',
+        title: 'No Courses Selected',
+        message: 'Please select at least one course to sync',
+      });
+      return;
+    }
+
+    setThinkificSyncing(true);
+    const toastId = showToast({
+      type: 'loading',
+      title: 'Syncing Courses',
+      message: `Syncing ${selectedCourseIds.size} course${selectedCourseIds.size !== 1 ? 's' : ''}...`,
+      persistent: true,
+    });
+
+    try {
+      const response = await fetch('/api/admin/thinkific/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ courseIds: Array.from(selectedCourseIds) }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        updateToast(toastId, {
+          type: 'success',
+          title: 'Courses Synced',
+          message: result.message || `${result.courses_synced} courses, ${result.chapters_synced} chapters, ${result.contents_synced} contents`,
+        });
+        setSelectedCourseIds(new Set());
+        fetchData();
+      } else {
+        const err = await response.json();
+        updateToast(toastId, {
+          type: 'error',
+          title: 'Sync Failed',
+          message: err.error || err.detail || 'Unknown error',
+        });
+      }
+    } catch (err) {
+      console.error('Error syncing selected courses:', err);
+      updateToast(toastId, {
+        type: 'error',
+        title: 'Sync Failed',
+        message: 'Failed to sync selected courses',
+      });
+    } finally {
+      setThinkificSyncing(false);
+    }
+  };
+
+  const toggleCourseSelection = (courseId: number) => {
+    setSelectedCourseIds(prev => {
+      const next = new Set(prev);
+      if (next.has(courseId)) {
+        next.delete(courseId);
+      } else {
+        next.add(courseId);
+      }
+      return next;
+    });
+  };
+
+  const selectAllCourses = () => {
+    setSelectedCourseIds(new Set(availableCourses.map(c => c.id)));
+  };
+
+  const clearCourseSelection = () => {
+    setSelectedCourseIds(new Set());
+  };
+
   const handleProcessPending = async () => {
     setProcessing(true);
+    const toastId = showToast({
+      type: 'loading',
+      title: 'Processing Transcripts',
+      message: 'Extracting and embedding video content...',
+      persistent: true,
+    });
+
     try {
       const res = await fetch('/api/admin/knowledge', {
         method: 'POST',
@@ -281,15 +457,27 @@ export default function KnowledgeCMSPage() {
 
       if (res.ok) {
         const result = await res.json();
-        alert(`Processed ${result.successful} of ${result.totalProcessed} videos`);
+        updateToast(toastId, {
+          type: 'success',
+          title: 'Processing Complete',
+          message: `Processed ${result.successful} of ${result.totalProcessed} videos`,
+        });
         fetchData();
       } else {
         const err = await res.json();
-        alert(`Error: ${err.error}`);
+        updateToast(toastId, {
+          type: 'error',
+          title: 'Processing Error',
+          message: err.error,
+        });
       }
     } catch (err) {
       console.error('Error processing pending:', err);
-      alert('Failed to process videos');
+      updateToast(toastId, {
+        type: 'error',
+        title: 'Processing Failed',
+        message: 'Failed to process videos',
+      });
     } finally {
       setProcessing(false);
     }
@@ -308,15 +496,27 @@ export default function KnowledgeCMSPage() {
 
       const result = await res.json();
       if (result.success) {
-        alert(`Video added: ${result.videoId}`);
+        showToast({
+          type: 'success',
+          title: 'Video Added',
+          message: `Video ID: ${result.videoId}`,
+        });
         setNewVideoUrl('');
         fetchData();
       } else {
-        alert(`Error: ${result.error}`);
+        showToast({
+          type: 'error',
+          title: 'Failed to Add Video',
+          message: result.error,
+        });
       }
     } catch (err) {
       console.error('Error adding video:', err);
-      alert('Failed to add video');
+      showToast({
+        type: 'error',
+        title: 'Failed to Add Video',
+        message: 'An unexpected error occurred',
+      });
     } finally {
       setAddingVideo(false);
     }
@@ -332,14 +532,26 @@ export default function KnowledgeCMSPage() {
 
       const result = await res.json();
       if (result.success) {
-        alert(`Reprocessed: ${result.chunkCount} chunks created`);
+        showToast({
+          type: 'success',
+          title: 'Video Reprocessed',
+          message: `${result.chunkCount} chunks created`,
+        });
         fetchData();
       } else {
-        alert(`Error: ${result.error}`);
+        showToast({
+          type: 'error',
+          title: 'Reprocessing Failed',
+          message: result.error,
+        });
       }
     } catch (err) {
       console.error('Error reprocessing:', err);
-      alert('Failed to reprocess video');
+      showToast({
+        type: 'error',
+        title: 'Reprocessing Failed',
+        message: 'Failed to reprocess video',
+      });
     }
   };
 
@@ -354,14 +566,26 @@ export default function KnowledgeCMSPage() {
 
       if (res.ok) {
         const result = await res.json();
-        alert(`Deleted ${result.deletedChunks} chunks`);
+        showToast({
+          type: 'success',
+          title: 'Source Deleted',
+          message: `${result.deletedChunks} chunks removed`,
+        });
         fetchData();
       } else {
-        alert('Failed to delete source');
+        showToast({
+          type: 'error',
+          title: 'Delete Failed',
+          message: 'Failed to delete source',
+        });
       }
     } catch (err) {
       console.error('Error deleting:', err);
-      alert('Failed to delete source');
+      showToast({
+        type: 'error',
+        title: 'Delete Failed',
+        message: 'Failed to delete source',
+      });
     }
   };
 
@@ -557,9 +781,12 @@ export default function KnowledgeCMSPage() {
                   <CardContent className="p-4 space-y-4">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-[var(--text-secondary)]">Last Sync</span>
-                      <span className="text-[var(--text-primary)]">
+                      <span
+                        className="text-[var(--text-primary)]"
+                        title={youtubeSyncStatus.lastSync ? new Date(youtubeSyncStatus.lastSync).toLocaleString() : undefined}
+                      >
                         {youtubeSyncStatus.lastSync
-                          ? new Date(youtubeSyncStatus.lastSync).toLocaleString()
+                          ? getRelativeTime(youtubeSyncStatus.lastSync)
                           : 'Never'}
                       </span>
                     </div>
@@ -631,6 +858,24 @@ export default function KnowledgeCMSPage() {
             {/* Thinkific Tab */}
             <TabsContent value="thinkific">
               <div className="space-y-6">
+                {/* API Configuration Status */}
+                {thinkificStats && !thinkificStats.configured && (
+                  <Card className="border-[var(--warning)] bg-[var(--warning)]/10">
+                    <CardContent className="py-4">
+                      <div className="flex items-center gap-3 text-[var(--warning)]">
+                        <AlertCircle className="w-5 h-5" />
+                        <div>
+                          <p className="font-medium">Thinkific API Not Configured</p>
+                          <p className="text-sm opacity-75">
+                            {thinkificStats.error || 'Set THINKIFIC_API_KEY and THINKIFIC_SUBDOMAIN environment variables.'}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Sync Panel */}
                 <Card variant="elevated" className="overflow-hidden">
                   <CardHeader className="border-b border-[var(--border-secondary)] bg-gradient-to-r from-indigo-500/10 to-transparent">
                     <div className="flex items-center justify-between">
@@ -639,66 +884,218 @@ export default function KnowledgeCMSPage() {
                           <GraduationCap className="w-5 h-5 text-indigo-500" />
                         </div>
                         <div>
-                          <CardTitle className="text-lg">Thinkific LMS</CardTitle>
-                          <p className="text-sm text-[var(--text-tertiary)]">Course Progress & Enrollments</p>
+                          <CardTitle className="text-lg">Thinkific LMS Content</CardTitle>
+                          <p className="text-sm text-[var(--text-tertiary)]">Courses, Chapters & Lessons</p>
                         </div>
                       </div>
-                      <Badge variant="success" className="flex items-center gap-1">
-                        <Webhook className="w-3 h-3" />
-                        Webhooks Active
-                      </Badge>
+                      {thinkificStats?.configured ? (
+                        <Badge variant="success" className="flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          API Configured
+                        </Badge>
+                      ) : (
+                        <Badge variant="warning" className="flex items-center gap-1">
+                          <XCircle className="w-3 h-3" />
+                          Not Configured
+                        </Badge>
+                      )}
                     </div>
                   </CardHeader>
                   <CardContent className="p-4 space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-[var(--text-secondary)]">Last Sync</span>
+                      <span
+                        className="text-[var(--text-primary)]"
+                        title={thinkificStats?.last_sync ? new Date(thinkificStats.last_sync).toLocaleString() : undefined}
+                      >
+                        {thinkificStats?.last_sync
+                          ? getRelativeTime(thinkificStats.last_sync)
+                          : 'Never'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3">
                       <div className="p-3 rounded-lg bg-[var(--bg-secondary)]">
-                        <p className="text-xs text-[var(--text-tertiary)]">Enrollments</p>
+                        <p className="text-xs text-[var(--text-tertiary)]">Courses</p>
                         <p className="text-xl font-bold text-[var(--text-primary)]">
-                          {thinkificStats?.totalEnrollments || 0}
+                          {thinkificStats?.courses_count || 0}
                         </p>
                       </div>
                       <div className="p-3 rounded-lg bg-[var(--bg-secondary)]">
-                        <p className="text-xs text-[var(--text-tertiary)]">Completions</p>
+                        <p className="text-xs text-[var(--text-tertiary)]">Chapters</p>
                         <p className="text-xl font-bold text-[var(--text-primary)]">
-                          {thinkificStats?.courseCompletions || 0}
+                          {thinkificStats?.chapters_count || 0}
+                        </p>
+                      </div>
+                      <div className="p-3 rounded-lg bg-[var(--bg-secondary)]">
+                        <p className="text-xs text-[var(--text-tertiary)]">Lessons</p>
+                        <p className="text-xl font-bold text-[var(--text-primary)]">
+                          {thinkificStats?.contents_count || 0}
                         </p>
                       </div>
                     </div>
 
+                    {/* Webhook Status */}
                     <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/30 flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-green-500" />
-                      <p className="text-sm text-green-400">Webhooks Active - Real-time sync enabled</p>
+                      <Webhook className="w-4 h-4 text-green-500" />
+                      <p className="text-sm text-green-400">Webhooks Active - Progress syncs automatically</p>
                     </div>
 
+                    {/* Sync Logs */}
+                    {thinkificStats?.sync_logs && thinkificStats.sync_logs.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium text-[var(--text-secondary)]">Recent Syncs</p>
+                        <div className="space-y-1">
+                          {thinkificStats.sync_logs.slice(0, 3).map((log) => (
+                            <div
+                              key={log.id}
+                              className="flex items-center justify-between text-xs p-2 rounded bg-[var(--bg-secondary)]"
+                            >
+                              <div className="flex items-center gap-2">
+                                {log.status === 'completed' ? (
+                                  <CheckCircle2 className="w-3 h-3 text-green-500" />
+                                ) : log.status === 'running' ? (
+                                  <Loader2 className="w-3 h-3 text-[var(--warning)] animate-spin" />
+                                ) : (
+                                  <XCircle className="w-3 h-3 text-[var(--error)]" />
+                                )}
+                                <span className="text-[var(--text-tertiary)]">
+                                  {new Date(log.started_at).toLocaleDateString()}
+                                </span>
+                              </div>
+                              <span className="text-[var(--text-primary)]">
+                                {log.courses_synced}c / {log.chapters_synced}ch / {log.contents_synced}l
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={handleThinkificSync}
+                        disabled={thinkificSyncing || !thinkificStats?.configured}
+                        className="flex-1"
+                        variant="primary"
+                      >
+                        {thinkificSyncing ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Syncing...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Sync All
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        onClick={fetchAvailableCourses}
+                        disabled={loadingCourses || !thinkificStats?.configured}
+                        variant="secondary"
+                      >
+                        {loadingCourses ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          'Select Courses'
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Course Selection Card */}
+                {availableCourses.length > 0 && (
+                  <Card>
+                    <CardHeader title="Select Courses to Sync">
+                      <div className="flex items-center gap-2">
+                        <Button size="sm" variant="ghost" onClick={selectAllCourses}>
+                          Select All
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={clearCourseSelection}>
+                          Clear
+                        </Button>
+                        <Badge variant={selectedCourseIds.size > 0 ? 'success' : 'default'} size="sm">
+                          {selectedCourseIds.size} selected
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="max-h-64 overflow-y-auto">
+                      <div className="space-y-2">
+                        {availableCourses.map((course) => (
+                          <div
+                            key={course.id}
+                            onClick={() => toggleCourseSelection(course.id)}
+                            className={cn(
+                              'p-3 rounded-lg cursor-pointer transition-colors flex items-center gap-3',
+                              selectedCourseIds.has(course.id)
+                                ? 'bg-[var(--accent-primary)]/20 border border-[var(--accent-primary)]'
+                                : 'bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] border border-transparent'
+                            )}
+                          >
+                            <div className={cn(
+                              'w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0',
+                              selectedCourseIds.has(course.id)
+                                ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]'
+                                : 'border-[var(--border-secondary)]'
+                            )}>
+                              {selectedCourseIds.has(course.id) && (
+                                <CheckCircle2 className="w-3 h-3 text-white" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-[var(--text-primary)] truncate">
+                                {course.name}
+                              </p>
+                              {course.description && (
+                                <p className="text-xs text-[var(--text-muted)] truncate">
+                                  {course.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                    <div className="p-4 border-t border-[var(--border-primary)]">
+                      <Button
+                        onClick={handleSyncSelectedCourses}
+                        disabled={thinkificSyncing || selectedCourseIds.size === 0}
+                        className="w-full"
+                        variant="primary"
+                      >
+                        {thinkificSyncing ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Syncing Selected Courses...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Sync {selectedCourseIds.size} Selected Course{selectedCourseIds.size !== 1 ? 's' : ''}
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Webhook Info Card */}
+                <Card>
+                  <CardHeader title="Webhook Events" />
+                  <CardContent>
                     <div className="text-sm text-[var(--text-tertiary)] space-y-1">
-                      <p>Configured webhook events:</p>
+                      <p className="text-[var(--text-secondary)] mb-2">Configured webhook events for real-time updates:</p>
                       <ul className="list-disc list-inside ml-2 space-y-0.5">
                         <li>user.signup - Links Thinkific user to KCU</li>
-                        <li>enrollment.created - Records enrollment, awards XP</li>
+                        <li>enrollment.created - Records enrollment, awards 50 XP</li>
                         <li>enrollment.progress - Updates progress percentage</li>
-                        <li>lesson.completed - Awards XP based on content type</li>
+                        <li>lesson.completed - Awards 25-100 XP based on content type</li>
                         <li>enrollment.completed - Awards 500 XP, creates achievement</li>
                       </ul>
                     </div>
-
-                    <Button
-                      onClick={handleThinkificSync}
-                      disabled={thinkificSyncing}
-                      className="w-full"
-                      variant="secondary"
-                    >
-                      {thinkificSyncing ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Syncing...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="w-4 h-4 mr-2" />
-                          Force Full Sync
-                        </>
-                      )}
-                    </Button>
                   </CardContent>
                 </Card>
               </div>

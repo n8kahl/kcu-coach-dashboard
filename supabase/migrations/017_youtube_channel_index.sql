@@ -11,6 +11,8 @@ DO $$
 BEGIN
     -- Add missing columns if table exists but columns don't
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'youtube_videos') THEN
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS channel_id VARCHAR(50);
+        ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS channel_title VARCHAR(200);
         ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS category VARCHAR(100);
         ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS topics TEXT[];
         ALTER TABLE youtube_videos ADD COLUMN IF NOT EXISTS ltp_relevance FLOAT DEFAULT 0.0;
