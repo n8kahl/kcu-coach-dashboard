@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Header } from '@/components/layout/header';
 import { PageShell } from '@/components/layout/page-shell';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -23,8 +23,19 @@ import {
   Lightbulb,
   ChevronDown,
   ChevronUp,
+  Youtube,
+  ExternalLink,
 } from 'lucide-react';
 import Link from 'next/link';
+
+interface RelatedVideo {
+  id: string;
+  video_id: string;
+  title: string;
+  thumbnail_url: string;
+  category: string | null;
+  ltp_relevance: number | null;
+}
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -41,6 +52,7 @@ export default function LessonPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [relatedVideos, setRelatedVideos] = useState<RelatedVideo[]>([]);
 
   const module = getModuleBySlug(moduleSlug);
 
@@ -110,9 +122,72 @@ export default function LessonPage() {
   const nextLesson =
     lessonIndex < module.lessons.length - 1 ? module.lessons[lessonIndex + 1] : null;
 
-  const handleComplete = () => {
+  // Fetch related YouTube videos based on lesson key takeaways
+  useEffect(() => {
+    async function fetchRelatedVideos() {
+      if (!lesson) return;
+
+      try {
+        // Search based on lesson title and key takeaways
+        const searchTerms = [
+          lesson.title,
+          ...lesson.key_takeaways.slice(0, 2),
+        ].join(' ').toLowerCase();
+
+        // Map to categories
+        let category = '';
+        if (searchTerms.includes('ltp') || searchTerms.includes('level') || searchTerms.includes('trend') || searchTerms.includes('patience')) {
+          category = 'LTP Framework';
+        } else if (searchTerms.includes('price action') || searchTerms.includes('candle')) {
+          category = 'Price Action';
+        } else if (searchTerms.includes('psychol') || searchTerms.includes('mindset') || searchTerms.includes('emotion')) {
+          category = 'Psychology';
+        } else if (searchTerms.includes('risk') || searchTerms.includes('stop') || searchTerms.includes('position')) {
+          category = 'Risk Management';
+        }
+
+        const params = new URLSearchParams({
+          limit: '3',
+          sortBy: 'ltp_relevance',
+          sortOrder: 'desc',
+        });
+
+        if (category) {
+          params.set('category', category);
+        }
+
+        const response = await fetch(`/api/youtube/videos?${params}`);
+        if (response.ok) {
+          const data = await response.json();
+          setRelatedVideos(data.videos || []);
+        }
+      } catch (err) {
+        console.error('Error fetching related videos:', err);
+      }
+    }
+
+    fetchRelatedVideos();
+  }, [lesson]);
+
+  const handleComplete = async () => {
     setIsCompleted(true);
-    // In real app, save to API
+
+    // Persist completion to API
+    try {
+      await fetch('/api/learning/v2/progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lessonId: lesson.id,
+          moduleSlug: moduleSlug,
+          completed: true,
+          progressPercent: 100,
+        }),
+      });
+    } catch (error) {
+      console.error('Error saving lesson completion:', error);
+      // Still show as complete locally even if API fails
+    }
   };
 
   const handleNext = () => {
@@ -433,6 +508,70 @@ export default function LessonPage() {
                           {Math.floor(nextLesson.duration / 60)} min
                         </p>
                       </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )}
+
+            {/* Dive Deeper - Related YouTube Videos */}
+            {relatedVideos.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+              >
+                <Card>
+                  <CardHeader
+                    title="Dive Deeper"
+                    subtitle="Related YouTube content"
+                    icon={<Youtube className="w-5 h-5 text-red-500" />}
+                    action={
+                      <Link href="/resources">
+                        <Badge variant="default" size="sm" className="cursor-pointer hover:bg-[var(--bg-tertiary)]">
+                          More
+                        </Badge>
+                      </Link>
+                    }
+                  />
+                  <CardContent>
+                    <div className="space-y-3">
+                      {relatedVideos.map((video) => (
+                        <a
+                          key={video.id}
+                          href={`https://www.youtube.com/watch?v=${video.video_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-start gap-3 p-2 rounded-lg hover:bg-[var(--bg-secondary)] transition-colors group"
+                        >
+                          {/* Thumbnail */}
+                          <div className="relative w-16 h-10 flex-shrink-0 rounded overflow-hidden bg-[var(--bg-tertiary)]">
+                            {video.thumbnail_url ? (
+                              <img
+                                src={video.thumbnail_url}
+                                alt={video.title}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <Youtube className="w-4 h-4 text-[var(--text-tertiary)]" />
+                              </div>
+                            )}
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Play className="w-3 h-3 text-white" fill="currentColor" />
+                            </div>
+                          </div>
+
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-xs font-medium text-[var(--text-primary)] line-clamp-2 group-hover:text-[var(--accent-primary)] transition-colors">
+                              {video.title}
+                            </h4>
+                          </div>
+
+                          <ExternalLink className="w-3 h-3 text-[var(--text-muted)] flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </a>
+                      ))}
                     </div>
                   </CardContent>
                 </Card>

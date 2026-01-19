@@ -172,6 +172,59 @@ Key tables (see `supabase-schema-v3.sql`):
 - `achievements` - Gamification badges
 - `admin_alerts` - Coach alerts for setups
 
+## Security
+
+### Secret Management - CRITICAL
+
+**NEVER commit secrets or local settings to git.** The following are automatically ignored:
+
+- `.env`, `.env.local`, `.env.*.local` - Environment files
+- `.claude/` - Claude Code local settings
+- `*.local.json` - Local configuration files
+- `credentials.json`, `secrets.json` - Credential files
+- `*.pem`, `*.key` - Private keys
+
+**CI enforces this**: The GitHub Actions workflow runs [gitleaks](https://github.com/gitleaks/gitleaks) on every push/PR and will **fail the build** if secrets are detected.
+
+### If You Accidentally Commit a Secret
+
+1. **Immediately rotate the exposed credential** (see Key Rotation below)
+2. Remove the file from git: `git rm --cached <file>`
+3. Add to `.gitignore` if not already present
+4. Force push to remove from history: `git filter-branch` or use BFG Repo Cleaner
+5. Consider the secret compromised - always rotate
+
+### Key Rotation Instructions
+
+**Supabase Service Role Key:**
+1. Go to Supabase Dashboard → Settings → API
+2. Click "Generate new key" under Service Role Key
+3. Update `SUPABASE_SERVICE_ROLE_KEY` in Railway/production
+4. Update local `.env.local`
+
+**Discord OAuth Secret:**
+1. Go to Discord Developer Portal → Your App → OAuth2
+2. Click "Reset Secret"
+3. Update `DISCORD_CLIENT_SECRET` in Railway/production
+4. Update local `.env.local`
+
+**Anthropic API Key:**
+1. Go to console.anthropic.com → API Keys
+2. Create new key, delete old one
+3. Update `ANTHROPIC_API_KEY` in Railway/production
+4. Update local `.env.local`
+
+**OpenAI API Key:**
+1. Go to platform.openai.com → API Keys
+2. Create new key, revoke old one
+3. Update `OPENAI_API_KEY` in Railway/production
+4. Update local `.env.local`
+
+**SESSION_SECRET:**
+1. Generate new: `openssl rand -base64 32`
+2. Update in Railway/production
+3. Note: All existing sessions will be invalidated
+
 ## Deployment
 
 Configured for Railway (`railway.json`). Ensure all required env vars are set:

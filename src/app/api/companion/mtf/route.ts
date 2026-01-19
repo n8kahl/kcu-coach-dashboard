@@ -1,8 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { marketDataService } from '@/lib/market-data';
 import { calculateEMA } from '@/lib/ltp-engine';
 import logger from '@/lib/logger';
+import { withRateLimitAndTimeout, getEndpointUserKey } from '@/lib/rate-limit';
 
 interface MTFAnalysis {
   timeframe: string;
@@ -144,7 +145,7 @@ function calculateAlignmentScore(analyses: MTFAnalysis[], direction: 'bullish' |
  * GET /api/companion/mtf
  * Get multi-timeframe analysis for a symbol
  */
-export async function GET(request: Request) {
+async function mtfHandler(request: NextRequest) {
   try {
     const session = await getSession();
     if (!session?.userId) {
@@ -231,3 +232,10 @@ export async function GET(request: Request) {
     }, { status: 500 });
   }
 }
+
+// Export with rate limiting (10 requests/minute) and timeout (30 seconds)
+export const GET = withRateLimitAndTimeout(
+  mtfHandler,
+  getEndpointUserKey('companion-mtf'),
+  { limit: 10, windowSeconds: 60, timeoutMs: 30000 }
+);

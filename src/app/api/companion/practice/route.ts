@@ -168,17 +168,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Failed to create scenario' }, { status: 500 });
     }
 
-    // Track that this setup was used for practice
-    await supabaseAdmin
-      .from('companion_sessions')
-      .update({
-        practice_attempts: supabaseAdmin.rpc('increment_field', { amount: 1 }),
-      })
-      .eq('user_id', session.userId)
-      .is('ended_at', null)
-      .catch(() => {
-        // Session might not exist
-      });
+    // Track that this setup was used for practice (silently ignore if session doesn't exist)
+    try {
+      await supabaseAdmin
+        .from('companion_sessions')
+        .update({
+          practice_attempts: supabaseAdmin.rpc('increment_field', { amount: 1 }),
+        })
+        .eq('user_id', session.userId)
+        .is('ended_at', null);
+    } catch {
+      // Session might not exist, that's ok
+    }
 
     logger.info('Practice scenario created from companion', {
       userId: session.userId,

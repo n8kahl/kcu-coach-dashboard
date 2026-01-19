@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SkeletonCard } from '@/components/ui/feedback';
+import { useToast } from '@/components/ui/toast';
 import {
   WinCard,
   TradeWinCard,
@@ -144,6 +145,7 @@ function CreateCardModal({ isOpen, onClose, cardType, onSubmit, trades }: Create
 
 export default function WinCardsPage() {
   const router = useRouter();
+  const { showToast } = useToast();
   const [winCards, setWinCards] = useState<WinCardType[]>([]);
   const [trades, setTrades] = useState<TradeEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -207,9 +209,18 @@ export default function WinCardsPage() {
 
       const { card } = await response.json();
       setWinCards((prev) => [card, ...prev]);
+      showToast({
+        type: 'success',
+        title: 'Win Card Created',
+        message: 'Your achievement card is ready to share!',
+      });
     } catch (err) {
       console.error('Error creating win card:', err);
-      alert('Failed to create win card. Please try again.');
+      showToast({
+        type: 'error',
+        title: 'Creation Failed',
+        message: 'Failed to create win card. Please try again.',
+      });
     }
   };
 
