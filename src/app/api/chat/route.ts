@@ -16,6 +16,7 @@ import { getAuthenticatedUser } from '@/lib/auth';
 import { getCurriculumReference } from '@/lib/curriculum-context';
 import { parseAIResponse } from '@/lib/rich-content-parser';
 import { getEnhancedRAGContext } from '@/lib/rag';
+import { findRelevantContent } from '@/lib/ai/knowledge-retrieval';
 import logger from '@/lib/logger';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -194,33 +195,65 @@ ${
       },
     ];
 
-    // Get RAG context for the user's message
+    // Get course content context (from course_lessons)
+    let courseContentContext = '';
     let ragContext = '';
     let ragSources: Array<{ title: string; type: string; relevance: number }> = [];
+
+    // Search course content first (primary knowledge source)
+    try {
+      const courseContent = await findRelevantContent(message, { limit: 3 });
+      if (courseContent.hasContent) {
+        courseContentContext = courseContent.contextText;
+        courseContent.lessons.forEach((lesson) => {
+          ragSources.push({
+            title: lesson.title,
+            type: 'lesson',
+            relevance: lesson.relevance,
+          });
+        });
+        logger.info('Course content retrieved', {
+          lessonCount: courseContent.lessons.length,
+          query: message.slice(0, 50),
+        });
+      }
+    } catch (contentError) {
+      logger.warn('Course content retrieval failed', {
+        error: contentError instanceof Error ? contentError.message : String(contentError),
+      });
+    }
+
+    // Also get RAG context from knowledge_chunks (YouTube, docs)
     try {
       const rag = await getEnhancedRAGContext(message);
       if (rag.hasContext) {
         ragContext = rag.contextText;
-        ragSources = rag.sources;
+        rag.sources.forEach((s) => {
+          if (!ragSources.find(r => r.title === s.title)) {
+            ragSources.push(s);
+          }
+        });
         logger.info('RAG context retrieved', {
           sourceCount: rag.sources.length,
           query: message.slice(0, 50),
         });
       }
     } catch (ragError) {
-      // Log but don't fail - RAG is optional enhancement
       logger.warn('RAG context retrieval failed', {
         error: ragError instanceof Error ? ragError.message : String(ragError),
       });
     }
 
-    // Build system prompt with RAG context
+    // Build system prompt with all context
     let systemPrompt = SYSTEM_PROMPT;
     if (userContext) {
       systemPrompt += `\n\n${userContext}`;
     }
+    if (courseContentContext) {
+      systemPrompt += `\n\n${courseContentContext}`;
+    }
     if (ragContext) {
-      systemPrompt += `\n\n${ragContext}`;
+      systemPrompt += `\n\n=== SUPPLEMENTARY KNOWLEDGE ===\n${ragContext}`;
     }
 
     // Call Claude API

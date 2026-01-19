@@ -1,243 +1,257 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+/**
+ * Course Player Page
+ *
+ * Full-featured course player with:
+ * - Sidebar: Modules/Lessons with progress checkmarks
+ * - Main: Video player using Cloudflare Stream
+ * - Tabs: Overview, Resources, Transcript, AI Assistant
+ */
+
+export const dynamic = 'force-dynamic';
+
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/header';
 import { PageShell } from '@/components/layout/page-shell';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ProgressBar, CircularProgress } from '@/components/ui/progress';
-import { motion } from 'framer-motion';
+import { ProgressBar } from '@/components/ui/progress';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   BookOpen,
-  TrendingUp,
-  Activity,
-  Target,
-  Crosshair,
-  ArrowRightLeft,
-  Brain,
-  ClipboardList,
-  ListChecks,
-  Shield,
-  ChevronRight,
   Clock,
   CheckCircle2,
-  Circle,
   Play,
-  Lock,
-  ArrowLeft,
   Loader2,
-  Video,
-  FileText,
-  HelpCircle,
-  GraduationCap,
   AlertCircle,
+  ChevronRight,
   ChevronDown,
-  ChevronUp,
-  Youtube,
+  ChevronLeft,
+  FileText,
+  Download,
   ExternalLink,
+  Send,
+  Sparkles,
+  Info,
+  Files,
+  Bot,
 } from 'lucide-react';
 import Link from 'next/link';
 
-// Icon mapping
-const iconMap: Record<string, React.ElementType> = {
-  BookOpen,
-  TrendingUp,
-  Activity,
-  Target,
-  Crosshair,
-  ArrowRightLeft,
-  Brain,
-  ClipboardList,
-  ListChecks,
-  Shield,
-  GraduationCap,
-};
-
-// Content type icon mapping
-const contentTypeIcons: Record<string, React.ElementType> = {
-  video: Video,
-  text: FileText,
-  quiz: HelpCircle,
-  unknown: BookOpen,
-};
-
-interface ThinkificContent {
-  id: string;
-  thinkific_id: number;
+// Types
+interface Resource {
   name: string;
-  content_type: string;
-  position: number;
-  video_duration: number | null;
-  video_provider: string | null;
-  free_preview: boolean;
-  description: string | null;
+  url: string;
+  type: string;
 }
 
-interface ThinkificChapter {
+interface Lesson {
   id: string;
-  thinkific_id: number;
-  name: string;
-  description: string | null;
-  position: number;
-  contents: ThinkificContent[];
-}
-
-interface ThinkificCourse {
-  id: string;
-  thinkific_id: number;
+  title: string;
   slug: string;
-  title: string;
-  description: string;
-  image_url: string | null;
-  lesson_count: number;
-  chapter_count: number;
-  duration: string | null;
+  description: string | null;
+  lessonNumber: string;
+  videoDurationSeconds: number | null;
+  videoUid: string | null;
+  videoPlaybackHls: string | null;
+  thumbnailUrl: string | null;
+  transcriptText: string | null;
+  resources: Resource[];
+  isPreview: boolean;
+  sortOrder: number;
+  completed?: boolean;
+  progressPercent?: number;
 }
 
-interface CourseData {
-  course: ThinkificCourse;
-  chapters: ThinkificChapter[];
-  source: 'thinkific' | 'local';
-}
-
-interface RelatedVideo {
+interface Module {
   id: string;
-  video_id: string;
   title: string;
-  thumbnail_url: string;
-  category: string | null;
-  ltp_relevance: number | null;
+  slug: string;
+  description: string | null;
+  moduleNumber: string;
+  sortOrder: number;
+  lessons: Lesson[];
+  completedLessons: number;
+  totalLessons: number;
 }
 
-function formatDuration(seconds: number): string {
-  if (!seconds || seconds === 0) return '';
-  const mins = Math.floor(seconds / 60);
-  if (mins >= 60) {
-    const hours = Math.floor(mins / 60);
-    const remainingMins = mins % 60;
-    return `${hours}h ${remainingMins}m`;
-  }
-  return `${mins} min`;
+interface Course {
+  id: string;
+  title: string;
+  slug: string;
+  description: string | null;
+  thumbnailUrl: string | null;
+  modules: Module[];
 }
 
-export default function ModulePage() {
-  const router = useRouter();
+interface CourseProgress {
+  totalLessons: number;
+  completedLessons: number;
+  completionPercent: number;
+}
+
+// Tabs
+type Tab = 'overview' | 'resources' | 'transcript' | 'ai';
+
+export default function CoursePlayerPage() {
   const params = useParams();
-  const moduleSlug = params.module as string;
+  const router = useRouter();
+  const courseSlug = params.module as string; // Using 'module' param as courseSlug
 
-  const [courseData, setCourseData] = useState<CourseData | null>(null);
+  const [course, setCourse] = useState<Course | null>(null);
+  const [progress, setProgress] = useState<CourseProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedChapters, setExpandedChapters] = useState<Set<number>>(new Set());
-  const [relatedVideos, setRelatedVideos] = useState<RelatedVideo[]>([]);
+
+  // Current lesson state
+  const [currentLesson, setCurrentLesson] = useState<Lesson | null>(null);
+  const [currentModule, setCurrentModule] = useState<Module | null>(null);
+
+  // UI state
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // AI Chat state
+  const [aiMessages, setAiMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [aiInput, setAiInput] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
 
   // Fetch course data
   useEffect(() => {
-    async function fetchCourse() {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const response = await fetch(`/api/learning/modules/${moduleSlug}`);
-        if (!response.ok) {
-          if (response.status === 404) {
-            setError('Course not found');
-          } else {
-            throw new Error('Failed to fetch course');
-          }
-          return;
-        }
-
-        const data = await response.json();
-        setCourseData(data);
-
-        // Expand first chapter by default
-        if (data.chapters?.length > 0) {
-          setExpandedChapters(new Set([data.chapters[0].thinkific_id]));
-        }
-      } catch (err) {
-        console.error('Error fetching course:', err);
-        setError('Failed to load course content');
-      } finally {
-        setLoading(false);
-      }
+    if (courseSlug) {
+      fetchCourse();
     }
+  }, [courseSlug]);
 
-    fetchCourse();
-  }, [moduleSlug]);
+  const fetchCourse = async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-  // Fetch related YouTube videos based on course title
-  useEffect(() => {
-    async function fetchRelatedVideos() {
-      if (!courseData?.course?.title) return;
-
-      try {
-        // Use category search - map course title to likely categories
-        const title = courseData.course.title.toLowerCase();
-        let category = '';
-
-        if (title.includes('ltp') || title.includes('level') || title.includes('trend') || title.includes('patience')) {
-          category = 'LTP Framework';
-        } else if (title.includes('price action') || title.includes('candle')) {
-          category = 'Price Action';
-        } else if (title.includes('psychol') || title.includes('mindset') || title.includes('discipline')) {
-          category = 'Psychology';
-        } else if (title.includes('risk') || title.includes('stop') || title.includes('position')) {
-          category = 'Risk Management';
-        } else if (title.includes('indicator') || title.includes('ema') || title.includes('vwap')) {
-          category = 'Indicators';
-        } else if (title.includes('strategy') || title.includes('setup') || title.includes('orb')) {
-          category = 'Strategies';
+      const response = await fetch(`/api/learn/courses/${courseSlug}`);
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('Course not found');
         }
-
-        const params = new URLSearchParams({
-          limit: '5',
-          sortBy: 'ltp_relevance',
-          sortOrder: 'desc',
-        });
-
-        if (category) {
-          params.set('category', category);
-        }
-
-        const response = await fetch(`/api/youtube/videos?${params}`);
-        if (response.ok) {
-          const data = await response.json();
-          setRelatedVideos(data.videos || []);
-        }
-      } catch (err) {
-        console.error('Error fetching related videos:', err);
+        throw new Error('Failed to fetch course');
       }
+
+      const data = await response.json();
+      setCourse(data.course);
+      setProgress(data.progress);
+
+      // Set initial module/lesson
+      if (data.course.modules && data.course.modules.length > 0) {
+        const firstModule = data.course.modules[0];
+        setCurrentModule(firstModule);
+        setExpandedModules(new Set([firstModule.id]));
+
+        if (firstModule.lessons && firstModule.lessons.length > 0) {
+          setCurrentLesson(firstModule.lessons[0]);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching course:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load course');
+    } finally {
+      setLoading(false);
     }
+  };
 
-    fetchRelatedVideos();
-  }, [courseData?.course?.title]);
+  const selectLesson = useCallback((lesson: Lesson, module: Module) => {
+    setCurrentLesson(lesson);
+    setCurrentModule(module);
+    setExpandedModules((prev) => {
+      const arr = Array.from(prev);
+      arr.push(module.id);
+      return new Set(arr);
+    });
+    // Reset AI chat when changing lessons
+    setAiMessages([]);
+  }, []);
 
-  const toggleChapter = (chapterId: number) => {
-    setExpandedChapters((prev) => {
+  const toggleModule = useCallback((moduleId: string) => {
+    setExpandedModules((prev) => {
       const next = new Set(prev);
-      if (next.has(chapterId)) {
-        next.delete(chapterId);
+      if (next.has(moduleId)) {
+        next.delete(moduleId);
       } else {
-        next.add(chapterId);
+        next.add(moduleId);
       }
       return next;
     });
+  }, []);
+
+  // Find next/previous lessons
+  const getAdjacentLessons = useCallback(() => {
+    if (!course || !currentLesson || !currentModule) return { prev: null, next: null };
+
+    const allLessons: { lesson: Lesson; module: Module }[] = [];
+    course.modules.forEach((mod) => {
+      mod.lessons.forEach((les) => {
+        allLessons.push({ lesson: les, module: mod });
+      });
+    });
+
+    const currentIndex = allLessons.findIndex((l) => l.lesson.id === currentLesson.id);
+
+    return {
+      prev: currentIndex > 0 ? allLessons[currentIndex - 1] : null,
+      next: currentIndex < allLessons.length - 1 ? allLessons[currentIndex + 1] : null,
+    };
+  }, [course, currentLesson, currentModule]);
+
+  // AI Chat handler
+  const sendAiMessage = async () => {
+    if (!aiInput.trim() || !currentLesson) return;
+
+    const userMessage = aiInput.trim();
+    setAiInput('');
+    setAiMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
+    setAiLoading(true);
+
+    try {
+      const response = await fetch('/api/ai/unified', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: userMessage,
+          mode: 'coach',
+          context: {
+            lessonId: currentLesson.id,
+            lessonTitle: currentLesson.title,
+            moduleTitle: currentModule?.title,
+            courseTitle: course?.title,
+            transcriptContext: currentLesson.transcriptText?.slice(0, 2000),
+          },
+          conversationHistory: aiMessages,
+        }),
+      });
+
+      if (!response.ok) throw new Error('AI request failed');
+
+      const data = await response.json();
+      setAiMessages((prev) => [...prev, { role: 'assistant', content: data.message }]);
+    } catch {
+      setAiMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' },
+      ]);
+    } finally {
+      setAiLoading(false);
+    }
   };
 
-  // Loading state
   if (loading) {
     return (
       <>
         <Header
           title="Loading..."
-          breadcrumbs={[
-            { label: 'Dashboard' },
-            { label: 'Learning', href: '/learning' },
-            { label: 'Loading...' },
-          ]}
+          breadcrumbs={[{ label: 'Dashboard' }, { label: 'Learning', href: '/learning' }, { label: 'Course' }]}
         />
         <PageShell>
           <div className="flex items-center justify-center py-20">
@@ -249,17 +263,12 @@ export default function ModulePage() {
     );
   }
 
-  // Error state
-  if (error || !courseData) {
+  if (error || !course) {
     return (
       <>
         <Header
-          title="Course Not Found"
-          breadcrumbs={[
-            { label: 'Dashboard' },
-            { label: 'Learning', href: '/learning' },
-            { label: 'Not Found' },
-          ]}
+          title="Error"
+          breadcrumbs={[{ label: 'Dashboard' }, { label: 'Learning', href: '/learning' }, { label: 'Course' }]}
         />
         <PageShell>
           <Card className="border-[var(--error)] bg-[var(--error)]/10">
@@ -267,13 +276,16 @@ export default function ModulePage() {
               <div className="flex flex-col items-center gap-4 text-center">
                 <AlertCircle className="w-12 h-12 text-[var(--error)]" />
                 <div>
-                  <p className="font-medium text-[var(--text-primary)]">
-                    {error || 'The requested course could not be found.'}
-                  </p>
+                  <p className="font-medium text-[var(--text-primary)]">{error}</p>
+                  <div className="flex gap-2 mt-4">
+                    <Button variant="secondary" onClick={fetchCourse}>
+                      Try Again
+                    </Button>
+                    <Link href="/learning">
+                      <Button variant="ghost">Back to Courses</Button>
+                    </Link>
+                  </div>
                 </div>
-                <Link href="/learning">
-                  <Button variant="primary">Back to Learning Center</Button>
-                </Link>
               </div>
             </CardContent>
           </Card>
@@ -282,350 +294,527 @@ export default function ModulePage() {
     );
   }
 
-  const { course, chapters } = courseData;
-  const totalLessons = chapters.reduce((sum, ch) => sum + ch.contents.length, 0);
+  const { prev, next } = getAdjacentLessons();
 
   return (
     <>
       <Header
         title={course.title}
-        subtitle={course.description}
         breadcrumbs={[
           { label: 'Dashboard' },
           { label: 'Learning', href: '/learning' },
           { label: course.title },
         ]}
         actions={
-          <Link href="/learning">
-            <Button variant="secondary" size="sm" icon={<ArrowLeft className="w-4 h-4" />}>
-              Back to Courses
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="lg:hidden"
+            >
+              <BookOpen className="w-4 h-4 mr-2" />
+              {sidebarOpen ? 'Hide' : 'Show'} Lessons
             </Button>
-          </Link>
+            {progress && (
+              <Badge variant="default">
+                {progress.completedLessons}/{progress.totalLessons} Complete
+              </Badge>
+            )}
+          </div>
         }
       />
 
-      <PageShell>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Content - Chapters & Lessons */}
-          <div className="lg:col-span-2 space-y-4">
-            {/* Course Header */}
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card variant="glow">
-                <CardContent>
-                  <div className="flex items-start gap-4">
-                    {/* Course Image or Icon */}
-                    {course.image_url ? (
-                      <div
-                        className="w-20 h-20 rounded-lg bg-cover bg-center flex-shrink-0"
-                        style={{ backgroundImage: `url(${course.image_url})` }}
-                      />
-                    ) : (
-                      <div className="w-20 h-20 flex items-center justify-center flex-shrink-0 rounded-lg bg-[var(--accent-primary-glow)]">
-                        <GraduationCap className="w-10 h-10 text-[var(--accent-primary)]" />
-                      </div>
-                    )}
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h2 className="text-xl font-bold text-[var(--text-primary)]">
-                          {course.title}
-                        </h2>
-                        <Badge variant="default" size="sm">
-                          LMS
-                        </Badge>
-                      </div>
-                      <p className="text-sm text-[var(--text-secondary)] mb-3 line-clamp-2">
-                        {course.description || 'No description available'}
-                      </p>
-                      <div className="flex items-center gap-4 text-sm text-[var(--text-tertiary)]">
-                        <span className="flex items-center gap-1">
-                          <BookOpen className="w-4 h-4" />
-                          {chapters.length} chapters
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Video className="w-4 h-4" />
-                          {totalLessons} lessons
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Chapters Accordion */}
-            <div className="space-y-3">
-              {chapters.map((chapter, chapterIndex) => {
-                const isExpanded = expandedChapters.has(chapter.thinkific_id);
-                const ChevronIcon = isExpanded ? ChevronUp : ChevronDown;
-
-                return (
-                  <motion.div
-                    key={chapter.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: chapterIndex * 0.05 }}
-                  >
-                    <Card>
-                      {/* Chapter Header */}
-                      <div
-                        className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-secondary)] transition-colors"
-                        onClick={() => toggleChapter(chapter.thinkific_id)}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-[var(--accent-primary-glow)] flex items-center justify-center">
-                              <span className="text-sm font-bold text-[var(--accent-primary)]">
-                                {chapterIndex + 1}
-                              </span>
-                            </div>
-                            <div>
-                              <h3 className="font-medium text-[var(--text-primary)]">
-                                {chapter.name}
-                              </h3>
-                              <p className="text-xs text-[var(--text-tertiary)]">
-                                {chapter.contents.length} lessons
-                              </p>
-                            </div>
-                          </div>
-                          <ChevronIcon className="w-5 h-5 text-[var(--text-tertiary)]" />
-                        </div>
-                      </div>
-
-                      {/* Chapter Contents (Lessons) */}
-                      {isExpanded && chapter.contents.length > 0 && (
-                        <div className="border-t border-[var(--border-primary)]">
-                          {chapter.contents.map((content, contentIndex) => {
-                            const ContentIcon =
-                              contentTypeIcons[content.content_type] || BookOpen;
-
-                            return (
-                              <div
-                                key={content.id}
-                                className="px-4 py-3 flex items-center gap-4 border-b border-[var(--border-primary)] last:border-b-0 hover:bg-[var(--bg-secondary)] transition-colors"
-                              >
-                                {/* Content Icon */}
-                                <div className="w-8 h-8 rounded flex items-center justify-center bg-[var(--bg-tertiary)]">
-                                  <ContentIcon className="w-4 h-4 text-[var(--text-secondary)]" />
-                                </div>
-
-                                {/* Content Info */}
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs text-[var(--text-muted)]">
-                                      {chapterIndex + 1}.{contentIndex + 1}
-                                    </span>
-                                    {content.free_preview && (
-                                      <Badge variant="success" size="sm">
-                                        Free Preview
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <h4 className="font-medium text-[var(--text-primary)] truncate">
-                                    {content.name}
-                                  </h4>
-                                  {content.description && (
-                                    <p className="text-xs text-[var(--text-tertiary)] truncate">
-                                      {content.description}
-                                    </p>
-                                  )}
-                                </div>
-
-                                {/* Duration & Type */}
-                                <div className="flex items-center gap-3 flex-shrink-0">
-                                  {content.video_duration && (
-                                    <span className="text-xs text-[var(--text-muted)]">
-                                      {formatDuration(content.video_duration)}
-                                    </span>
-                                  )}
-                                  <Badge variant="default" size="sm">
-                                    {content.content_type}
-                                  </Badge>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {/* Empty chapter */}
-                      {isExpanded && chapter.contents.length === 0 && (
-                        <div className="px-4 py-6 text-center text-[var(--text-muted)] border-t border-[var(--border-primary)]">
-                          No lessons in this chapter yet
-                        </div>
-                      )}
-                    </Card>
-                  </motion.div>
-                );
-              })}
-            </div>
-
-            {/* Empty state if no chapters */}
-            {chapters.length === 0 && (
-              <Card>
-                <CardContent className="py-12 text-center">
-                  <GraduationCap className="w-16 h-16 mx-auto mb-4 text-[var(--text-tertiary)]" />
-                  <p className="text-[var(--text-secondary)]">
-                    No chapters available for this course yet.
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* Sidebar */}
-          <div className="space-y-4">
-            {/* Course Stats */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-            >
-              <Card>
-                <CardHeader title="Course Overview" />
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="text-center p-3 rounded-lg bg-[var(--bg-secondary)]">
-                        <p className="text-2xl font-bold text-[var(--accent-primary)]">
-                          {chapters.length}
-                        </p>
-                        <p className="text-xs text-[var(--text-muted)]">Chapters</p>
-                      </div>
-                      <div className="text-center p-3 rounded-lg bg-[var(--bg-secondary)]">
-                        <p className="text-2xl font-bold text-[var(--accent-primary)]">
-                          {totalLessons}
-                        </p>
-                        <p className="text-xs text-[var(--text-muted)]">Lessons</p>
-                      </div>
-                    </div>
-
-                    {/* Access Course Button */}
-                    <Button
-                      variant="primary"
-                      fullWidth
-                      icon={<Play className="w-4 h-4" />}
-                      onClick={() => {
-                        // Open in Thinkific via SSO
-                        window.open(
-                          `https://kaycapitals.thinkific.com/courses/${course.slug}`,
-                          '_blank'
-                        );
-                      }}
-                    >
-                      Access Course
-                    </Button>
-                    <p className="text-xs text-[var(--text-muted)] text-center">
-                      Opens in Thinkific LMS
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Chapters Quick Nav */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15 }}
-            >
-              <Card>
-                <CardHeader title="Chapters" />
-                <CardContent>
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {chapters.map((chapter, index) => (
-                      <button
-                        key={chapter.id}
-                        onClick={() => toggleChapter(chapter.thinkific_id)}
-                        className="w-full text-left px-3 py-2 rounded hover:bg-[var(--bg-secondary)] transition-colors"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-[var(--accent-primary)]">
-                            {index + 1}
-                          </span>
-                          <span className="text-sm text-[var(--text-primary)] truncate">
-                            {chapter.name}
-                          </span>
-                        </div>
-                        <p className="text-xs text-[var(--text-muted)] ml-5">
-                          {chapter.contents.length} lessons
-                        </p>
-                      </button>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Related YouTube Videos */}
-            {relatedVideos.length > 0 && (
+      <PageShell maxWidth="full" padding="sm">
+        <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-180px)]">
+          {/* Sidebar - Modules & Lessons */}
+          <AnimatePresence>
+            {sidebarOpen && (
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="w-full lg:w-80 flex-shrink-0 overflow-y-auto"
               >
-                <Card>
-                  <CardHeader
-                    title="Related Videos"
-                    action={
-                      <Link href="/resources">
-                        <Badge variant="default" size="sm" className="cursor-pointer hover:bg-[var(--bg-tertiary)]">
-                          <Youtube className="w-3 h-3 mr-1 text-red-500" />
-                          View All
-                        </Badge>
-                      </Link>
-                    }
-                  />
-                  <CardContent>
-                    <div className="space-y-3">
-                      {relatedVideos.slice(0, 4).map((video) => (
-                        <a
-                          key={video.id}
-                          href={`https://www.youtube.com/watch?v=${video.video_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-start gap-3 p-2 rounded-lg hover:bg-[var(--bg-secondary)] transition-colors group"
-                        >
-                          {/* Thumbnail */}
-                          <div className="relative w-20 h-12 flex-shrink-0 rounded overflow-hidden bg-[var(--bg-tertiary)]">
-                            {video.thumbnail_url ? (
-                              <img
-                                src={video.thumbnail_url}
-                                alt={video.title}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <Youtube className="w-5 h-5 text-[var(--text-tertiary)]" />
-                              </div>
-                            )}
-                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Play className="w-4 h-4 text-white" fill="currentColor" />
-                            </div>
-                          </div>
-
-                          {/* Info */}
-                          <div className="flex-1 min-w-0">
-                            <h4 className="text-xs font-medium text-[var(--text-primary)] line-clamp-2 group-hover:text-[var(--accent-primary)] transition-colors">
-                              {video.title}
-                            </h4>
-                            {video.category && (
-                              <span className="text-[10px] text-[var(--text-muted)]">
-                                {video.category}
-                              </span>
-                            )}
-                          </div>
-
-                          <ExternalLink className="w-3 h-3 text-[var(--text-muted)] flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </a>
-                      ))}
+                <Card className="h-full">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base">Course Content</CardTitle>
+                      {progress && (
+                        <span className="text-sm text-[var(--text-tertiary)]">
+                          {Math.round(progress.completionPercent)}%
+                        </span>
+                      )}
                     </div>
+                    {progress && (
+                      <ProgressBar value={progress.completionPercent} variant="gold" size="sm" />
+                    )}
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {course.modules.map((module) => (
+                      <ModuleAccordion
+                        key={module.id}
+                        module={module}
+                        isExpanded={expandedModules.has(module.id)}
+                        onToggle={() => toggleModule(module.id)}
+                        currentLessonId={currentLesson?.id}
+                        onSelectLesson={(lesson) => selectLesson(lesson, module)}
+                      />
+                    ))}
                   </CardContent>
                 </Card>
               </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Main Content */}
+          <div className="flex-1 min-w-0 flex flex-col gap-4 overflow-hidden">
+            {currentLesson ? (
+              <>
+                {/* Video Player */}
+                <Card className="flex-shrink-0">
+                  <div className="aspect-video bg-black relative">
+                    {currentLesson.videoUid ? (
+                      <CloudflareStreamPlayer
+                        videoUid={currentLesson.videoUid}
+                        poster={currentLesson.thumbnailUrl || undefined}
+                      />
+                    ) : currentLesson.videoPlaybackHls ? (
+                      <video
+                        src={currentLesson.videoPlaybackHls}
+                        poster={currentLesson.thumbnailUrl || undefined}
+                        controls
+                        className="w-full h-full"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center text-[var(--text-muted)]">
+                        <div className="text-center">
+                          <AlertCircle className="w-12 h-12 mx-auto mb-2" />
+                          <p>Video not available</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+
+                {/* Lesson Info & Tabs */}
+                <Card className="flex-1 overflow-hidden flex flex-col">
+                  {/* Lesson Header */}
+                  <CardHeader className="flex-shrink-0 pb-0">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="default">Lesson {currentLesson.lessonNumber}</Badge>
+                        {currentLesson.completed && (
+                          <Badge variant="success">
+                            <CheckCircle2 className="w-3 h-3 mr-1" />
+                            Completed
+                          </Badge>
+                        )}
+                      </div>
+                      {currentLesson.videoDurationSeconds && (
+                        <span className="text-sm text-[var(--text-tertiary)]">
+                          <Clock className="w-4 h-4 inline mr-1" />
+                          {Math.floor(currentLesson.videoDurationSeconds / 60)}m
+                        </span>
+                      )}
+                    </div>
+                    <h2 className="text-xl font-semibold text-[var(--text-primary)]">
+                      {currentLesson.title}
+                    </h2>
+                  </CardHeader>
+
+                  {/* Tabs */}
+                  <div className="flex border-b border-[var(--border-primary)] px-6">
+                    <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
+                      <Info className="w-4 h-4 mr-2" />
+                      Overview
+                    </TabButton>
+                    <TabButton active={activeTab === 'resources'} onClick={() => setActiveTab('resources')}>
+                      <Files className="w-4 h-4 mr-2" />
+                      Resources
+                      {currentLesson.resources.length > 0 && (
+                        <Badge variant="default" size="sm" className="ml-2">
+                          {currentLesson.resources.length}
+                        </Badge>
+                      )}
+                    </TabButton>
+                    <TabButton active={activeTab === 'transcript'} onClick={() => setActiveTab('transcript')}>
+                      <FileText className="w-4 h-4 mr-2" />
+                      Transcript
+                    </TabButton>
+                    <TabButton active={activeTab === 'ai'} onClick={() => setActiveTab('ai')}>
+                      <Bot className="w-4 h-4 mr-2" />
+                      AI Assistant
+                    </TabButton>
+                  </div>
+
+                  {/* Tab Content */}
+                  <CardContent className="flex-1 overflow-y-auto py-4">
+                    {activeTab === 'overview' && (
+                      <div className="prose prose-sm dark:prose-invert max-w-none">
+                        {currentLesson.description ? (
+                          <p>{currentLesson.description}</p>
+                        ) : (
+                          <p className="text-[var(--text-tertiary)]">No description available for this lesson.</p>
+                        )}
+                      </div>
+                    )}
+
+                    {activeTab === 'resources' && (
+                      <div className="space-y-3">
+                        {currentLesson.resources.length > 0 ? (
+                          currentLesson.resources.map((resource, index) => (
+                            <a
+                              key={index}
+                              href={resource.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-3 p-3 rounded-lg bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                            >
+                              <div className="p-2 rounded-lg bg-[var(--accent-primary)]/10">
+                                {resource.type === 'pdf' ? (
+                                  <FileText className="w-5 h-5 text-[var(--accent-primary)]" />
+                                ) : (
+                                  <Download className="w-5 h-5 text-[var(--accent-primary)]" />
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <p className="font-medium text-[var(--text-primary)]">{resource.name}</p>
+                                <p className="text-sm text-[var(--text-tertiary)]">{resource.type.toUpperCase()}</p>
+                              </div>
+                              <ExternalLink className="w-4 h-4 text-[var(--text-tertiary)]" />
+                            </a>
+                          ))
+                        ) : (
+                          <p className="text-[var(--text-tertiary)] text-center py-8">
+                            No resources available for this lesson.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {activeTab === 'transcript' && (
+                      <div className="prose prose-sm dark:prose-invert max-w-none">
+                        {currentLesson.transcriptText ? (
+                          <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                            {currentLesson.transcriptText}
+                          </pre>
+                        ) : (
+                          <p className="text-[var(--text-tertiary)] text-center py-8">
+                            Transcript not available for this lesson.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {activeTab === 'ai' && (
+                      <AIAssistantChat
+                        messages={aiMessages}
+                        input={aiInput}
+                        loading={aiLoading}
+                        lessonTitle={currentLesson.title}
+                        onInputChange={setAiInput}
+                        onSend={sendAiMessage}
+                      />
+                    )}
+                  </CardContent>
+
+                  {/* Navigation */}
+                  <div className="flex-shrink-0 border-t border-[var(--border-primary)] p-4">
+                    <div className="flex items-center justify-between">
+                      {prev ? (
+                        <Button
+                          variant="ghost"
+                          onClick={() => selectLesson(prev.lesson, prev.module)}
+                        >
+                          <ChevronLeft className="w-4 h-4 mr-1" />
+                          Previous
+                        </Button>
+                      ) : (
+                        <div />
+                      )}
+                      {next ? (
+                        <Button
+                          variant="primary"
+                          onClick={() => selectLesson(next.lesson, next.module)}
+                        >
+                          Next Lesson
+                          <ChevronRight className="w-4 h-4 ml-1" />
+                        </Button>
+                      ) : (
+                        <Link href="/learning">
+                          <Button variant="primary">
+                            <CheckCircle2 className="w-4 h-4 mr-2" />
+                            Complete Course
+                          </Button>
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              </>
+            ) : (
+              <Card className="flex-1 flex items-center justify-center">
+                <div className="text-center">
+                  <BookOpen className="w-16 h-16 text-[var(--text-muted)] mx-auto mb-4" />
+                  <p className="text-[var(--text-secondary)]">Select a lesson to start learning</p>
+                </div>
+              </Card>
             )}
           </div>
         </div>
       </PageShell>
     </>
+  );
+}
+
+// Module Accordion Component
+function ModuleAccordion({
+  module,
+  isExpanded,
+  onToggle,
+  currentLessonId,
+  onSelectLesson,
+}: {
+  module: Module;
+  isExpanded: boolean;
+  onToggle: () => void;
+  currentLessonId?: string;
+  onSelectLesson: (lesson: Lesson) => void;
+}) {
+  const completionPercent = module.totalLessons > 0
+    ? Math.round((module.completedLessons / module.totalLessons) * 100)
+    : 0;
+
+  return (
+    <div className="border border-[var(--border-primary)] rounded-lg overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 p-3 hover:bg-[var(--bg-secondary)] transition-colors"
+      >
+        <div className="flex-shrink-0">
+          {completionPercent === 100 ? (
+            <CheckCircle2 className="w-5 h-5 text-[var(--profit)]" />
+          ) : (
+            <div className="w-5 h-5 rounded-full border-2 border-[var(--border-secondary)] flex items-center justify-center">
+              <span className="text-xs text-[var(--text-muted)]">{module.moduleNumber}</span>
+            </div>
+          )}
+        </div>
+        <div className="flex-1 text-left">
+          <p className="font-medium text-[var(--text-primary)] text-sm">{module.title}</p>
+          <p className="text-xs text-[var(--text-tertiary)]">
+            {module.completedLessons}/{module.totalLessons} lessons
+          </p>
+        </div>
+        {isExpanded ? (
+          <ChevronDown className="w-4 h-4 text-[var(--text-tertiary)]" />
+        ) : (
+          <ChevronRight className="w-4 h-4 text-[var(--text-tertiary)]" />
+        )}
+      </button>
+
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="border-t border-[var(--border-primary)] bg-[var(--bg-secondary)]">
+              {module.lessons.map((lesson) => (
+                <button
+                  key={lesson.id}
+                  onClick={() => onSelectLesson(lesson)}
+                  className={`w-full flex items-center gap-3 p-3 text-left transition-colors ${
+                    lesson.id === currentLessonId
+                      ? 'bg-[var(--accent-primary)]/10 border-l-2 border-[var(--accent-primary)]'
+                      : 'hover:bg-[var(--bg-tertiary)]'
+                  }`}
+                >
+                  <div className="flex-shrink-0">
+                    {lesson.completed ? (
+                      <CheckCircle2 className="w-4 h-4 text-[var(--profit)]" />
+                    ) : lesson.id === currentLessonId ? (
+                      <Play className="w-4 h-4 text-[var(--accent-primary)]" />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border border-[var(--border-secondary)]" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm truncate ${
+                      lesson.id === currentLessonId
+                        ? 'text-[var(--accent-primary)] font-medium'
+                        : 'text-[var(--text-primary)]'
+                    }`}>
+                      {lesson.title}
+                    </p>
+                  </div>
+                  {lesson.videoDurationSeconds && (
+                    <span className="text-xs text-[var(--text-muted)]">
+                      {Math.floor(lesson.videoDurationSeconds / 60)}m
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// Tab Button Component
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+        active
+          ? 'border-[var(--accent-primary)] text-[var(--accent-primary)]'
+          : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// Cloudflare Stream Player Component
+function CloudflareStreamPlayer({
+  videoUid,
+  poster,
+}: {
+  videoUid: string;
+  poster?: string;
+}) {
+  return (
+    <iframe
+      src={`https://iframe.cloudflarestream.com/${videoUid}?poster=${poster ? encodeURIComponent(poster) : ''}`}
+      className="w-full h-full"
+      allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
+      allowFullScreen
+    />
+  );
+}
+
+// AI Assistant Chat Component
+function AIAssistantChat({
+  messages,
+  input,
+  loading,
+  lessonTitle,
+  onInputChange,
+  onSend,
+}: {
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  input: string;
+  loading: boolean;
+  lessonTitle: string;
+  onInputChange: (value: string) => void;
+  onSend: () => void;
+}) {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  return (
+    <div className="flex flex-col h-full min-h-[300px]">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto space-y-4 mb-4">
+        {messages.length === 0 ? (
+          <div className="text-center py-8">
+            <Sparkles className="w-12 h-12 text-[var(--accent-primary)] mx-auto mb-3" />
+            <h3 className="font-medium text-[var(--text-primary)] mb-2">
+              AI Assistant for "{lessonTitle}"
+            </h3>
+            <p className="text-sm text-[var(--text-tertiary)] max-w-md mx-auto">
+              Ask questions about this lesson. The AI has context from the transcript and can explain concepts, clarify points, or help you understand the material better.
+            </p>
+            <div className="flex flex-wrap justify-center gap-2 mt-4">
+              <SuggestionButton onClick={() => onInputChange('Summarize the key points of this lesson')}>
+                Summarize key points
+              </SuggestionButton>
+              <SuggestionButton onClick={() => onInputChange('What are the main takeaways?')}>
+                Main takeaways
+              </SuggestionButton>
+              <SuggestionButton onClick={() => onInputChange('Explain this concept in simpler terms')}>
+                Explain simply
+              </SuggestionButton>
+            </div>
+          </div>
+        ) : (
+          messages.map((msg, index) => (
+            <div
+              key={index}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                  msg.role === 'user'
+                    ? 'bg-[var(--accent-primary)] text-black'
+                    : 'bg-[var(--bg-secondary)] text-[var(--text-primary)]'
+                }`}
+              >
+                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+              </div>
+            </div>
+          ))
+        )}
+        {loading && (
+          <div className="flex justify-start">
+            <div className="bg-[var(--bg-secondary)] rounded-lg px-4 py-2">
+              <Loader2 className="w-4 h-4 animate-spin text-[var(--accent-primary)]" />
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => onInputChange(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && onSend()}
+          placeholder="Ask about this lesson..."
+          className="flex-1 px-4 py-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)]"
+          disabled={loading}
+        />
+        <Button onClick={onSend} disabled={loading || !input.trim()}>
+          <Send className="w-4 h-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SuggestionButton({
+  onClick,
+  children,
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="px-3 py-1.5 text-xs rounded-full bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+    >
+      {children}
+    </button>
   );
 }

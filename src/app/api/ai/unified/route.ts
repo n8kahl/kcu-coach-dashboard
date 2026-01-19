@@ -10,6 +10,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { parseAIResponse } from '@/lib/rich-content-parser';
 import { getEnhancedRAGContext } from '@/lib/rag';
+import { findRelevantContent } from '@/lib/ai/knowledge-retrieval';
 import { generateSystemPrompt, sanitizeInput, validateMessage } from '@/lib/ai-context';
 import { getMarketDataTools, executeMarketDataTool } from '@/lib/market-data-tools';
 import logger from '@/lib/logger';
@@ -112,7 +113,8 @@ async function handleChatMode(
   conversationHistory: Array<{ role: string; content: string }>,
   options: UnifiedAIRequest['options']
 ): Promise<UnifiedAIResponse> {
-  // Get RAG context for the user's message
+  // Get course content context for the user's message
+  let courseContentContext = '';
   let ragContext = '';
   let ragSources: Array<{
     id: string;
@@ -121,16 +123,48 @@ async function handleChatMode(
     relevance: number;
   }> = [];
 
+  // Search course_lessons for relevant content (transcripts, descriptions)
+  try {
+    const courseContent = await findRelevantContent(message, { limit: 3 });
+    if (courseContent.hasContent) {
+      courseContentContext = courseContent.contextText;
+      // Add course lessons to sources
+      courseContent.lessons.forEach((lesson) => {
+        ragSources.push({
+          id: lesson.id,
+          title: lesson.title,
+          type: 'lesson',
+          relevance: lesson.relevance,
+        });
+      });
+      logger.info('Course content retrieved', {
+        query: message.slice(0, 50),
+        lessonCount: courseContent.lessons.length,
+        processingTimeMs: courseContent.processingTimeMs,
+      });
+    }
+  } catch (contentError) {
+    logger.warn('Course content retrieval failed', {
+      error: contentError instanceof Error ? contentError.message : String(contentError),
+    });
+  }
+
+  // Also get RAG context from knowledge_chunks (for YouTube, docs, etc.)
   try {
     const rag = await getEnhancedRAGContext(message);
     if (rag.hasContext) {
       ragContext = rag.contextText;
-      ragSources = rag.sources.map((s) => ({
-        id: s.title,
-        title: s.title,
-        type: (s.type || 'documentation') as 'lesson' | 'video' | 'transcript' | 'documentation',
-        relevance: s.relevance,
-      }));
+      rag.sources.forEach((s) => {
+        // Avoid duplicates from course content
+        if (!ragSources.find(r => r.title === s.title)) {
+          ragSources.push({
+            id: s.title,
+            title: s.title,
+            type: (s.type || 'documentation') as 'lesson' | 'video' | 'transcript' | 'documentation',
+            relevance: s.relevance,
+          });
+        }
+      });
     }
   } catch (ragError) {
     logger.warn('RAG context retrieval failed', {
@@ -140,8 +174,15 @@ async function handleChatMode(
 
   // Build system prompt with context
   let systemPrompt = generateSystemPrompt(context);
+
+  // Add course content context first (primary source)
+  if (courseContentContext) {
+    systemPrompt += `\n\n${courseContentContext}`;
+  }
+
+  // Add supplementary RAG context (YouTube, documentation)
   if (ragContext) {
-    systemPrompt += `\n\n=== RELEVANT KNOWLEDGE ===\n${ragContext}`;
+    systemPrompt += `\n\n=== SUPPLEMENTARY KNOWLEDGE ===\n${ragContext}`;
   }
 
   // Add today's date for relative date parsing

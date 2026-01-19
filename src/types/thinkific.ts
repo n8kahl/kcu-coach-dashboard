@@ -1,6 +1,25 @@
 /**
- * Thinkific API Type Definitions
- * For integration with Thinkific LMS REST API
+ * @deprecated DEPRECATED - Thinkific Integration Types
+ *
+ * These types are being phased out as part of the content system consolidation.
+ * See migration 030_unify_content_system.sql which drops the thinkific_* tables.
+ *
+ * The new native schema uses:
+ * - courses → Course type from '@/types/learning'
+ * - course_modules → CourseModule type from '@/types/learning'
+ * - course_lessons → CourseLesson type from '@/types/learning'
+ *
+ * Files that still import from this module need to be migrated:
+ * - src/lib/thinkific-api.ts → update to sync to course_* tables
+ * - src/lib/learning-progress.ts → update to use course_* tables
+ * - src/app/api/thinkific/webhooks/route.ts → deprecate or update
+ * - src/app/api/admin/thinkific/sync/route.ts → update sync target
+ *
+ * NOTE: The Thinkific API client (thinkific-api.ts) will continue to FETCH
+ * from Thinkific, but now writes directly to course_* tables instead of
+ * thinkific_* tables.
+ *
+ * TODO: Remove this file after all dependent code is migrated.
  */
 
 // ============ API Response Types ============

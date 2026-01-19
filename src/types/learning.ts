@@ -1,7 +1,24 @@
-// Learning System Types with Compliance Support
+/**
+ * Learning System Types - Unified Native Schema
+ *
+ * This file defines types for the consolidated course_* database schema.
+ * All content is now stored in: courses, course_modules, course_lessons
+ *
+ * Database Tables (see migration 023_video_learning_system.sql):
+ * - courses: Top-level containers for educational content
+ * - course_modules: Chapters/sections within courses
+ * - course_lessons: Individual video lessons with resources
+ * - course_lesson_progress: User watch progress & compliance tracking
+ * - lesson_watch_sessions: Detailed session audit trail
+ * - course_quiz_*: Quiz system tables
+ *
+ * MIGRATION NOTE (030_unify_content_system.sql):
+ * The legacy thinkific_* and learning_modules tables have been deprecated
+ * and dropped. All content now uses the native course_* schema.
+ */
 
 // ============================================
-// RESOURCE TYPES (NEW)
+// RESOURCE TYPES
 // ============================================
 
 export type ResourceType = 'pdf' | 'link' | 'image' | 'download';
