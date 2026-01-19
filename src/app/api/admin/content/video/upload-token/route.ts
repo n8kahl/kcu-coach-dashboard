@@ -73,6 +73,40 @@ export async function POST(request: Request) {
       allowedOrigins,
     } = body;
 
+    // Build allowed origins list - must include all origins that might upload
+    // IMPORTANT: Cloudflare requires origins WITHOUT protocol (e.g., "localhost:3000" not "http://localhost:3000")
+    const rawOrigins = allowedOrigins || [
+      process.env.NEXT_PUBLIC_APP_URL,
+      'http://localhost:3000',
+    ].filter(Boolean) as string[];
+
+    // Strip protocol from origins (Cloudflare requirement)
+    const origins = rawOrigins.map((origin: string) => {
+      try {
+        const url = new URL(origin);
+        return url.host; // Returns "localhost:3000" or "example.com"
+      } catch {
+        return origin; // If not a valid URL, use as-is
+      }
+    });
+
+    const requestBody = {
+      maxDurationSeconds,
+      requireSignedURLs,
+      allowedOrigins: origins,
+      meta: {
+        ...meta,
+        uploadedBy: session.userId,
+        uploadedAt: new Date().toISOString(),
+      },
+    };
+
+    logger.info('Requesting Cloudflare upload token', {
+      maxDurationSeconds,
+      allowedOrigins: origins,
+      metaKeys: Object.keys(meta),
+    });
+
     // Request a direct creator upload URL from Cloudflare
     const cfResponse = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/stream/direct_upload`,
@@ -82,32 +116,24 @@ export async function POST(request: Request) {
           'Authorization': `Bearer ${apiToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          maxDurationSeconds,
-          requireSignedURLs,
-          allowedOrigins: allowedOrigins || [
-            process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
-          ],
-          meta: {
-            ...meta,
-            uploadedBy: session.userId,
-            uploadedAt: new Date().toISOString(),
-          },
-        }),
+        body: JSON.stringify(requestBody),
       }
     );
 
     const cfData: DirectUploadResponse = await cfResponse.json();
 
-    if (!cfData.success || !cfData.result?.uploadURL) {
+    if (!cfResponse.ok || !cfData.success || !cfData.result?.uploadURL) {
       logger.error('Cloudflare upload token request failed', {
+        status: cfResponse.status,
+        statusText: cfResponse.statusText,
         errors: cfData.errors,
         messages: cfData.messages,
+        success: cfData.success,
       });
       return NextResponse.json(
         {
           error: 'Failed to get upload URL',
-          details: cfData.errors?.[0]?.message || 'Unknown error',
+          details: cfData.errors?.[0]?.message || cfData.messages?.[0] || `Cloudflare returned ${cfResponse.status}`,
         },
         { status: 502 }
       );

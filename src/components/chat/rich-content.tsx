@@ -11,11 +11,9 @@ import type {
   SetupVisualizationContent,
   QuizPromptContent,
   VideoTimestampContent,
-  ThinkificLinkContent,
   LTPAnalysisChartContent,
 } from '@/types';
 import { VideoTimestampCard } from './video-timestamp-card';
-import { ThinkificLinkCard } from './thinkific-link-card';
 import { LTPAnalysisCard } from './ltp-analysis-chart';
 import {
   BookOpen,
@@ -55,8 +53,6 @@ export function RichContentRenderer({ content, className }: RichContentRendererP
             return <QuizCard key={`quiz-${index}`} quiz={item} />;
           case 'video_timestamp':
             return <VideoTimestampCard key={`video-${index}`} content={item as VideoTimestampContent & { source: 'youtube' }} />;
-          case 'thinkific_link':
-            return <ThinkificLinkCard key={`thinkific-${index}`} content={item as ThinkificLinkContent} />;
           case 'ltp_analysis_chart':
             return <LTPAnalysisCard key={`ltp-${index}`} content={item as LTPAnalysisChartContent} />;
           default:

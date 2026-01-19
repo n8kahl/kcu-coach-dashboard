@@ -281,8 +281,25 @@ function VideoUploader({
           videoEl.src = URL.createObjectURL(file);
         },
         onError: (err) => {
-          console.error('Upload error:', err);
-          setError('Upload failed. Please try again.');
+          console.error('TUS upload error:', err);
+          // Try to extract more details from the error
+          let errorMessage = 'Upload failed. Please try again.';
+          if (err instanceof Error && err.message) {
+            errorMessage = err.message;
+          }
+          // Check for response body if available (DetailedError type from tus-js-client)
+          const detailedErr = err as { originalResponse?: { getBody?: () => string } };
+          if (detailedErr.originalResponse?.getBody) {
+            try {
+              const body = detailedErr.originalResponse.getBody();
+              if (body) {
+                errorMessage += ` - ${body}`;
+              }
+            } catch {
+              // Ignore
+            }
+          }
+          setError(errorMessage);
           setUploading(false);
         },
       });

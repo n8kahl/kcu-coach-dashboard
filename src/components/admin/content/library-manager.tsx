@@ -103,54 +103,38 @@ export function LibraryManager({
     try {
       setError(null);
 
-      // Fetch YouTube videos
-      const ytVideosRes = await fetch('/api/youtube/videos?limit=100');
-      if (ytVideosRes.ok) {
-        const ytData = await ytVideosRes.json();
-        const ytVideos: LibraryVideo[] = (ytData.videos || []).map((v: {
-          id: string;
-          video_id: string;
-          title: string;
-          description?: string;
-          thumbnail_url?: string;
-          duration_seconds?: number;
-          transcript_status: string;
-          transcript_text?: string;
-          chunk_count?: number;
-          topics?: string[];
-          created_at: string;
-        }) => ({
-          id: v.id,
-          type: 'youtube' as const,
-          videoId: v.video_id,
-          title: v.title,
-          description: v.description,
-          thumbnailUrl: v.thumbnail_url || `https://img.youtube.com/vi/${v.video_id}/mqdefault.jpg`,
-          duration: v.duration_seconds,
-          status: v.transcript_status === 'completed' ? 'ready' : v.transcript_status === 'pending' ? 'pending' : v.transcript_status === 'processing' ? 'processing' : 'failed',
-          transcriptStatus: v.transcript_status as LibraryVideo['transcriptStatus'],
-          transcriptText: v.transcript_text,
-          chunkCount: v.chunk_count,
-          topics: v.topics,
-          createdAt: v.created_at,
-          url: `https://www.youtube.com/watch?v=${v.video_id}`,
+      // Fetch all library videos from unified endpoint
+      const libraryRes = await fetch('/api/admin/content/library');
+      if (libraryRes.ok) {
+        const libraryData = await libraryRes.json();
+
+        // Add thumbnail URLs for YouTube videos
+        const videosWithThumbnails: LibraryVideo[] = (libraryData.videos || []).map((v: LibraryVideo) => ({
+          ...v,
+          thumbnailUrl: v.thumbnailUrl || (v.type === 'youtube'
+            ? `https://img.youtube.com/vi/${v.videoId}/mqdefault.jpg`
+            : undefined),
         }));
 
-        // Calculate YouTube stats
+        setVideos(videosWithThumbnails);
+
+        // Calculate YouTube stats from the unified data
+        const ytVideos = videosWithThumbnails.filter(v => v.type === 'youtube');
         const categories: Record<string, number> = {};
-        ytData.videos?.forEach((v: { category?: string }) => {
-          if (v.category) {
-            categories[v.category] = (categories[v.category] || 0) + 1;
+        ytVideos.forEach((v) => {
+          if (v.topics?.[0]) {
+            const topic = v.topics[0];
+            categories[topic] = (categories[topic] || 0) + 1;
           }
         });
         setYoutubeStats({
-          totalVideos: ytData.total || 0,
+          totalVideos: libraryData.stats?.youtube || 0,
           processedVideos: ytVideos.filter(v => v.transcriptStatus === 'completed').length,
           pendingTranscripts: ytVideos.filter(v => v.transcriptStatus === 'pending').length,
           categories,
         });
-
-        setVideos(ytVideos);
+      } else {
+        throw new Error('Failed to fetch library');
       }
 
       // Fetch YouTube sync status
@@ -165,9 +149,6 @@ export function LibraryManager({
           });
         }
       }
-
-      // TODO: Fetch Cloudflare videos from course_lessons where video_uid is set
-      // This would aggregate all uploaded videos for reuse
 
     } catch (err) {
       console.error('Error fetching library data:', err);
