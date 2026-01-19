@@ -9,3 +9,5 @@ export { SettingsModal, type SocialSettings } from './settings-modal';
 export { AddInfluencerModal } from './add-influencer-modal';
 export { InfluencerList } from './influencer-list';
 export { TrendingTopics } from './trending-topics';
+export { LearningMilestones } from './learning-milestones';
+export { StudyStatsCard, StudyStatsCardModal } from './StudyStatsCard';

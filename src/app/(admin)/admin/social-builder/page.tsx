@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Zap,
   Clock,
+  GraduationCap,
 } from 'lucide-react';
 
 // UI Components
@@ -38,6 +39,7 @@ import {
   AddInfluencerModal,
   InfluencerList,
   TrendingTopics,
+  LearningMilestones,
 } from '@/components/social';
 
 import type { ContentSuggestion, SocialPlatform, TrendingTopic, InfluencerProfileInput, ContentCategory } from '@/types/social';
@@ -446,6 +448,10 @@ function SocialBuilderContent() {
             <TrendingUp className="w-4 h-4 mr-2" />
             Trending
           </TabsTrigger>
+          <TabsTrigger value="learning" variant="pills">
+            <GraduationCap className="w-4 h-4 mr-2" />
+            Learning
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -759,6 +765,14 @@ function SocialBuilderContent() {
           <TrendingTopics
             onGenerateFromTopic={handleGenerateFromTopic}
             showToast={showToast}
+          />
+        </TabsContent>
+
+        {/* Learning Milestones Tab */}
+        <TabsContent value="learning">
+          <LearningMilestones
+            showToast={showToast}
+            onRefresh={fetchDashboardData}
           />
         </TabsContent>
       </Tabs>

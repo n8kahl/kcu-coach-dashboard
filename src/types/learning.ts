@@ -458,3 +458,187 @@ export interface CourseWithAccess extends Course {
   progress: CourseProgress | null;
   modulesWithProgress?: ModuleWithProgress[];
 }
+
+// ============================================
+// LEARNING LEDGER (Compliance Audit Trail)
+// ============================================
+
+/** Resource types that can be tracked */
+export type AuditResourceType = 'lesson' | 'quiz' | 'module' | 'course' | 'video' | 'practice';
+
+/** Actions that can be logged */
+export type AuditAction =
+  | 'started'
+  | 'completed'
+  | 'quiz_attempt'
+  | 'quiz_passed'
+  | 'quiz_failed'
+  | 'video_segment_watched'
+  | 'video_paused'
+  | 'video_resumed'
+  | 'video_seeked'
+  | 'video_speed_changed'
+  | 'module_unlocked'
+  | 'certificate_earned'
+  | 'bookmark_created'
+  | 'note_added';
+
+/** Metadata for quiz attempt actions */
+export interface QuizAttemptMetadata {
+  score: number;
+  passed: boolean;
+  attempt_number: number;
+  questions_correct: number;
+  questions_total: number;
+  time_spent_seconds?: number;
+}
+
+/** Metadata for video segment watched actions */
+export interface VideoSegmentMetadata {
+  start_time: number;
+  end_time: number;
+  playback_speed: number;
+}
+
+/** Metadata for video seek actions */
+export interface VideoSeekMetadata {
+  from_time: number;
+  to_time: number;
+  direction: 'forward' | 'backward';
+}
+
+/** Metadata for video speed change actions */
+export interface VideoSpeedChangeMetadata {
+  old_speed: number;
+  new_speed: number;
+}
+
+/** Client information for audit trail */
+export interface AuditClientInfo {
+  device_type?: 'desktop' | 'tablet' | 'mobile';
+  browser?: string;
+  ip_hash?: string;
+  user_agent?: string;
+}
+
+/** A single learning audit log entry */
+export interface LearningAuditLog {
+  id: string;
+  user_id: string;
+  resource_id: string | null;
+  resource_type: AuditResourceType;
+  action: AuditAction;
+  duration_seconds: number;
+  metadata: QuizAttemptMetadata | VideoSegmentMetadata | VideoSeekMetadata | VideoSpeedChangeMetadata | Record<string, unknown>;
+  resource_title: string | null;
+  module_id: string | null;
+  module_title: string | null;
+  course_id: string | null;
+  course_title: string | null;
+  client_info: AuditClientInfo;
+  created_at: string;
+  session_id: string | null;
+}
+
+/** Input for creating a new audit log entry */
+export interface LearningAuditLogInput {
+  resource_id?: string;
+  resource_type: AuditResourceType;
+  action: AuditAction;
+  duration_seconds?: number;
+  metadata?: Record<string, unknown>;
+  resource_title?: string;
+  module_id?: string;
+  module_title?: string;
+  course_id?: string;
+  course_title?: string;
+  session_id?: string;
+}
+
+/** Transcript summary statistics */
+export interface TranscriptSummary {
+  totalTime: number;
+  totalTimeFormatted: string;
+  lessonsCompleted: number;
+  averageQuizScore: number;
+  averageQuizGrade: 'A+' | 'A' | 'A-' | 'B+' | 'B' | 'B-' | 'C+' | 'C' | 'C-' | 'D' | 'F';
+  consistencyScore: number;
+  globalRank: number;
+  modulesCompleted: number;
+  quizzesPassed: number;
+  contentCoverage: number;
+  firstActivityAt: string | null;
+  lastActivityAt: string | null;
+  memberSince: string;
+}
+
+/** Module time breakdown for transcript */
+export interface ModuleTimeBreakdown {
+  moduleId: string;
+  moduleTitle: string;
+  totalSeconds: number;
+  totalFormatted: string;
+  lessonCount: number;
+  quizCount: number;
+  percentageOfTotal: number;
+}
+
+/** A single activity in the learning history */
+export interface LearningHistoryItem {
+  id: string;
+  date: string;
+  dateFormatted: string;
+  module: string;
+  activityType: 'Video' | 'Quiz' | 'Lesson' | 'Practice' | 'Module' | 'Course';
+  activityTitle: string;
+  timeSpent: number;
+  timeSpentFormatted: string;
+  result: string | null;
+  resultType?: 'score' | 'completion' | 'time';
+  action: AuditAction;
+}
+
+/** Complete user transcript response */
+export interface UserTranscript {
+  userId: string;
+  userName: string;
+  summary: TranscriptSummary;
+  history: LearningHistoryItem[];
+  modules: ModuleTimeBreakdown[];
+}
+
+/** User learning achievement */
+export interface UserLearningAchievement {
+  id: string;
+  userId: string;
+  achievementSlug: string;
+  achievementTitle: string;
+  achievementDescription: string | null;
+  achievementIcon: string;
+  earnedAt: string;
+  metadata: Record<string, unknown>;
+}
+
+/** Possible achievement slugs */
+export type AchievementSlug =
+  | 'ltp-master'
+  | 'gamma-expert'
+  | 'risk-manager'
+  | 'consistency-king'
+  | 'study-streak-7'
+  | 'study-streak-30'
+  | 'first-quiz-ace'
+  | 'perfect-module'
+  | 'video-marathon'
+  | 'early-bird'
+  | 'night-owl'
+  | 'weekend-warrior';
+
+/** Achievement definition for display */
+export interface AchievementDefinition {
+  slug: AchievementSlug;
+  title: string;
+  description: string;
+  icon: string;
+  criteria: string;
+}
