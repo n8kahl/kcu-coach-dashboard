@@ -10,12 +10,12 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { parseAIResponse } from '@/lib/rich-content-parser';
 import { getEnhancedRAGContext } from '@/lib/rag';
-import { generateSystemPrompt } from '@/lib/ai-context';
+import { generateSystemPrompt, sanitizeInput, validateMessage } from '@/lib/ai-context';
 import { getMarketDataTools, executeMarketDataTool } from '@/lib/market-data-tools';
 import logger from '@/lib/logger';
 import Anthropic from '@anthropic-ai/sdk';
 import type { MessageParam, ContentBlock, ToolResultBlockParam } from '@anthropic-ai/sdk/resources/messages';
-import type { UnifiedAIRequest, UnifiedAIResponse, AIContext } from '@/types/ai';
+import type { UnifiedAIRequest, UnifiedAIResponse, AIContext, AIErrorCode } from '@/types/ai';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -372,43 +372,71 @@ Provide guidance without giving away the answer directly.`;
   return handleChatMode(analysisPrompt, context, [], { includeRichContent: true });
 }
 
+/**
+ * Helper to create standardized error responses
+ */
+function errorResponse(code: AIErrorCode, message: string, status: number) {
+  return NextResponse.json(
+    {
+      error: message,
+      code,
+      retryable: ['RATE_LIMITED', 'NETWORK_ERROR', 'TOOL_ERROR', 'UNKNOWN_ERROR'].includes(code),
+    },
+    { status }
+  );
+}
+
 export async function POST(request: Request) {
   try {
     const sessionUser = await getAuthenticatedUser();
 
     if (!sessionUser) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return errorResponse('UNAUTHORIZED', 'Please log in to continue.', 401);
     }
 
     const body: UnifiedAIRequest = await request.json();
     const { message, mode = 'chat', context: partialContext, conversationHistory = [], options } = body;
 
-    if (!message) {
-      return NextResponse.json({ error: 'Message is required' }, { status: 400 });
+    // Validate and sanitize message
+    const validation = validateMessage(message);
+    if (!validation.valid) {
+      return errorResponse('VALIDATION_ERROR', validation.error || 'Invalid message', 400);
     }
 
+    const sanitizedMessage = sanitizeInput(message);
+
     // Build full context with database data
+    // Note: We verify admin status from the database, not from client-provided context
     const context = await buildFullContext(partialContext, sessionUser.discordId || '');
+
+    // Double-check: Admin status comes from database, override any client claim
+    if (partialContext.user?.isAdmin !== context.user?.isAdmin) {
+      logger.warn('Admin status mismatch - client claimed different status', {
+        clientClaimed: partialContext.user?.isAdmin,
+        databaseValue: context.user?.isAdmin,
+        userId: sessionUser.discordId,
+      });
+    }
 
     logger.info('Unified AI request', {
       mode,
       page: context.currentPage,
       userId: sessionUser.discordId,
-      messageLength: message.length,
+      messageLength: sanitizedMessage.length,
     });
 
     let response: UnifiedAIResponse;
 
     switch (mode) {
       case 'search':
-        response = await handleSearchMode(message, context);
+        response = await handleSearchMode(sanitizedMessage, context);
         break;
       case 'analyze':
-        response = await handleAnalyzeMode(message, context);
+        response = await handleAnalyzeMode(sanitizedMessage, context);
         break;
       case 'chat':
       default:
-        response = await handleChatMode(message, context, conversationHistory, options);
+        response = await handleChatMode(sanitizedMessage, context, conversationHistory, options);
         break;
     }
 
@@ -416,27 +444,30 @@ export async function POST(request: Request) {
   } catch (error) {
     logger.error('Unified AI error', {
       error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
     });
 
-    // Provide specific error messages
+    // Provide specific error messages based on error type
     if (error instanceof Error) {
-      if (error.message.includes('API key')) {
-        return NextResponse.json(
-          { error: 'AI service configuration error', code: 'API_KEY_ERROR' },
-          { status: 500 }
-        );
+      const message = error.message.toLowerCase();
+
+      if (message.includes('api key') || message.includes('authentication')) {
+        return errorResponse('API_KEY_ERROR', 'AI service configuration error. Please contact support.', 500);
       }
-      if (error.message.includes('rate limit') || error.message.includes('429')) {
-        return NextResponse.json(
-          { error: 'AI service is temporarily busy. Please try again.', code: 'RATE_LIMIT' },
-          { status: 429 }
-        );
+
+      if (message.includes('rate limit') || message.includes('429') || message.includes('too many')) {
+        return errorResponse('RATE_LIMITED', 'Too many requests. Please wait a moment and try again.', 429);
+      }
+
+      if (message.includes('network') || message.includes('fetch') || message.includes('timeout')) {
+        return errorResponse('NETWORK_ERROR', 'Network error. Please check your connection and try again.', 503);
+      }
+
+      if (message.includes('tool') || message.includes('function')) {
+        return errorResponse('TOOL_ERROR', 'Error executing action. Please try again.', 500);
       }
     }
 
-    return NextResponse.json(
-      { error: 'Internal server error', code: 'UNKNOWN_ERROR' },
-      { status: 500 }
-    );
+    return errorResponse('UNKNOWN_ERROR', 'An unexpected error occurred. Please try again.', 500);
   }
 }

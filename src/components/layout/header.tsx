@@ -12,11 +12,13 @@ import {
   ExternalLink,
   HelpCircle,
   RefreshCw,
+  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Avatar } from '@/components/ui/avatar';
+import { useAIContext } from '@/components/ai/AIContextProvider';
 
 interface HeaderProps {
   title: string;
@@ -28,6 +30,8 @@ interface HeaderProps {
 export function Header({ title, subtitle, breadcrumbs, actions }: HeaderProps) {
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const { togglePanel, panelState } = useAIContext();
+  const isCoachOpen = panelState.panelState !== 'collapsed';
 
   return (
     <header className="sticky top-0 z-30 bg-[var(--bg-primary)]/95 backdrop-blur-sm border-b border-[var(--border-primary)]">
@@ -120,6 +124,28 @@ export function Header({ title, subtitle, breadcrumbs, actions }: HeaderProps) {
               <HelpCircle className="w-5 h-5" aria-hidden="true" />
               <ExternalLink className="w-3 h-3 absolute -top-1 -right-1 opacity-0 group-hover:opacity-100" aria-hidden="true" />
             </a>
+
+            {/* Coach Mode Toggle */}
+            <button
+              onClick={togglePanel}
+              className={cn(
+                'flex items-center gap-2 px-3 py-1.5 transition-colors rounded-none border',
+                isCoachOpen
+                  ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400'
+                  : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:text-white hover:border-neutral-600'
+              )}
+              aria-label={isCoachOpen ? 'Close Coach Mode' : 'Open Coach Mode (⌘J)'}
+              title="Toggle Coach Mode (⌘J)"
+            >
+              <Zap className={cn('w-4 h-4', isCoachOpen && 'text-emerald-400')} aria-hidden="true" />
+              <span className="text-xs font-medium">Coach</span>
+              {isCoachOpen && (
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+              )}
+            </button>
 
             {/* Actions slot */}
             {actions}

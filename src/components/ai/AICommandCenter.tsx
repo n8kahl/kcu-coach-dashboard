@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useAIContext } from './AIContextProvider';
@@ -10,19 +10,23 @@ import { AISuggestions } from './AISuggestions';
 import { RichContentRenderer } from '@/components/chat/rich-content';
 import { Button } from '@/components/ui/button';
 import { Avatar } from '@/components/ui/avatar';
+import { getSuggestedPrompts } from '@/lib/ai-context';
 import {
   Bot,
   Send,
   X,
   ChevronLeft,
-  ChevronRight,
   Loader2,
   Sparkles,
-  MapPin,
+  Zap,
   MessageSquare,
   Trash2,
   Minimize2,
-  Maximize2,
+  Copy,
+  Check,
+  RefreshCw,
+  AlertCircle,
+  Radio,
 } from 'lucide-react';
 import type { AIMessage, DashboardPage } from '@/types/ai';
 
@@ -51,15 +55,11 @@ const PAGE_DISPLAY_NAMES: Record<DashboardPage, string> = {
 };
 
 // ============================================
-// Suggested Prompts
+// Local Storage Keys
 // ============================================
 
-const SUGGESTED_PROMPTS = [
-  'Explain the LTP framework',
-  'How do I identify a patience candle?',
-  'Review my recent trades',
-  'What makes a good support level?',
-];
+const STORAGE_KEY_MESSAGES = 'kcu_ai_messages';
+const STORAGE_KEY_LAST_PAGE = 'kcu_ai_last_page';
 
 // ============================================
 // Main Command Center Component
@@ -85,8 +85,48 @@ export function AICommandCenter() {
   const clearMessages = clearHistory;
 
   const [input, setInput] = useState('');
+  const [lastFailedMessage, setLastFailedMessage] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Get context-aware suggested prompts
+  const suggestedPrompts = useMemo(() => getSuggestedPrompts(context), [context]);
+
+  // Load messages from localStorage on mount (for persistence)
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_MESSAGES);
+      const lastPage = localStorage.getItem(STORAGE_KEY_LAST_PAGE);
+
+      // Only restore if on the same page (to keep context relevant)
+      if (stored && lastPage === context.currentPage) {
+        // Messages are managed by context provider, this is just a placeholder
+        // for future implementation where we'd dispatch to restore messages
+      }
+
+      // Store current page
+      localStorage.setItem(STORAGE_KEY_LAST_PAGE, context.currentPage);
+    } catch {
+      // localStorage might not be available
+    }
+  }, [context.currentPage]);
+
+  // Save messages to localStorage when they change
+  useEffect(() => {
+    try {
+      if (messages.length > 0) {
+        const toStore = messages.slice(-20).map(m => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp,
+        }));
+        localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(toStore));
+      }
+    } catch {
+      // localStorage might not be available
+    }
+  }, [messages]);
 
   // Scroll to bottom when messages change
   const scrollToBottom = useCallback(() => {
@@ -104,11 +144,29 @@ export function AICommandCenter() {
     }
   }, [isOpen, isCollapsed]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim() && !isLoading) {
-      sendMessage(input);
+      const messageToSend = input;
       setInput('');
+      setLastFailedMessage(null);
+      try {
+        await sendMessage(messageToSend);
+      } catch {
+        setLastFailedMessage(messageToSend);
+      }
+    }
+  };
+
+  const handleRetry = async () => {
+    if (lastFailedMessage) {
+      const messageToRetry = lastFailedMessage;
+      setLastFailedMessage(null);
+      try {
+        await sendMessage(messageToRetry);
+      } catch {
+        setLastFailedMessage(messageToRetry);
+      }
     }
   };
 
@@ -164,8 +222,8 @@ export function AICommandCenter() {
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             className={cn(
               'fixed top-0 right-0 h-screen z-50',
-              'bg-[var(--bg-secondary)] border-l border-[var(--border-primary)]',
-              'flex flex-col',
+              'bg-neutral-950 border-l border-neutral-800',
+              'flex flex-col rounded-none',
               'transition-all duration-300',
               // Desktop: side panel, Mobile: full screen sheet
               isCollapsed
@@ -178,28 +236,38 @@ export function AICommandCenter() {
               <CollapsedPanel onExpand={toggleCollapsed} />
             ) : (
               <>
-                {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b border-[var(--border-primary)]">
+                {/* Header - Coach Mode with Live Indicator */}
+                <div className="flex items-center justify-between p-4 border-b border-neutral-800">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-[var(--accent-primary-glow)] flex items-center justify-center">
-                      <Bot className="w-5 h-5 text-[var(--accent-primary)]" />
+                    <div className="w-10 h-10 bg-emerald-500/10 flex items-center justify-center rounded-none">
+                      <Zap className="w-5 h-5 text-emerald-400" />
                     </div>
                     <div>
-                      <h2 className="font-semibold text-[var(--text-primary)]">KCU Coach</h2>
-                      <p className="text-xs text-[var(--text-tertiary)]">AI Trading Mentor</p>
+                      <div className="flex items-center gap-2">
+                        <h2 className="font-semibold text-white">Coach Mode</h2>
+                        {/* Pulsing Live Indicator */}
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 rounded-none">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                          </span>
+                          <span className="text-[10px] font-medium text-emerald-400 uppercase tracking-wider">Live</span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-neutral-500">AI-powered trading assistant</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
                     <button
                       onClick={toggleCollapsed}
-                      className="p-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                      className="p-2 text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors rounded-none"
                       title="Collapse panel"
                     >
                       <Minimize2 className="w-4 h-4" />
                     </button>
                     <button
                       onClick={closePanel}
-                      className="p-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                      className="p-2 text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors rounded-none"
                       title="Close panel (Esc)"
                     >
                       <X className="w-4 h-4" />
@@ -207,17 +275,18 @@ export function AICommandCenter() {
                   </div>
                 </div>
 
-                {/* Context Indicator */}
-                <div className="px-4 py-2 bg-[var(--bg-tertiary)] border-b border-[var(--border-primary)]">
+                {/* Context Banner - Analyzing indicator */}
+                <div className="px-4 py-2.5 bg-neutral-900/80 border-b border-neutral-800">
                   <div className="flex items-center gap-2 text-xs">
-                    <MapPin className="w-3 h-3 text-[var(--accent-primary)]" />
-                    <span className="text-[var(--text-secondary)]">
+                    <Radio className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-amber-400 font-medium">Analyzing:</span>
+                    <span className="text-neutral-300">
                       {PAGE_DISPLAY_NAMES[context.currentPage]}
                     </span>
                     {getContextIndicator() && (
                       <>
-                        <span className="text-[var(--text-muted)]">|</span>
-                        <span className="text-[var(--text-tertiary)] truncate">
+                        <span className="text-neutral-600">→</span>
+                        <span className="text-neutral-400 truncate font-mono text-[11px]">
                           {getContextIndicator()}
                         </span>
                       </>
@@ -229,13 +298,31 @@ export function AICommandCenter() {
                 <AIQuickActions onAction={handleQuickAction} />
 
                 {/* Messages Area */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-neutral-950">
                   {messages.length === 0 ? (
-                    <EmptyState onPromptClick={handleQuickAction} />
+                    <EmptyState
+                      onPromptClick={handleQuickAction}
+                      suggestedPrompts={suggestedPrompts}
+                    />
                   ) : (
                     <>
-                      {messages.map((message) => (
-                        <MessageBubble key={message.id} message={message} />
+                      {messages.map((message, index) => (
+                        <MessageBubble
+                          key={message.id}
+                          message={message}
+                          onRetry={
+                            message.role === 'assistant' &&
+                            message.content.includes('error') &&
+                            index === messages.length - 1
+                              ? handleRetry
+                              : undefined
+                          }
+                          isLastError={
+                            lastFailedMessage !== null &&
+                            index === messages.length - 1 &&
+                            message.role === 'assistant'
+                          }
+                        />
                       ))}
                       {isLoading && <LoadingIndicator />}
                       <div ref={messagesEndRef} />
@@ -245,10 +332,10 @@ export function AICommandCenter() {
 
                 {/* Clear Chat Button (when messages exist) */}
                 {messages.length > 0 && (
-                  <div className="px-4 py-2 border-t border-[var(--border-primary)]">
+                  <div className="px-4 py-2 border-t border-neutral-800 bg-neutral-950">
                     <button
                       onClick={clearMessages}
-                      className="flex items-center gap-2 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+                      className="flex items-center gap-2 text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
                     >
                       <Trash2 className="w-3 h-3" />
                       Clear conversation
@@ -272,7 +359,7 @@ export function AICommandCenter() {
                 {/* Input Area */}
                 <form
                   onSubmit={handleSubmit}
-                  className="p-4 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)]"
+                  className="p-4 border-t border-neutral-800 bg-neutral-900"
                 >
                   <div className="flex gap-2">
                     <textarea
@@ -284,22 +371,31 @@ export function AICommandCenter() {
                       rows={1}
                       disabled={isLoading}
                       className={cn(
-                        'flex-1 resize-none bg-[var(--bg-primary)] border border-[var(--border-primary)]',
-                        'p-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]',
-                        'focus:outline-none focus:border-[var(--accent-primary)]',
+                        'flex-1 resize-none bg-neutral-950 border border-neutral-800 rounded-none',
+                        'p-3 text-sm text-white placeholder:text-neutral-600',
+                        'focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20',
                         'transition-colors disabled:opacity-50'
                       )}
                     />
-                    <Button
+                    <button
                       type="submit"
-                      variant="primary"
-                      size="md"
                       disabled={!input.trim() || isLoading}
-                      icon={isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    />
+                      className={cn(
+                        'px-4 bg-emerald-500 text-white rounded-none',
+                        'hover:bg-emerald-400 transition-colors',
+                        'disabled:opacity-50 disabled:cursor-not-allowed',
+                        'flex items-center justify-center'
+                      )}
+                    >
+                      {isLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Send className="w-4 h-4" />
+                      )}
+                    </button>
                   </div>
-                  <p className="mt-2 text-[10px] text-[var(--text-muted)] text-center">
-                    Press <kbd className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded text-[var(--text-tertiary)]">Cmd+J</kbd> to toggle
+                  <p className="mt-2 text-[10px] text-neutral-600 text-center">
+                    Press <kbd className="px-1 py-0.5 bg-neutral-800 rounded-none text-neutral-400 font-mono">⌘J</kbd> to toggle
                   </p>
                 </form>
               </>
@@ -317,17 +413,17 @@ export function AICommandCenter() {
 
 function CollapsedPanel({ onExpand }: { onExpand: () => void }) {
   return (
-    <div className="flex flex-col items-center py-4 gap-4">
+    <div className="flex flex-col items-center py-4 gap-4 bg-neutral-950">
       <button
         onClick={onExpand}
-        className="p-3 bg-[var(--accent-primary-glow)] text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20 transition-colors"
-        title="Expand AI Coach"
+        className="p-3 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors rounded-none"
+        title="Expand Coach Mode"
       >
-        <Bot className="w-5 h-5" />
+        <Zap className="w-5 h-5" />
       </button>
       <button
         onClick={onExpand}
-        className="p-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+        className="p-2 text-neutral-500 hover:text-white transition-colors rounded-none"
         title="Expand panel"
       >
         <ChevronLeft className="w-4 h-4" />
@@ -340,27 +436,32 @@ function CollapsedPanel({ onExpand }: { onExpand: () => void }) {
 // Empty State with Suggested Prompts
 // ============================================
 
-function EmptyState({ onPromptClick }: { onPromptClick: (prompt: string) => void }) {
+interface EmptyStateProps {
+  onPromptClick: (prompt: string) => void;
+  suggestedPrompts: string[];
+}
+
+function EmptyState({ onPromptClick, suggestedPrompts }: EmptyStateProps) {
   return (
     <div className="h-full flex flex-col items-center justify-center text-center px-4">
-      <div className="w-16 h-16 bg-[var(--accent-primary-glow)] flex items-center justify-center mb-4">
-        <Sparkles className="w-8 h-8 text-[var(--accent-primary)]" />
+      <div className="w-16 h-16 bg-emerald-500/10 flex items-center justify-center mb-4 rounded-none">
+        <Sparkles className="w-8 h-8 text-emerald-400" />
       </div>
-      <h4 className="font-semibold text-[var(--text-primary)] mb-2">
+      <h4 className="font-semibold text-white mb-2">
         Hey trader! How can I help?
       </h4>
-      <p className="text-sm text-[var(--text-tertiary)] mb-6 max-w-[280px]">
+      <p className="text-sm text-neutral-400 mb-6 max-w-[280px]">
         Ask me about the LTP framework, analyze your trades, or get trading guidance.
       </p>
       <div className="space-y-2 w-full">
-        {SUGGESTED_PROMPTS.map((prompt) => (
+        {suggestedPrompts.map((prompt) => (
           <button
             key={prompt}
             onClick={() => onPromptClick(prompt)}
-            className="w-full p-3 text-left text-sm bg-[var(--bg-tertiary)] border border-[var(--border-primary)] hover:border-[var(--accent-primary-muted)] hover:bg-[var(--bg-card-hover)] transition-colors"
+            className="w-full p-3 text-left text-sm bg-neutral-900 border border-neutral-800 hover:border-emerald-500/50 hover:bg-neutral-800 transition-colors rounded-none group"
           >
-            <MessageSquare className="w-4 h-4 inline-block mr-2 text-[var(--accent-primary)]" />
-            {prompt}
+            <MessageSquare className="w-4 h-4 inline-block mr-2 text-emerald-400 group-hover:text-emerald-300" />
+            <span className="text-neutral-300 group-hover:text-white">{prompt}</span>
           </button>
         ))}
       </div>
@@ -372,21 +473,99 @@ function EmptyState({ onPromptClick }: { onPromptClick: (prompt: string) => void
 // Message Bubble
 // ============================================
 
-function MessageBubble({ message }: { message: AIMessage }) {
+interface MessageBubbleProps {
+  message: AIMessage;
+  onRetry?: () => void;
+  isLastError?: boolean;
+}
+
+function MessageBubble({ message, onRetry, isLastError }: MessageBubbleProps) {
   const isUser = message.role === 'user';
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = message.content;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  // Simple markdown-like rendering for code blocks and formatting
+  const renderContent = (text: string) => {
+    // Handle code blocks
+    const parts = text.split(/(```[\s\S]*?```)/g);
+    return parts.map((part, index) => {
+      if (part.startsWith('```') && part.endsWith('```')) {
+        const code = part.slice(3, -3);
+        const firstNewline = code.indexOf('\n');
+        const language = firstNewline > 0 ? code.slice(0, firstNewline).trim() : '';
+        const codeContent = firstNewline > 0 ? code.slice(firstNewline + 1) : code;
+        return (
+          <pre
+            key={index}
+            className="my-2 p-2 bg-neutral-900 border border-neutral-800 overflow-x-auto text-xs font-mono rounded-none"
+          >
+            {language && (
+              <div className="text-neutral-500 text-[10px] mb-1">{language}</div>
+            )}
+            <code className="text-neutral-200">{codeContent}</code>
+          </pre>
+        );
+      }
+
+      // Handle inline code
+      const inlineParts = part.split(/(`[^`]+`)/g);
+      return inlineParts.map((inlinePart, inlineIndex) => {
+        if (inlinePart.startsWith('`') && inlinePart.endsWith('`')) {
+          return (
+            <code
+              key={`${index}-${inlineIndex}`}
+              className="px-1 py-0.5 bg-neutral-800 text-emerald-400 text-xs font-mono rounded-none"
+            >
+              {inlinePart.slice(1, -1)}
+            </code>
+          );
+        }
+
+        // Handle bold
+        const boldParts = inlinePart.split(/(\*\*[^*]+\*\*)/g);
+        return boldParts.map((boldPart, boldIndex) => {
+          if (boldPart.startsWith('**') && boldPart.endsWith('**')) {
+            return (
+              <strong key={`${index}-${inlineIndex}-${boldIndex}`} className="text-white font-semibold">
+                {boldPart.slice(2, -2)}
+              </strong>
+            );
+          }
+          return <span key={`${index}-${inlineIndex}-${boldIndex}`}>{boldPart}</span>;
+        });
+      });
+    });
+  };
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={cn('flex gap-3', isUser && 'flex-row-reverse')}
+      className={cn('flex gap-3 group', isUser && 'flex-row-reverse')}
     >
       {/* Avatar */}
       {isUser ? (
         <Avatar size="sm" />
       ) : (
-        <div className="w-8 h-8 bg-[var(--accent-primary-glow)] flex items-center justify-center shrink-0">
-          <Bot className="w-4 h-4 text-[var(--accent-primary)]" />
+        <div className="w-8 h-8 bg-emerald-500/10 flex items-center justify-center shrink-0 rounded-none">
+          <Bot className="w-4 h-4 text-emerald-400" />
         </div>
       )}
 
@@ -394,14 +573,49 @@ function MessageBubble({ message }: { message: AIMessage }) {
       <div className={cn('max-w-[85%]', isUser && 'text-right')}>
         <div
           className={cn(
-            'p-3 text-sm',
+            'p-3 text-sm relative rounded-none',
             isUser
-              ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]'
-              : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] border border-[var(--border-primary)]'
+              ? 'bg-emerald-500 text-white'
+              : 'bg-neutral-900 text-neutral-200 border border-neutral-800',
+            isLastError && 'border-red-500/50'
           )}
         >
-          <p className="whitespace-pre-wrap">{message.content}</p>
+          <div className="whitespace-pre-wrap">{renderContent(message.content)}</div>
+
+          {/* Action buttons for assistant messages */}
+          {!isUser && (
+            <div className="absolute -bottom-6 left-0 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+              <button
+                onClick={handleCopy}
+                className="p-1 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-none transition-colors"
+                title="Copy message"
+              >
+                {copied ? (
+                  <Check className="w-3 h-3 text-emerald-400" />
+                ) : (
+                  <Copy className="w-3 h-3" />
+                )}
+              </button>
+              {onRetry && (
+                <button
+                  onClick={onRetry}
+                  className="p-1 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-none transition-colors"
+                  title="Retry message"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Error indicator */}
+        {isLastError && (
+          <div className="flex items-center gap-1 mt-1 text-xs text-red-400">
+            <AlertCircle className="w-3 h-3" />
+            <span>Failed to send. Click retry to try again.</span>
+          </div>
+        )}
 
         {/* Rich Content */}
         {message.role === 'assistant' && message.richContent && message.richContent.length > 0 && (
@@ -410,14 +624,14 @@ function MessageBubble({ message }: { message: AIMessage }) {
 
         {/* Sources */}
         {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
-          <div className="mt-2 text-xs text-[var(--text-muted)]">
+          <div className="mt-2 text-xs text-neutral-500">
             Sources: {message.sources.map(s => s.title).join(', ')}
           </div>
         )}
 
         {/* Timestamp */}
-        <div className="mt-1 text-[10px] text-[var(--text-muted)]">
-          {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        <div className="mt-1 text-[10px] text-neutral-600">
+          {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </div>
       </div>
     </motion.div>
@@ -435,11 +649,14 @@ function LoadingIndicator() {
       animate={{ opacity: 1 }}
       className="flex gap-3"
     >
-      <div className="w-8 h-8 bg-[var(--accent-primary-glow)] flex items-center justify-center shrink-0">
-        <Bot className="w-4 h-4 text-[var(--accent-primary)]" />
+      <div className="w-8 h-8 bg-emerald-500/10 flex items-center justify-center shrink-0 rounded-none">
+        <Bot className="w-4 h-4 text-emerald-400" />
       </div>
-      <div className="bg-[var(--bg-tertiary)] border border-[var(--border-primary)] p-3">
-        <Loader2 className="w-4 h-4 animate-spin text-[var(--accent-primary)]" />
+      <div className="bg-neutral-900 border border-neutral-800 p-3 rounded-none">
+        <div className="flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+          <span className="text-xs text-neutral-400">Thinking...</span>
+        </div>
       </div>
     </motion.div>
   );

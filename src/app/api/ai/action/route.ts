@@ -503,6 +503,267 @@ Suggest content angles for each.`,
 
 Base on typical trader behavior patterns.`,
   }),
+
+  // New overview actions
+  compare_week_over_week: async (context) => {
+    const trades = context.recentTrades || [];
+    const totalPnL = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+
+    return {
+      prompt: `Compare this trader's recent performance week over week:
+
+Current Week Stats:
+- Trades: ${trades.length}
+- Total P&L: $${totalPnL.toFixed(2)}
+- Practice accuracy: ${context.stats?.practiceAccuracy?.toFixed(1) || 0}%
+- Current streak: ${context.stats?.currentStreak || 0} days
+
+Provide:
+1. Week-over-week comparison (assume previous week was similar baseline)
+2. Trend analysis (improving/declining/stable)
+3. Key metrics to focus on
+4. Actionable goals for next week`,
+    };
+  },
+
+  check_status: async (context) => ({
+    prompt: `Provide a quick status check for ${context.user.username}:
+
+Current Stats:
+- Experience: ${context.user.experienceLevel}
+- Streak: ${context.stats?.currentStreak || 0} days
+- Practice accuracy: ${context.stats?.practiceAccuracy?.toFixed(1) || 0}%
+- Lessons completed: ${context.stats?.lessonsCompleted || 0}
+
+Give a brief:
+1. Current standing summary
+2. Recent progress highlights
+3. Quick wins they can achieve today
+4. Encouragement message`,
+  }),
+
+  market_opportunity: async (context) => ({
+    prompt: `Identify current market opportunities for an ${context.user.experienceLevel} trader:
+
+Consider:
+1. Current market conditions (volatility, trend)
+2. Setups that match their skill level
+3. Symbols showing LTP-compatible patterns
+4. Risk considerations for their experience level
+
+Provide 2-3 specific opportunities with [[SETUP:...]] visualizations.`,
+  }),
+
+  // New journal actions
+  export_trades: async (context) => {
+    const trades = context.recentTrades || [];
+    return {
+      prompt: `Help this trader understand their trade data for export:
+
+Recent trades count: ${trades.length}
+${trades.map((t) => `- ${t.symbol} ${t.direction}: $${t.pnl?.toFixed(2) || 'N/A'}`).join('\n')}
+
+Provide:
+1. Summary statistics they can export
+2. Key fields to include in their export
+3. Tips for organizing trade data in a spreadsheet
+4. How to track LTP scores over time
+
+Note: Actual export happens in the UI - this provides guidance.`,
+    };
+  },
+
+  backtest_strategy: async (context) => {
+    const trades = context.recentTrades || [];
+    return {
+      prompt: `Analyze this trader's strategy based on their recent trades:
+
+${trades
+  .map(
+    (t) =>
+      `- ${t.symbol} ${t.direction}: Entry $${t.entry_price}, P&L ${t.pnl !== undefined ? `$${t.pnl.toFixed(2)}` : 'N/A'}`
+  )
+  .join('\n')}
+
+Provide:
+1. Win rate analysis
+2. Average R:R ratio
+3. Best performing setups
+4. Suggested modifications to improve results
+5. Backtesting approach for their strategy`,
+    };
+  },
+
+  trade_statistics: async (context) => {
+    const trades = context.recentTrades || [];
+    const winners = trades.filter((t) => (t.pnl || 0) > 0);
+    const losers = trades.filter((t) => (t.pnl || 0) < 0);
+
+    return {
+      prompt: `Generate detailed trading statistics:
+
+Overview:
+- Total trades: ${trades.length}
+- Winners: ${winners.length}
+- Losers: ${losers.length}
+- Win rate: ${trades.length > 0 ? ((winners.length / trades.length) * 100).toFixed(1) : 0}%
+- Total P&L: $${trades.reduce((sum, t) => sum + (t.pnl || 0), 0).toFixed(2)}
+
+Provide:
+1. Key performance metrics
+2. Comparison to typical trader benchmarks
+3. Areas of strength
+4. Areas needing improvement
+5. Specific recommendations`,
+    };
+  },
+
+  find_losses: async (context) => {
+    const trades = context.recentTrades || [];
+    const losers = trades.filter((t) => (t.pnl || 0) < 0);
+
+    return {
+      prompt: `Analyze losing trades for patterns:
+
+Recent losses:
+${losers.map((t) => `- ${t.symbol} ${t.direction}: $${t.pnl?.toFixed(2)}`).join('\n') || 'No recent losses'}
+
+Identify:
+1. Common patterns in losses
+2. LTP compliance issues
+3. Timing problems
+4. Position sizing concerns
+5. Specific lessons to address each issue
+
+Be constructive and actionable.`,
+    };
+  },
+
+  // New learning actions
+  get_learning_plan: async (context) => ({
+    prompt: `Create a personalized learning plan for ${context.user.username}:
+
+Current state:
+- Experience: ${context.user.experienceLevel}
+- Current module: ${context.learningState?.currentModule || 'ltp-framework'}
+- Completed lessons: ${context.learningState?.completedLessons?.length || 0}
+- Weak areas: ${context.learningState?.weakAreas?.join(', ') || 'not identified'}
+- Practice accuracy: ${context.stats?.practiceAccuracy?.toFixed(1) || 0}%
+
+Create a 2-week learning plan with:
+1. Daily lesson recommendations
+2. Practice goals
+3. Knowledge checkpoints
+4. Progress milestones
+
+Include [[LESSON:...]] and [[QUIZ:...]] markers.`,
+  }),
+
+  prerequisite_check: async (context) => {
+    const currentModule = context.learningState?.currentModule || 'ltp-framework';
+    return {
+      prompt: `Check prerequisites for ${currentModule}:
+
+Completed lessons: ${context.learningState?.completedLessons?.length || 0}
+Practice accuracy: ${context.stats?.practiceAccuracy?.toFixed(1) || 0}%
+
+Assess:
+1. Required foundational knowledge
+2. Any gaps in prerequisites
+3. Recommended review material
+4. Readiness score for current module
+
+Include [[LESSON:...]] links for any gaps found.`,
+    };
+  },
+
+  // New companion actions
+  watch_symbol: async (context) => {
+    const symbol = context.selectedSymbol || 'SPY';
+    return {
+      prompt: `Provide a watchlist brief for ${symbol}:
+
+Include:
+1. Key levels to watch
+2. Current trend assessment
+3. Potential setups forming
+4. Important news/events to be aware of
+5. When to look for entries
+
+Use [[CHART:${symbol}|15|MA,VWAP]] for visualization.`,
+    };
+  },
+
+  set_alert: async (context) => {
+    const symbol = context.selectedSymbol;
+    if (!symbol) {
+      return { prompt: 'Please select a symbol to set alerts for.' };
+    }
+    return {
+      prompt: `Recommend price alerts for ${symbol}:
+
+Suggest alert levels based on:
+1. Key support/resistance levels
+2. Moving average crosses
+3. VWAP zones
+4. Previous day high/low
+
+For each alert, explain:
+- Why this level matters
+- What action to consider if triggered
+- How to use with LTP framework`,
+    };
+  },
+
+  compare_setups: async (context) => ({
+    prompt: `Compare current setups in the watchlist:
+
+Consider these factors:
+1. LTP scores for each
+2. Risk/reward ratios
+3. Confluence factors
+4. Time horizon
+5. Experience level required
+
+Rank from best to worst opportunity with explanations.
+Include [[SETUP:...]] visualizations for top picks.`,
+  }),
+
+  // New admin actions
+  user_engagement_report: async () => ({
+    prompt: `Generate a user engagement analysis report:
+
+Analyze typical patterns for:
+1. Active user metrics
+2. Content engagement rates
+3. Learning completion rates
+4. Practice mode participation
+5. Community activity trends
+
+Provide:
+- Key insights
+- Areas for improvement
+- Content recommendations
+- Engagement strategies`,
+  }),
+
+  content_gap_analysis: async () => ({
+    prompt: `Perform a content gap analysis for the trading education platform:
+
+Evaluate:
+1. Topics not yet covered
+2. Skill levels underserved
+3. Content formats missing
+4. User-requested topics
+5. Industry trends not addressed
+
+Prioritize gaps by:
+- User impact
+- Implementation effort
+- Business value
+
+Suggest specific content pieces to create.`,
+  }),
 };
 
 export async function POST(request: Request) {

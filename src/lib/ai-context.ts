@@ -16,6 +16,61 @@ import type {
 import { getCurriculumReference } from './curriculum-context';
 
 // =============================================================================
+// Input Sanitization
+// =============================================================================
+
+/**
+ * Sanitize user input to prevent XSS and injection attacks
+ */
+export function sanitizeInput(input: string): string {
+  if (!input || typeof input !== 'string') return '';
+
+  // Remove null bytes
+  let sanitized = input.replace(/\0/g, '');
+
+  // Limit length to prevent DoS
+  const MAX_LENGTH = 10000;
+  if (sanitized.length > MAX_LENGTH) {
+    sanitized = sanitized.slice(0, MAX_LENGTH);
+  }
+
+  // Remove potential script injection patterns
+  sanitized = sanitized
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/javascript:/gi, '')
+    .replace(/on\w+=/gi, '');
+
+  // Normalize whitespace but preserve intentional formatting
+  sanitized = sanitized
+    .replace(/[\r\n]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return sanitized;
+}
+
+/**
+ * Validate message content
+ */
+export function validateMessage(message: string): { valid: boolean; error?: string } {
+  if (!message || typeof message !== 'string') {
+    return { valid: false, error: 'Message is required' };
+  }
+
+  const sanitized = sanitizeInput(message);
+
+  if (sanitized.length === 0) {
+    return { valid: false, error: 'Message cannot be empty' };
+  }
+
+  if (sanitized.length < 2) {
+    return { valid: false, error: 'Message is too short' };
+  }
+
+  return { valid: true };
+}
+
+// =============================================================================
 // Quick Actions Registry
 // =============================================================================
 
@@ -291,6 +346,136 @@ export const quickActionsRegistry: QuickAction[] = [
     pages: ['admin/social-builder'],
     adminOnly: true,
   },
+
+  // Additional Overview actions
+  {
+    id: 'compare_week_over_week',
+    label: 'Compare Weeks',
+    description: 'Compare your performance to last week',
+    prompt: 'Compare my trading performance this week vs last week. Show me the differences in win rate, P&L, and LTP scores.',
+    icon: 'BarChart',
+    pages: ['overview'],
+  },
+  {
+    id: 'check_status',
+    label: 'Check Status',
+    description: 'Current streaks, milestones, rankings',
+    prompt: 'What is my current status? Show my streaks, milestones I am close to, and my ranking.',
+    icon: 'Trophy',
+    pages: ['overview'],
+  },
+
+  // Additional Journal actions
+  {
+    id: 'export_trades',
+    label: 'Export Trades',
+    description: 'Export your trade journal data',
+    prompt: 'Help me export my trade journal. What formats are available and what data will be included?',
+    icon: 'Download',
+    pages: ['journal'],
+  },
+  {
+    id: 'backtest_strategy',
+    label: 'Backtest Strategy',
+    description: 'Test a pattern against historical trades',
+    prompt: 'Analyze my historical trades to backtest my strategy. What patterns have been most successful?',
+    icon: 'FlaskConical',
+    pages: ['journal'],
+  },
+  {
+    id: 'trade_statistics',
+    label: 'Trade Statistics',
+    description: 'Detailed statistical analysis',
+    prompt: 'Give me detailed statistics on my trading. Include win rate by symbol, direction, time of day, and day of week.',
+    icon: 'PieChart',
+    pages: ['journal'],
+  },
+  {
+    id: 'find_losses',
+    label: 'Find Losses',
+    description: 'Analyze your losing trades',
+    prompt: 'Show me my losing trades and analyze them. What patterns do you see in my losses?',
+    icon: 'TrendingDown',
+    pages: ['journal'],
+  },
+
+  // Additional Learning actions
+  {
+    id: 'get_learning_plan',
+    label: 'Learning Plan',
+    description: 'Get an AI-generated learning path',
+    prompt: 'Create a personalized learning plan for me based on my current progress and weak areas.',
+    icon: 'Map',
+    pages: ['learning'],
+  },
+  {
+    id: 'prerequisite_check',
+    label: 'Prerequisites',
+    description: 'Check prerequisites before proceeding',
+    prompt: 'What prerequisites should I complete before this lesson? Am I ready for this content?',
+    icon: 'ListChecks',
+    pages: ['learning'],
+    requiresSelection: true,
+    selectionType: 'lesson',
+  },
+
+  // Additional Companion actions
+  {
+    id: 'watch_symbol',
+    label: 'Add to Watchlist',
+    description: 'Add symbol to your watchlist',
+    prompt: 'Add this symbol to my watchlist and tell me what levels I should watch.',
+    icon: 'Eye',
+    pages: ['companion'],
+    requiresSelection: true,
+    selectionType: 'symbol',
+  },
+  {
+    id: 'set_alert',
+    label: 'Set Alert',
+    description: 'Set a price or pattern alert',
+    prompt: 'Help me set up an alert for this symbol. What price levels or patterns should I watch for?',
+    icon: 'Bell',
+    pages: ['companion'],
+    requiresSelection: true,
+    selectionType: 'symbol',
+  },
+  {
+    id: 'compare_setups',
+    label: 'Compare Setups',
+    description: 'Compare multiple setups side-by-side',
+    prompt: 'Compare the setups on my watchlist. Which one has the best LTP score right now?',
+    icon: 'Columns',
+    pages: ['companion'],
+  },
+  {
+    id: 'market_opportunity',
+    label: 'Find Opportunities',
+    description: 'Find real-time setup opportunities',
+    prompt: 'What are the best trading opportunities right now based on the LTP framework?',
+    icon: 'Radar',
+    pages: ['companion', 'overview'],
+  },
+
+  // Additional Admin actions
+  {
+    id: 'user_engagement_report',
+    label: 'Engagement Report',
+    description: 'Deep dive into user metrics',
+    prompt: 'Generate a detailed user engagement report. Show me active users, retention, and feature usage.',
+    icon: 'UserCheck',
+    pages: ['admin/analytics', 'admin/users'],
+    adminOnly: true,
+  },
+  {
+    id: 'content_gap_analysis',
+    label: 'Content Gaps',
+    description: 'Identify missing content areas',
+    prompt: 'Analyze our content for gaps. What topics are users asking about that we don\'t cover well?',
+    icon: 'Search',
+    pages: ['admin/knowledge'],
+    adminOnly: true,
+  },
 ];
 
 /**
@@ -472,24 +657,119 @@ Win Rate: ${stats.winRate.toFixed(1)}%`;
 }
 
 /**
+ * Get current market time info in Eastern timezone
+ */
+function getMarketTimeInfo(): {
+  currentTime: string;
+  marketPhase: string;
+  timeUntilChange: string;
+} {
+  // Get current time in Eastern timezone
+  const now = new Date();
+  const etOptions: Intl.DateTimeFormatOptions = {
+    timeZone: 'America/New_York',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  };
+  const etTime = new Intl.DateTimeFormat('en-US', etOptions).format(now);
+  const [hours, minutes] = etTime.split(':').map(Number);
+  const currentMinutes = hours * 60 + minutes;
+
+  // Market hours (Eastern)
+  const preMarketStart = 4 * 60; // 4:00 AM
+  const marketOpen = 9 * 60 + 30; // 9:30 AM
+  const marketClose = 16 * 60; // 4:00 PM
+  const afterHoursEnd = 20 * 60; // 8:00 PM
+
+  let marketPhase: string;
+  let timeUntilChange: string;
+
+  if (currentMinutes < preMarketStart) {
+    marketPhase = 'CLOSED (overnight)';
+    const minsUntil = preMarketStart - currentMinutes;
+    timeUntilChange = `${Math.floor(minsUntil / 60)}h ${minsUntil % 60}m until pre-market`;
+  } else if (currentMinutes < marketOpen) {
+    marketPhase = 'PRE-MARKET';
+    const minsUntil = marketOpen - currentMinutes;
+    timeUntilChange = `${Math.floor(minsUntil / 60)}h ${minsUntil % 60}m until open`;
+  } else if (currentMinutes < marketClose) {
+    marketPhase = 'MARKET OPEN';
+    const minsUntil = marketClose - currentMinutes;
+    timeUntilChange = `${Math.floor(minsUntil / 60)}h ${minsUntil % 60}m until close`;
+  } else if (currentMinutes < afterHoursEnd) {
+    marketPhase = 'AFTER-HOURS';
+    const minsUntil = afterHoursEnd - currentMinutes;
+    timeUntilChange = `${Math.floor(minsUntil / 60)}h ${minsUntil % 60}m until after-hours ends`;
+  } else {
+    marketPhase = 'CLOSED';
+    const minsUntil = 24 * 60 - currentMinutes + preMarketStart;
+    timeUntilChange = `${Math.floor(minsUntil / 60)}h ${minsUntil % 60}m until pre-market`;
+  }
+
+  return {
+    currentTime: etTime,
+    marketPhase,
+    timeUntilChange,
+  };
+}
+
+/**
  * Generate market context for the system prompt
  */
 function getMarketContextPrompt(marketContext?: MarketContext): string {
-  if (!marketContext) return '';
-
-  const { spy, qqq, vix, marketStatus, keyLevelsNearby } = marketContext;
+  // Always include timezone info even without market data
+  const timeInfo = getMarketTimeInfo();
 
   let prompt = `
 === MARKET CONTEXT ===
-Market Status: ${marketStatus.toUpperCase()}
-SPY: $${spy.price.toFixed(2)} (${spy.change >= 0 ? '+' : ''}${spy.changePercent.toFixed(2)}%) - ${spy.trend}
-QQQ: $${qqq.price.toFixed(2)} (${qqq.change >= 0 ? '+' : ''}${qqq.changePercent.toFixed(2)}%) - ${qqq.trend}
-VIX: ${vix.toFixed(2)}`;
+Current Eastern Time: ${timeInfo.currentTime}
+Market Phase: ${timeInfo.marketPhase}
+${timeInfo.timeUntilChange}`;
 
-  if (keyLevelsNearby.length > 0) {
+  if (!marketContext) {
+    prompt += '\n(Real-time market data not loaded)';
+    return prompt;
+  }
+
+  const { spy, qqq, vix, keyLevelsNearby } = marketContext;
+
+  // Safely access price data with fallbacks
+  if (spy?.price) {
+    prompt += `\nSPY: $${spy.price.toFixed(2)} (${spy.change >= 0 ? '+' : ''}${spy.changePercent?.toFixed(2) || '0.00'}%) - ${spy.trend || 'neutral'}`;
+    if (spy.previousClose) {
+      prompt += ` | Prev Close: $${spy.previousClose.toFixed(2)}`;
+    }
+  }
+
+  if (qqq?.price) {
+    prompt += `\nQQQ: $${qqq.price.toFixed(2)} (${qqq.change >= 0 ? '+' : ''}${qqq.changePercent?.toFixed(2) || '0.00'}%) - ${qqq.trend || 'neutral'}`;
+    if (qqq.previousClose) {
+      prompt += ` | Prev Close: $${qqq.previousClose.toFixed(2)}`;
+    }
+  }
+
+  if (vix) {
+    prompt += `\nVIX: ${vix.toFixed(2)}`;
+    // Add VIX interpretation
+    if (vix < 15) prompt += ' (Low volatility - calm market)';
+    else if (vix < 20) prompt += ' (Normal volatility)';
+    else if (vix < 30) prompt += ' (Elevated volatility - be cautious)';
+    else prompt += ' (High volatility - extreme caution)';
+  }
+
+  if (keyLevelsNearby && keyLevelsNearby.length > 0) {
     prompt += `\n\nKey Levels Nearby:`;
     keyLevelsNearby.slice(0, 5).forEach((l) => {
       prompt += `\n- ${l.symbol}: ${l.level.level_type} at $${l.level.price.toFixed(2)} (${l.distancePercent.toFixed(2)}% away)`;
+    });
+  }
+
+  // Add earnings warnings if present
+  if (marketContext.upcomingEarnings && marketContext.upcomingEarnings.length > 0) {
+    prompt += `\n\n⚠️ Upcoming Earnings:`;
+    marketContext.upcomingEarnings.slice(0, 3).forEach((e) => {
+      prompt += `\n- ${e.symbol}: ${e.date} (${e.timing} market)`;
     });
   }
 
@@ -617,4 +897,162 @@ export function compressContext(context: AIContext): Partial<AIContext> {
     marketContext: context.marketContext,
     interactionCount: context.interactionCount,
   };
+}
+
+// =============================================================================
+// Context-Aware Suggested Prompts
+// =============================================================================
+
+interface SuggestedPrompt {
+  text: string;
+  priority: number;
+}
+
+/**
+ * Get context-aware suggested prompts based on current page and selections
+ */
+export function getSuggestedPrompts(context: AIContext): string[] {
+  const prompts: SuggestedPrompt[] = [];
+  const { currentPage, selectedTrade, selectedLesson, selectedSymbol, selectedSetup, selectedScenario } = context;
+
+  // Page-specific prompts
+  const pagePrompts: Record<DashboardPage, SuggestedPrompt[]> = {
+    overview: [
+      { text: 'Give me my daily trading briefing', priority: 10 },
+      { text: 'What should I focus on today?', priority: 8 },
+      { text: 'Review my performance this week', priority: 7 },
+      { text: 'What are the best opportunities right now?', priority: 6 },
+    ],
+    journal: [
+      { text: 'Analyze my recent trades for patterns', priority: 8 },
+      { text: 'What are my most common mistakes?', priority: 7 },
+      { text: 'Show me my best performing setups', priority: 6 },
+      { text: 'Compare my wins vs losses', priority: 5 },
+    ],
+    learning: [
+      { text: 'What should I study next?', priority: 8 },
+      { text: 'Explain the LTP framework', priority: 7 },
+      { text: 'How do I identify patience candles?', priority: 6 },
+      { text: 'Quiz me on what I learned', priority: 5 },
+    ],
+    coach: [
+      { text: 'Explain the LTP framework', priority: 8 },
+      { text: 'How do I identify a good entry?', priority: 7 },
+      { text: 'What makes a strong support level?', priority: 6 },
+      { text: 'Help me with risk management', priority: 5 },
+    ],
+    companion: [
+      { text: 'What setups look good right now?', priority: 8 },
+      { text: 'Analyze the current market trend', priority: 7 },
+      { text: 'Where are the key levels to watch?', priority: 6 },
+      { text: 'Is there a patience candle forming?', priority: 5 },
+    ],
+    practice: [
+      { text: 'Give me a hint for this scenario', priority: 8 },
+      { text: 'Explain what I should look for here', priority: 7 },
+      { text: 'Review my recent practice mistakes', priority: 6 },
+      { text: 'Try a different scenario type', priority: 5 },
+    ],
+    achievements: [
+      { text: 'What achievements am I close to?', priority: 8 },
+      { text: 'How can I earn more badges?', priority: 7 },
+      { text: 'What does this achievement require?', priority: 6 },
+    ],
+    leaderboard: [
+      { text: 'How can I improve my ranking?', priority: 8 },
+      { text: 'What do top traders do differently?', priority: 7 },
+      { text: 'Analyze my recent performance', priority: 6 },
+    ],
+    'win-cards': [
+      { text: 'Help me analyze this winning trade', priority: 8 },
+      { text: 'What made this trade successful?', priority: 7 },
+      { text: 'Show me similar successful setups', priority: 6 },
+    ],
+    progress: [
+      { text: 'What areas need the most work?', priority: 8 },
+      { text: 'Create a learning plan for me', priority: 7 },
+      { text: 'Review my progress this month', priority: 6 },
+    ],
+    resources: [
+      { text: 'Find videos about patience candles', priority: 8 },
+      { text: 'What resources cover key levels?', priority: 7 },
+      { text: 'Recommend content for my level', priority: 6 },
+    ],
+    'admin/users': [
+      { text: 'Show user engagement metrics', priority: 8 },
+      { text: 'Which users need attention?', priority: 7 },
+    ],
+    'admin/social-builder': [
+      { text: 'Generate a caption for this post', priority: 8 },
+      { text: 'What topics are trending now?', priority: 7 },
+      { text: 'Best time to post today?', priority: 6 },
+    ],
+    'admin/knowledge': [
+      { text: 'What content gaps exist?', priority: 8 },
+      { text: 'Review pending content', priority: 7 },
+    ],
+    'admin/analytics': [
+      { text: 'Show me the engagement report', priority: 8 },
+      { text: 'What features are most used?', priority: 7 },
+    ],
+    'admin/settings': [
+      { text: 'Help me configure settings', priority: 8 },
+    ],
+    'admin/card-builder': [
+      { text: 'Help me design a win card', priority: 8 },
+    ],
+  };
+
+  // Add page-specific prompts
+  const pageSpecificPrompts = pagePrompts[currentPage] || [];
+  prompts.push(...pageSpecificPrompts);
+
+  // Selection-specific prompts (higher priority)
+  if (selectedTrade) {
+    prompts.push(
+      { text: `Analyze my ${selectedTrade.symbol} ${selectedTrade.direction} trade`, priority: 12 },
+      { text: 'Grade this trade with LTP framework', priority: 11 },
+      { text: 'What could I have done better?', priority: 10 },
+      { text: 'Find similar trades in my journal', priority: 9 }
+    );
+  }
+
+  if (selectedLesson) {
+    prompts.push(
+      { text: `Explain "${selectedLesson.title}" in more detail`, priority: 12 },
+      { text: 'Show me a real example of this concept', priority: 11 },
+      { text: 'Quiz me on this lesson', priority: 10 }
+    );
+  }
+
+  if (selectedSymbol) {
+    prompts.push(
+      { text: `Analyze ${selectedSymbol} using LTP`, priority: 12 },
+      { text: `What are the key levels for ${selectedSymbol}?`, priority: 11 },
+      { text: `Is ${selectedSymbol} showing any setups?`, priority: 10 }
+    );
+  }
+
+  if (selectedSetup) {
+    prompts.push(
+      { text: `Grade this ${selectedSetup.symbol} setup`, priority: 12 },
+      { text: 'When should I enter this trade?', priority: 11 },
+      { text: 'What is the risk/reward here?', priority: 10 }
+    );
+  }
+
+  if (selectedScenario) {
+    prompts.push(
+      { text: 'Give me a hint without the answer', priority: 12 },
+      { text: 'What should I be looking for?', priority: 11 },
+      { text: 'Explain the setup in this scenario', priority: 10 }
+    );
+  }
+
+  // Sort by priority and return top 4 unique prompts
+  return prompts
+    .sort((a, b) => b.priority - a.priority)
+    .map(p => p.text)
+    .filter((text, index, self) => self.indexOf(text) === index)
+    .slice(0, 4);
 }

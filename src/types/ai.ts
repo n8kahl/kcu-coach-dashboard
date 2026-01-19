@@ -48,23 +48,43 @@ export interface PageSpecificData {
     symbol?: string;
     dateRange?: { start: Date; end: Date };
     direction?: 'long' | 'short';
+    ltpGrade?: 'A' | 'B' | 'C' | 'D' | 'F';
+    pnlRange?: { min?: number; max?: number };
+    timeframe?: '1m' | '5m' | '15m' | '1h' | 'day';
   };
+  tradeSorting?: {
+    sortBy: 'date' | 'symbol' | 'pnl' | 'ltp_score';
+    sortOrder: 'asc' | 'desc';
+  };
+  searchQuery?: string;
 
   // Learning
   currentModule?: string;
   currentLesson?: string;
   videoTimestamp?: number;
+  currentVideoId?: string;
+  videoDuration?: number;
+  completedVideos?: string[];
+  difficultyLevel?: 'beginner' | 'intermediate' | 'advanced';
 
   // Companion
   watchlistSymbols?: string[];
   focusedSymbol?: string;
+  alertsSet?: Array<{ symbol: string; price: number; direction: 'above' | 'below' }>;
 
   // Practice
   currentScenario?: PracticeScenario;
   practiceMode?: 'historical' | 'ai-generated' | 'daily-challenge';
+  practiceAttemptCount?: number;
+  practiceCorrectCount?: number;
+  practiceAccuracyOnType?: number;
+  previousAttempts?: Array<{ scenarioId: string; correct: boolean; timestamp: Date }>;
 
   // Admin
   adminSection?: string;
+  activeABTests?: Array<{ id: string; name: string; variant: string }>;
+  contentToReview?: number;
+  userReports?: number;
 }
 
 // =============================================================================
@@ -113,18 +133,31 @@ export interface MarketContext {
     change: number;
     changePercent: number;
     trend: 'bullish' | 'bearish' | 'neutral';
+    previousClose?: number;
+    yearHigh?: number;
+    yearLow?: number;
   };
   qqq: {
     price: number;
     change: number;
     changePercent: number;
     trend: 'bullish' | 'bearish' | 'neutral';
+    previousClose?: number;
+    yearHigh?: number;
+    yearLow?: number;
   };
   vix: number;
 
   // Market status
   marketStatus: 'pre' | 'open' | 'after' | 'closed';
   lastUpdated: Date;
+
+  // Timezone info (US Eastern by default)
+  timezone: string;
+  marketOpenTime?: string; // e.g., "09:30"
+  marketCloseTime?: string; // e.g., "16:00"
+  timeToOpen?: string; // e.g., "2h 30m"
+  timeToClose?: string; // e.g., "4h 15m"
 
   // Key levels nearby (for watched symbols)
   keyLevelsNearby: Array<{
@@ -140,6 +173,13 @@ export interface MarketContext {
     timeframe: string;
     timestamp: Date;
     direction: 'bullish' | 'bearish';
+  }>;
+
+  // Earnings calendar for watched symbols
+  upcomingEarnings?: Array<{
+    symbol: string;
+    date: string;
+    timing: 'before' | 'after' | 'during';
   }>;
 }
 
@@ -274,6 +314,9 @@ export type QuickActionId =
   | 'review_week'
   | 'what_to_study'
   | 'identify_patterns'
+  | 'compare_week_over_week'
+  | 'check_status'
+  | 'market_opportunity'
   // Journal actions
   | 'analyze_trade'
   | 'grade_ltp'
@@ -282,17 +325,26 @@ export type QuickActionId =
   | 'what_went_right'
   | 'what_went_wrong'
   | 'how_to_improve'
+  | 'export_trades'
+  | 'backtest_strategy'
+  | 'trade_statistics'
+  | 'find_losses'
   // Learning actions
   | 'resume_learning'
   | 'test_knowledge'
   | 'explain_concept'
   | 'show_example'
   | 'practice_this'
+  | 'get_learning_plan'
+  | 'prerequisite_check'
   // Companion actions
   | 'analyze_setup'
   | 'grade_level'
   | 'whats_the_trend'
   | 'when_to_enter'
+  | 'watch_symbol'
+  | 'set_alert'
+  | 'compare_setups'
   // Practice actions
   | 'get_hint'
   | 'explain_setup'
@@ -302,7 +354,9 @@ export type QuickActionId =
   | 'generate_caption'
   | 'find_trending'
   | 'analyze_competitors'
-  | 'best_post_time';
+  | 'best_post_time'
+  | 'user_engagement_report'
+  | 'content_gap_analysis';
 
 export interface QuickAction {
   id: QuickActionId;
@@ -401,6 +455,53 @@ export interface AISuggestion {
   priority: 'low' | 'medium' | 'high';
   dismissible: boolean;
   expiresAt?: Date;
+}
+
+// =============================================================================
+// Error Types
+// =============================================================================
+
+export type AIErrorCode =
+  | 'UNAUTHORIZED'
+  | 'RATE_LIMITED'
+  | 'API_KEY_ERROR'
+  | 'NETWORK_ERROR'
+  | 'VALIDATION_ERROR'
+  | 'CONTEXT_ERROR'
+  | 'TOOL_ERROR'
+  | 'UNKNOWN_ERROR';
+
+export interface AIError {
+  code: AIErrorCode;
+  message: string;
+  retryable: boolean;
+  retryAfter?: number; // seconds until retry is allowed
+  details?: Record<string, unknown>;
+}
+
+export const AI_ERROR_MESSAGES: Record<AIErrorCode, string> = {
+  UNAUTHORIZED: 'Please log in to continue.',
+  RATE_LIMITED: 'Too many requests. Please wait a moment.',
+  API_KEY_ERROR: 'AI service configuration error. Please contact support.',
+  NETWORK_ERROR: 'Network error. Please check your connection.',
+  VALIDATION_ERROR: 'Invalid input. Please try again.',
+  CONTEXT_ERROR: 'Unable to load context. Please refresh the page.',
+  TOOL_ERROR: 'Error executing action. Please try again.',
+  UNKNOWN_ERROR: 'An unexpected error occurred. Please try again.',
+};
+
+export function createAIError(
+  code: AIErrorCode,
+  customMessage?: string,
+  details?: Record<string, unknown>
+): AIError {
+  return {
+    code,
+    message: customMessage || AI_ERROR_MESSAGES[code],
+    retryable: ['RATE_LIMITED', 'NETWORK_ERROR', 'TOOL_ERROR', 'UNKNOWN_ERROR'].includes(code),
+    retryAfter: code === 'RATE_LIMITED' ? 30 : undefined,
+    details,
+  };
 }
 
 // =============================================================================

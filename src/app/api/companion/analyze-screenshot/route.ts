@@ -8,6 +8,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { CURRICULUM_MODULES } from '@/data/curriculum';
+import {
+  KCU_CORE_QUOTES,
+  KCU_CORE_PRINCIPLES,
+  TIMEFRAME_RULES,
+  PATIENCE_CANDLE_TYPES,
+  LEVEL_RULES,
+  SMA_200_RULES,
+  PROFIT_TARGETS,
+  PROFIT_TAKING_METHOD,
+  VOLUME_RULES,
+  MOMENTUM_RULES,
+  GAP_STRATEGY,
+  ORB_RULES,
+  DYNAMITE_LEVELS,
+  RISK_MANAGEMENT,
+  COMMON_MISTAKES,
+  REVERSAL_RULES
+} from '@/lib/kcu-coaching-rules';
 
 const anthropic = new Anthropic();
 
@@ -16,8 +34,85 @@ function buildCurriculumContext(): string {
   const context: string[] = [
     'You are the KCU Trading Coach AI. Your role is to analyze trading charts and provide coaching based on the KCU curriculum.',
     '',
-    '=== KCU CURRICULUM OVERVIEW ===',
-    ''
+    '=== CORE KCU QUOTES (MEMORIZE THESE) ===',
+    ...KCU_CORE_QUOTES.map((q, i) => `${i + 1}. "${q}"`),
+    '',
+    '=== CORE PRINCIPLES ===',
+    `Rule of Ones: ${KCU_CORE_PRINCIPLES.ruleOfOnes}`,
+    `Three Things at Levels: ${KCU_CORE_PRINCIPLES.threeThingsAtLevels.join(', ')}`,
+    `Three Types of Trading: ${KCU_CORE_PRINCIPLES.threeTypesOfTrading.join(', ')}`,
+    `95% Rule: ${KCU_CORE_PRINCIPLES.nintyFivePercentRule}`,
+    `C Framework: ${KCU_CORE_PRINCIPLES.cFramework}`,
+    '',
+    '=== TIMEFRAME RULES ===',
+    ...TIMEFRAME_RULES.map(tf => `${tf.timeframe}: ${tf.description}`),
+    '',
+    '=== LTP FRAMEWORK ===',
+    'L = Levels: Key price zones where price may react',
+    'T = Trend: Direction of momentum (higher highs/lows or lower highs/lows)',
+    'P = Patience: Waiting for confirmation candle before entry',
+    '',
+    'LEVEL RULES:',
+    ...LEVEL_RULES.howToDraw.map(r => `- ${r}`),
+    `Key Principle: ${LEVEL_RULES.keyPrinciple}`,
+    '',
+    '=== PATIENCE CANDLE TYPES ===',
+    'For CALLS (Bullish):',
+    ...PATIENCE_CANDLE_TYPES.filter(p => p.direction === 'bullish').map(p => `- ${p.description}`),
+    'For PUTS (Bearish):',
+    ...PATIENCE_CANDLE_TYPES.filter(p => p.direction === 'bearish').map(p => `- ${p.description}`),
+    'Entry Rule: Enter on break of patience candle high/low on NEXT candle',
+    'Stop Rule: Stop loss on OTHER side of patience candle',
+    '',
+    '=== 200 MOVING AVERAGE RULES ===',
+    `Core: ${SMA_200_RULES.corePrinciple}`,
+    ...SMA_200_RULES.rules.map(r => `- ${r}`),
+    '',
+    '=== PROFIT TAKING ===',
+    'Targets:',
+    ...PROFIT_TARGETS.map(t => `- ${t}`),
+    'Method:',
+    ...PROFIT_TAKING_METHOD.map(m => `- ${m}`),
+    '',
+    '=== VOLUME ANALYSIS ===',
+    ...VOLUME_RULES.interpretations.map(v => `- ${v.condition} = ${v.meaning}`),
+    '',
+    '=== MOMENTUM RULES ===',
+    'Strong Momentum: ' + MOMENTUM_RULES.strongMomentum.join(', '),
+    'Weak Momentum: ' + MOMENTUM_RULES.weakMomentum.join(', '),
+    '',
+    '=== GAP/SUCKER STRATEGY ===',
+    'Gap Down: Wait for break of pre-market low, if reclaims = CALLS',
+    'Gap Up: Wait for break of pre-market high, if fails = PUTS',
+    `Why: ${GAP_STRATEGY.whyItWorks}`,
+    '',
+    '=== ORB (Opening Range Breakout) ===',
+    `Definition: ${ORB_RULES.definition}`,
+    ...ORB_RULES.uses.map(u => `- ${u}`),
+    '',
+    '=== DYNAMITE LEVELS ===',
+    `${DYNAMITE_LEVELS.definition}`,
+    `Additional: ${DYNAMITE_LEVELS.additionalLevels}`,
+    ...DYNAMITE_LEVELS.tradingRules.map(r => `- ${r}`),
+    '',
+    '=== REVERSAL TRADING ===',
+    `Key: ${REVERSAL_RULES.keyPrinciple}`,
+    'Requirements:',
+    ...REVERSAL_RULES.requirements.map(r => `- ${r}`),
+    `Success Rate: ${REVERSAL_RULES.successRate}`,
+    '',
+    '=== RISK MANAGEMENT ===',
+    'Position Sizing:',
+    ...RISK_MANAGEMENT.positionSizing.map(r => `- ${r}`),
+    'Risk/Reward:',
+    ...RISK_MANAGEMENT.riskReward.map(r => `- ${r}`),
+    'Stop Loss Rules:',
+    ...RISK_MANAGEMENT.stopLossRules.map(r => `- ${r}`),
+    '',
+    '=== COMMON MISTAKES TO AVOID ===',
+    ...COMMON_MISTAKES.map(m => `- ${m.mistake}: ${m.solution}`),
+    '',
+    '=== KCU CURRICULUM MODULES ==='
   ];
 
   for (const module of CURRICULUM_MODULES) {
@@ -37,13 +132,6 @@ function buildCurriculumContext(): string {
       context.push('');
     }
   }
-
-  context.push('=== LTP FRAMEWORK SUMMARY ===');
-  context.push('L = Levels: Key price zones where price may react (hourly levels, PDH/PDL, VWAP, ORB levels)');
-  context.push('T = Trend: Direction of momentum across timeframes (EMA 9/21 alignment, VWAP position)');
-  context.push('P = Patience: Waiting for confirmation before entry (patience candles, proper setups)');
-  context.push('');
-  context.push('All three components must align for a high-probability trade entry.');
 
   return context.join('\n');
 }

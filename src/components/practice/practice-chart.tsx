@@ -24,6 +24,12 @@ import {
   VolumeProfile,
 } from '@/lib/practice/indicators';
 import {
+  useCandleReplay,
+  type AnimatingCandle,
+  type OHLCCandle,
+  easingFunctions,
+} from '@/hooks/useCandleReplay';
+import {
   Play,
   Pause,
   SkipForward,
@@ -235,6 +241,72 @@ export function PracticeChart({
   });
 
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Candle painting animation hook
+  const {
+    state: candleReplayState,
+    animateCandle,
+    cancelAnimation,
+    isAnimating: isCandleAnimating,
+  } = useCandleReplay({
+    duration: 500, // Paint candle over 500ms
+    easing: easingFunctions.easeOutCubic,
+    realisticPath: true,
+    onComplete: (candle) => {
+      // When animation completes, finalize the candle
+      // The chart will already show the final values
+    },
+    onFrame: (animatingCandle) => {
+      // Update chart on each animation frame
+      if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
+
+      // Get all completed candles up to (but not including) the animating one
+      const completedCandles = currentBars.slice(0, currentCandleIndex);
+
+      // Create the animated candle data for the chart
+      const animatedCandleData: CandlestickData = {
+        time: (animatingCandle.t / 1000) as Time,
+        open: animatingCandle.o,
+        high: animatingCandle.currentHigh,
+        low: animatingCandle.currentLow,
+        close: animatingCandle.currentClose,
+      };
+
+      // Combine completed candles with the animating candle
+      const allCandles: CandlestickData[] = [
+        ...completedCandles.map(c => ({
+          time: (c.t / 1000) as Time,
+          open: c.o,
+          high: c.h,
+          low: c.l,
+          close: c.c,
+        })),
+        animatedCandleData,
+      ];
+
+      // Update candle series with animation frame
+      candleSeriesRef.current.setData(allCandles);
+
+      // Update volume (use proportional volume based on progress)
+      const volumeProgress = animatingCandle.progress;
+      const animatedVolume = animatingCandle.v * volumeProgress;
+      const allVolume = [
+        ...completedCandles.map(c => ({
+          time: (c.t / 1000) as Time,
+          value: c.v,
+          color: c.c >= c.o ? CHART_COLORS.volumeUp : CHART_COLORS.volumeDown,
+        })),
+        {
+          time: (animatingCandle.t / 1000) as Time,
+          value: animatedVolume,
+          color: animatingCandle.currentClose >= animatingCandle.o
+            ? CHART_COLORS.volumeUp
+            : CHART_COLORS.volumeDown,
+        },
+      ];
+      volumeSeriesRef.current.setData(allVolume);
+    },
+  });
 
   // Get bars for current timeframe
   const getBarsForTimeframe = useCallback((): ChartCandle[] => {
@@ -668,39 +740,66 @@ export function PracticeChart({
 
   const handlePause = useCallback(() => {
     setIsPlaying(false);
-  }, []);
+    cancelAnimation(); // Cancel any ongoing candle animation
+  }, [cancelAnimation]);
 
   const handleStepForward = useCallback(() => {
+    // Don't allow stepping while animation is in progress
+    if (isCandleAnimating) return;
+
     if (currentCandleIndex < currentBars.length - 1) {
-      setCurrentCandleIndex(prev => prev + 1);
+      const nextIndex = currentCandleIndex + 1;
+      const nextCandle = currentBars[nextIndex] as OHLCCandle;
+
+      // Start the candle painting animation
+      animateCandle(nextCandle);
+
+      // Update the index (the candle will animate into place)
+      setCurrentCandleIndex(nextIndex);
     }
-  }, [currentCandleIndex, currentBars.length]);
+  }, [currentCandleIndex, currentBars, isCandleAnimating, animateCandle]);
 
   const handleReset = useCallback(() => {
     setIsPlaying(false);
+    cancelAnimation(); // Cancel any ongoing candle animation
     setCurrentCandleIndex(Math.min(initialCandleCount - 1, currentBars.length - 1));
     setDecisionReached(false);
-  }, [currentBars.length, initialCandleCount]);
+  }, [currentBars.length, initialCandleCount, cancelAnimation]);
 
   const handleShowAll = useCallback(() => {
     setIsPlaying(false);
+    cancelAnimation(); // Cancel any ongoing candle animation
     setCurrentCandleIndex(currentBars.length - 1);
-  }, [currentBars.length]);
+  }, [currentBars.length, cancelAnimation]);
 
-  // Auto-play effect
+  // Auto-play effect with candle painting
   useEffect(() => {
-    if (isPlaying) {
-      const interval = 800 / playbackSpeed;
+    if (isPlaying && !isCandleAnimating) {
+      // Calculate interval based on playback speed
+      // At 1x speed, candle animation (500ms) + pause (300ms) = 800ms per candle
+      const animationDuration = 500 / playbackSpeed;
+      const pauseBetweenCandles = 300 / playbackSpeed;
+      const totalInterval = animationDuration + pauseBetweenCandles;
+
       playIntervalRef.current = setInterval(() => {
         setCurrentCandleIndex(prev => {
           if (prev >= currentBars.length - 1) {
             setIsPlaying(false);
             return prev;
           }
-          return prev + 1;
+
+          const nextIndex = prev + 1;
+          const nextCandle = currentBars[nextIndex] as OHLCCandle;
+
+          // Trigger candle painting animation
+          if (nextCandle) {
+            animateCandle(nextCandle);
+          }
+
+          return nextIndex;
         });
-      }, interval);
-    } else {
+      }, totalInterval);
+    } else if (!isPlaying) {
       if (playIntervalRef.current) {
         clearInterval(playIntervalRef.current);
         playIntervalRef.current = null;
@@ -712,7 +811,7 @@ export function PracticeChart({
         clearInterval(playIntervalRef.current);
       }
     };
-  }, [isPlaying, currentBars.length, playbackSpeed]);
+  }, [isPlaying, currentBars, playbackSpeed, isCandleAnimating, animateCandle]);
 
   // Zoom controls
   const handleZoomIn = useCallback(() => {

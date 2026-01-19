@@ -2,6 +2,156 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =============================================================================
+ * DESIGN SYSTEM UTILITIES
+ * Premium Trading Terminal aesthetic enforcement
+ * ============================================================================= */
+
+@layer utilities {
+  /* Border-thin: Subtle dark gray border for terminal-style panels */
+  .border-thin {
+    border: 1px solid #333333;
+  }
+
+  /* Border-thin variants for specific sides */
+  .border-t-thin {
+    border-top: 1px solid #333333;
+  }
+  .border-r-thin {
+    border-right: 1px solid #333333;
+  }
+  .border-b-thin {
+    border-bottom: 1px solid #333333;
+  }
+  .border-l-thin {
+    border-left: 1px solid #333333;
+  }
+
+  /* Glow variants using kcu-gold */
+  .shadow-kcu-glow-sm {
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.15);
+  }
+  .shadow-kcu-glow-md {
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.25);
+  }
+  .shadow-kcu-glow-lg {
+    box-shadow: 0 0 40px rgba(245, 158, 11, 0.35);
+  }
+}
+
+@layer components {
+  /* =============================================================================
+   * INPUT-TERMINAL: Bloomberg-style input fields
+   * - No browser focus rings
+   * - Solid bottom border instead of box border
+   * - Sharp, professional appearance
+   * ============================================================================= */
+  .input-terminal {
+    @apply w-full bg-transparent text-[var(--text-primary)] text-sm;
+    border: none;
+    border-bottom: 1px solid #333333;
+    padding: 0.75rem 0;
+    outline: none;
+    transition: border-color 150ms ease, color 150ms ease;
+  }
+
+  .input-terminal::placeholder {
+    color: var(--text-tertiary);
+  }
+
+  .input-terminal:focus {
+    border-bottom-color: #F59E0B;
+    outline: none;
+    box-shadow: none;
+  }
+
+  .input-terminal:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Input-terminal with label */
+  .input-terminal-group {
+    @apply flex flex-col gap-1;
+  }
+
+  .input-terminal-label {
+    @apply text-xs uppercase tracking-wider;
+    color: var(--text-tertiary);
+  }
+
+  /* =============================================================================
+   * BUTTON-SHARP: Premium sharp-cornered buttons
+   * Uses the enforced sharp border-radius from tailwind config
+   * ============================================================================= */
+  .btn-sharp {
+    @apply inline-flex items-center justify-center gap-2;
+    @apply px-4 py-2.5 text-sm font-semibold uppercase tracking-wide;
+    @apply transition-all duration-150;
+    border-radius: 0;
+    border: 1px solid transparent;
+  }
+
+  .btn-sharp-primary {
+    @apply btn-sharp;
+    background: #F59E0B;
+    color: #0d0d0d;
+    border-color: #F59E0B;
+  }
+
+  .btn-sharp-primary:hover {
+    background: #D97706;
+    border-color: #D97706;
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.3);
+  }
+
+  .btn-sharp-primary:active {
+    transform: scale(0.98);
+  }
+
+  .btn-sharp-secondary {
+    @apply btn-sharp;
+    background: transparent;
+    color: var(--text-primary);
+    border-color: #333333;
+  }
+
+  .btn-sharp-secondary:hover {
+    border-color: #F59E0B;
+    color: #F59E0B;
+  }
+
+  .btn-sharp-ghost {
+    @apply btn-sharp;
+    background: transparent;
+    color: var(--text-secondary);
+    border-color: transparent;
+  }
+
+  .btn-sharp-ghost:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  /* =============================================================================
+   * CARD-TERMINAL: Sharp-cornered panel cards
+   * ============================================================================= */
+  .card-terminal {
+    @apply bg-[var(--bg-card)] border-thin p-4;
+    border-radius: 0;
+  }
+
+  .card-terminal-hover {
+    @apply card-terminal transition-all duration-200;
+  }
+
+  .card-terminal-hover:hover {
+    background: var(--bg-card-hover);
+    border-color: rgba(245, 158, 11, 0.3);
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.1);
+  }
+}
+
 /* KCU Coach Design System
  * Matches v0-kcu.vercel.app aesthetic:
  * - Dark theme with hexagonal/honeycomb patterns
@@ -60,9 +210,9 @@
   --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 20px rgba(245, 158, 11, 0.2);
 
-  /* Typography */
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  /* Typography - Uses Next.js font loader CSS variables when available */
+  --font-sans: var(--font-inter, 'Inter'), system-ui, -apple-system, sans-serif;
+  --font-jetbrains: var(--font-mono, 'JetBrains Mono'), 'Fira Code', monospace;
   --font-display: 'Anton', 'Impact', sans-serif;
 
   /* Spacing scale */

@@ -35,12 +35,52 @@ const config: Config = {
           900: '#701a75',
           950: '#4a044e',
         },
+        // KCU Brand Gold - Primary accent color
+        'kcu-gold': {
+          DEFAULT: '#F59E0B',
+          50: '#FEF9E7',
+          100: '#FEF3CF',
+          200: '#FDE68A',
+          300: '#FCD34D',
+          400: '#FBBF24',
+          500: '#F59E0B',
+          600: '#D97706',
+          700: '#B45309',
+          800: '#92400E',
+          900: '#78350F',
+          dim: 'rgba(245, 158, 11, 0.15)', // Low opacity for backgrounds
+          glow: 'rgba(245, 158, 11, 0.3)', // For box-shadow glow effects
+        },
         success: '#10B981',
         warning: '#F59E0B',
         error: '#EF4444',
         'dark-bg': '#0f172a',
         'dark-card': '#1e293b',
         'dark-border': '#334155',
+        // Terminal-style borders
+        'terminal-border': '#333333',
+      },
+      // SHARP CORNERS - Override default rounded utilities
+      // Trading terminals have sharp, professional edges
+      borderRadius: {
+        none: '0px',
+        sm: '0px',      // Override: sharp
+        DEFAULT: '0px', // Override: sharp
+        md: '2px',      // Max 2px for buttons
+        lg: '2px',      // Max 2px
+        xl: '2px',
+        '2xl': '2px',
+        '3xl': '2px',
+        full: '9999px', // Keep full for avatars/dots
+      },
+      // Border width utilities
+      borderWidth: {
+        DEFAULT: '1px',
+        0: '0px',
+        thin: '1px',
+        2: '2px',
+        4: '4px',
+        8: '8px',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
