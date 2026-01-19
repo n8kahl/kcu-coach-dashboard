@@ -262,31 +262,55 @@ export async function POST(request: Request): Promise<Response> {
     let liveMarketContext = '';
     if (marketDataService.isConfigured()) {
       try {
-        const [spySnapshot, qqqSnapshot, marketStatus, vix] = await Promise.all([
-          marketDataService.getMarketSnapshot('SPY'),
-          marketDataService.getMarketSnapshot('QQQ'),
+        // Get comprehensive LTP analysis for SPY and QQQ
+        const [spyLTP, qqqLTP, marketStatus, vix] = await Promise.all([
+          marketDataService.getLTPAnalysis('SPY'),
+          marketDataService.getLTPAnalysis('QQQ'),
           marketDataService.getMarketStatus(),
           marketDataService.getVIX(),
         ]);
 
-        const formatKeyLevels = (levels: Array<{ type: string; price: number; distance?: number }>) =>
-          levels.slice(0, 4).map(l => `${l.type}: $${l.price.toFixed(2)}`).join(', ');
+        const formatMTFTrends = (mtf: { timeframes: Array<{ timeframe: string; trend: string; ema9: number; ema21: number }> } | null) => {
+          if (!mtf) return 'N/A';
+          return mtf.timeframes.map(t => `${t.timeframe}: ${t.trend} (EMA9: $${t.ema9.toFixed(2)}, EMA21: $${t.ema21.toFixed(2)})`).join('\n    ');
+        };
+
+        const formatLTPAnalysis = (ltp: typeof spyLTP, symbol: string) => {
+          if (!ltp) return `${symbol}: Data unavailable`;
+
+          return `${symbol}: $${ltp.trend.mtf.currentPrice.toFixed(2)}
+  LTP Grade: ${ltp.grade} (${ltp.setupQuality}) - Confluence: ${ltp.confluenceScore}%
+
+  LEVELS (Score: ${ltp.levels.levelScore}%):
+    Position: ${ltp.levels.pricePosition.replace('_', ' ')} | Proximity: ${ltp.levels.levelProximity.replace('_', ' ')}
+    VWAP: ${ltp.levels.vwap ? '$' + ltp.levels.vwap.toFixed(2) : 'N/A'}
+    PDH: ${ltp.levels.pdh ? '$' + ltp.levels.pdh.toFixed(2) : 'N/A'} | PDL: ${ltp.levels.pdl ? '$' + ltp.levels.pdl.toFixed(2) : 'N/A'}
+    ORB High: ${ltp.levels.orbHigh ? '$' + ltp.levels.orbHigh.toFixed(2) : 'N/A'} | ORB Low: ${ltp.levels.orbLow ? '$' + ltp.levels.orbLow.toFixed(2) : 'N/A'}
+
+  TREND (Score: ${ltp.trend.trendScore}%):
+    Daily: ${ltp.trend.dailyTrend} | Intraday Bias: ${ltp.trend.intradayTrend}
+    Alignment: ${ltp.trend.trendAlignment}${ltp.trend.mtf.conflictingTimeframes.length > 0 ? ` (Conflicts: ${ltp.trend.mtf.conflictingTimeframes.join(', ')})` : ''}
+    MTF Analysis:
+    ${formatMTFTrends(ltp.trend.mtf)}
+
+  PATIENCE (Score: ${ltp.patience.patienceScore}%):
+    5m: ${ltp.patience.candle5m ? (ltp.patience.candle5m.confirmed ? 'CONFIRMED ' : ltp.patience.candle5m.forming ? 'Forming ' : 'None ') + ltp.patience.candle5m.direction : 'None'}
+    15m: ${ltp.patience.candle15m ? (ltp.patience.candle15m.confirmed ? 'CONFIRMED ' : ltp.patience.candle15m.forming ? 'Forming ' : 'None ') + ltp.patience.candle15m.direction : 'None'}
+    1h: ${ltp.patience.candle1h ? (ltp.patience.candle1h.confirmed ? 'CONFIRMED ' : ltp.patience.candle1h.forming ? 'Forming ' : 'None ') + ltp.patience.candle1h.direction : 'None'}
+
+  RECOMMENDATION: ${ltp.recommendation}`;
+        };
 
         liveMarketContext = `
-=== LIVE MARKET DATA (from Massive.com) ===
+=== LIVE LTP ANALYSIS (Real-Time from Massive.com) ===
 Market Status: ${marketStatus.market} ${marketStatus.earlyHours ? '(Pre-market)' : marketStatus.afterHours ? '(After hours)' : ''}
-VIX: ${vix.toFixed(2)} ${vix < 15 ? '(Low volatility)' : vix > 25 ? '(High volatility)' : '(Normal)'}
+VIX: ${vix.toFixed(2)} ${vix < 15 ? '(Low volatility - tight ranges expected)' : vix > 25 ? '(High volatility - wide swings likely)' : '(Normal volatility)'}
 
-SPY: $${spySnapshot?.quote.price.toFixed(2) || 'N/A'} (${spySnapshot?.quote.changePercent ? (spySnapshot.quote.changePercent >= 0 ? '+' : '') + spySnapshot.quote.changePercent.toFixed(2) + '%' : 'N/A'})
-  Trend: ${spySnapshot?.trend || 'N/A'}
-  Key Levels: ${spySnapshot ? formatKeyLevels(spySnapshot.keyLevels) : 'N/A'}
-  ${spySnapshot?.patienceCandle?.forming ? `Patience candle forming (${spySnapshot.patienceCandle.direction})` : 'No patience candle'}
+${formatLTPAnalysis(spyLTP, 'SPY')}
 
-QQQ: $${qqqSnapshot?.quote.price.toFixed(2) || 'N/A'} (${qqqSnapshot?.quote.changePercent ? (qqqSnapshot.quote.changePercent >= 0 ? '+' : '') + qqqSnapshot.quote.changePercent.toFixed(2) + '%' : 'N/A'})
-  Trend: ${qqqSnapshot?.trend || 'N/A'}
-  Key Levels: ${qqqSnapshot ? formatKeyLevels(qqqSnapshot.keyLevels) : 'N/A'}
+${formatLTPAnalysis(qqqLTP, 'QQQ')}
 
-Use this data when answering questions about current market conditions, setups, or key levels.`;
+Use this LTP analysis to answer questions about setups, levels, trends, and trade recommendations. Always reference specific data when discussing market conditions.`;
       } catch (marketError) {
         logger.warn('Live market data fetch failed', {
           error: marketError instanceof Error ? marketError.message : String(marketError),

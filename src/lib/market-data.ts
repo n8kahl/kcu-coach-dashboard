@@ -183,6 +183,67 @@ export interface MarketSnapshot {
   };
 }
 
+// Multi-Timeframe Analysis Types
+export interface TimeframeTrend {
+  timeframe: string;
+  trend: 'bullish' | 'bearish' | 'neutral';
+  ema9: number;
+  ema21: number;
+  priceVsEma9: 'above' | 'below' | 'at';
+  priceVsEma21: 'above' | 'below' | 'at';
+  emaAlignment: 'bullish' | 'bearish' | 'mixed';
+}
+
+export interface MTFAnalysis {
+  symbol: string;
+  currentPrice: number;
+  timeframes: TimeframeTrend[];
+  overallBias: 'bullish' | 'bearish' | 'neutral';
+  alignmentScore: number; // 0-100, how aligned are the timeframes
+  conflictingTimeframes: string[];
+}
+
+export interface LTPAnalysis {
+  symbol: string;
+  timestamp: string;
+
+  // LEVELS
+  levels: {
+    nearest: KeyLevel[];
+    pdh: number | null;
+    pdl: number | null;
+    vwap: number | null;
+    orbHigh: number | null;
+    orbLow: number | null;
+    pricePosition: 'above_vwap' | 'below_vwap' | 'at_vwap';
+    levelProximity: 'at_level' | 'near_level' | 'between_levels';
+    levelScore: number; // 0-100
+  };
+
+  // TREND
+  trend: {
+    mtf: MTFAnalysis;
+    dailyTrend: 'bullish' | 'bearish' | 'neutral';
+    intradayTrend: 'bullish' | 'bearish' | 'neutral';
+    trendAlignment: 'aligned' | 'conflicting';
+    trendScore: number; // 0-100
+  };
+
+  // PATIENCE
+  patience: {
+    candle5m: { forming: boolean; confirmed: boolean; direction: 'bullish' | 'bearish' } | null;
+    candle15m: { forming: boolean; confirmed: boolean; direction: 'bullish' | 'bearish' } | null;
+    candle1h: { forming: boolean; confirmed: boolean; direction: 'bullish' | 'bearish' } | null;
+    patienceScore: number; // 0-100
+  };
+
+  // Overall LTP Grade
+  confluenceScore: number; // 0-100
+  grade: 'A+' | 'A' | 'B' | 'C' | 'D' | 'F';
+  setupQuality: 'Strong' | 'Moderate' | 'Weak' | 'No Setup';
+  recommendation: string;
+}
+
 // Cache TTLs in seconds
 const CACHE_TTL = {
   quote: 5,
@@ -1248,6 +1309,309 @@ class MarketDataService {
     await Promise.all(promises);
     return results;
   }
+
+  // ============================================
+  // Multi-Timeframe (MTF) Analysis Methods
+  // ============================================
+
+  /**
+   * Calculate EMA from bars
+   */
+  private calculateEMAFromBars(bars: Bar[], period: number): number {
+    if (bars.length < period) return 0;
+
+    const multiplier = 2 / (period + 1);
+    let ema = bars.slice(0, period).reduce((sum, b) => sum + b.close, 0) / period;
+
+    for (let i = period; i < bars.length; i++) {
+      ema = (bars[i].close - ema) * multiplier + ema;
+    }
+
+    return ema;
+  }
+
+  /**
+   * Get trend analysis for a specific timeframe
+   */
+  async getTimeframeTrend(ticker: string, timeframe: string): Promise<TimeframeTrend | null> {
+    const symbol = ticker.toUpperCase();
+
+    // Map timeframe to minutes/timespan
+    const timespanMap: Record<string, { timespan: string; limit: number }> = {
+      '5m': { timespan: '5', limit: 50 },
+      '15m': { timespan: '15', limit: 50 },
+      '1h': { timespan: '60', limit: 50 },
+      '4h': { timespan: '240', limit: 50 },
+      'daily': { timespan: 'day', limit: 50 },
+    };
+
+    const config = timespanMap[timeframe];
+    if (!config) return null;
+
+    const bars = await this.getAggregates(symbol, config.timespan, config.limit);
+    if (bars.length < 21) return null;
+
+    const currentPrice = bars[bars.length - 1]?.close || 0;
+    const ema9 = this.calculateEMAFromBars(bars, 9);
+    const ema21 = this.calculateEMAFromBars(bars, 21);
+
+    // Determine price position relative to EMAs
+    const threshold = currentPrice * 0.001; // 0.1% threshold for "at"
+    const priceVsEma9: 'above' | 'below' | 'at' =
+      currentPrice > ema9 + threshold ? 'above' :
+      currentPrice < ema9 - threshold ? 'below' : 'at';
+    const priceVsEma21: 'above' | 'below' | 'at' =
+      currentPrice > ema21 + threshold ? 'above' :
+      currentPrice < ema21 - threshold ? 'below' : 'at';
+
+    // Determine EMA alignment
+    const emaAlignment: 'bullish' | 'bearish' | 'mixed' =
+      ema9 > ema21 ? 'bullish' :
+      ema9 < ema21 ? 'bearish' : 'mixed';
+
+    // Determine overall trend for this timeframe
+    let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+    if (priceVsEma9 === 'above' && priceVsEma21 === 'above' && emaAlignment === 'bullish') {
+      trend = 'bullish';
+    } else if (priceVsEma9 === 'below' && priceVsEma21 === 'below' && emaAlignment === 'bearish') {
+      trend = 'bearish';
+    }
+
+    return {
+      timeframe,
+      trend,
+      ema9,
+      ema21,
+      priceVsEma9,
+      priceVsEma21,
+      emaAlignment,
+    };
+  }
+
+  /**
+   * Get Multi-Timeframe (MTF) Analysis
+   * Analyzes trend across 5m, 15m, 1h, and daily timeframes
+   */
+  async getMTFAnalysis(ticker: string): Promise<MTFAnalysis | null> {
+    const symbol = ticker.toUpperCase();
+    const cacheKey = `mtf:${symbol}`;
+
+    const result = await this.getCached<MTFAnalysis>(
+      cacheKey,
+      CACHE_TTL.indicators,
+      async () => {
+        const quote = await this.getQuote(symbol);
+        if (!quote) return null;
+
+        // Analyze all timeframes in parallel
+        const timeframePromises = ['5m', '15m', '1h', 'daily'].map(tf =>
+          this.getTimeframeTrend(symbol, tf)
+        );
+        const timeframeResults = await Promise.all(timeframePromises);
+        const timeframes = timeframeResults.filter((t): t is TimeframeTrend => t !== null);
+
+        if (timeframes.length === 0) return null;
+
+        // Calculate alignment score
+        const bullishCount = timeframes.filter(t => t.trend === 'bullish').length;
+        const bearishCount = timeframes.filter(t => t.trend === 'bearish').length;
+        const totalTimeframes = timeframes.length;
+
+        let overallBias: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+        let alignmentScore = 0;
+
+        if (bullishCount === totalTimeframes) {
+          overallBias = 'bullish';
+          alignmentScore = 100;
+        } else if (bearishCount === totalTimeframes) {
+          overallBias = 'bearish';
+          alignmentScore = 100;
+        } else if (bullishCount > bearishCount) {
+          overallBias = 'bullish';
+          alignmentScore = Math.round((bullishCount / totalTimeframes) * 100);
+        } else if (bearishCount > bullishCount) {
+          overallBias = 'bearish';
+          alignmentScore = Math.round((bearishCount / totalTimeframes) * 100);
+        } else {
+          alignmentScore = 50;
+        }
+
+        // Find conflicting timeframes
+        const conflictingTimeframes = timeframes
+          .filter(t => t.trend !== overallBias && t.trend !== 'neutral')
+          .map(t => t.timeframe);
+
+        return {
+          symbol,
+          currentPrice: quote.price,
+          timeframes,
+          overallBias,
+          alignmentScore,
+          conflictingTimeframes,
+        };
+      }
+    );
+
+    return result;
+  }
+
+  // ============================================
+  // LTP Framework Analysis
+  // ============================================
+
+  /**
+   * Get comprehensive LTP (Levels, Trend, Patience) Analysis
+   * This is the core analysis method for the KCU trading framework
+   */
+  async getLTPAnalysis(ticker: string): Promise<LTPAnalysis | null> {
+    const symbol = ticker.toUpperCase();
+    const cacheKey = `ltp:${symbol}`;
+
+    const result = await this.getCached<LTPAnalysis>(
+      cacheKey,
+      CACHE_TTL.snapshot,
+      async () => {
+        // Fetch all required data in parallel
+        const [quote, keyLevels, mtf, bars5m, bars15m, bars1h] = await Promise.all([
+          this.getQuote(symbol),
+          this.getKeyLevels(symbol),
+          this.getMTFAnalysis(symbol),
+          this.getAggregates(symbol, '5', 50),
+          this.getAggregates(symbol, '15', 50),
+          this.getAggregates(symbol, '60', 50),
+        ]);
+
+        if (!quote || !mtf) return null;
+
+        const currentPrice = quote.price;
+
+        // ============ LEVELS ANALYSIS ============
+        const pdh = keyLevels.find(l => l.type === 'pdh')?.price || null;
+        const pdl = keyLevels.find(l => l.type === 'pdl')?.price || null;
+        const vwap = keyLevels.find(l => l.type === 'vwap')?.price || quote.vwap || null;
+        const orbHigh = keyLevels.find(l => l.type === 'orb_high')?.price || null;
+        const orbLow = keyLevels.find(l => l.type === 'orb_low')?.price || null;
+
+        // Price position relative to VWAP
+        const pricePosition: 'above_vwap' | 'below_vwap' | 'at_vwap' =
+          vwap === null ? 'at_vwap' :
+          currentPrice > vwap * 1.001 ? 'above_vwap' :
+          currentPrice < vwap * 0.999 ? 'below_vwap' : 'at_vwap';
+
+        // Find nearest levels
+        const nearest = keyLevels.slice(0, 4);
+
+        // Level proximity score (are we at a tradeable level?)
+        const nearestDistance = Math.min(...keyLevels.map(l => Math.abs(l.distance || 100)));
+        const levelProximity: 'at_level' | 'near_level' | 'between_levels' =
+          nearestDistance < 0.3 ? 'at_level' :
+          nearestDistance < 0.8 ? 'near_level' : 'between_levels';
+
+        // Level score (higher if we're at a strong level)
+        let levelScore = 50; // Base score
+        if (levelProximity === 'at_level') {
+          const nearestLevel = keyLevels[0];
+          levelScore = nearestLevel ? Math.min(95, nearestLevel.strength + 10) : 70;
+        } else if (levelProximity === 'near_level') {
+          levelScore = 65;
+        }
+
+        // ============ TREND ANALYSIS ============
+        const dailyTrend = mtf.timeframes.find(t => t.timeframe === 'daily')?.trend || 'neutral';
+        const intradayTrend = mtf.overallBias;
+        const trendAlignment: 'aligned' | 'conflicting' =
+          dailyTrend === intradayTrend || dailyTrend === 'neutral' || intradayTrend === 'neutral'
+            ? 'aligned' : 'conflicting';
+
+        // Trend score based on MTF alignment
+        let trendScore = mtf.alignmentScore;
+        if (trendAlignment === 'aligned' && dailyTrend !== 'neutral') {
+          trendScore = Math.min(100, trendScore + 10);
+        } else if (trendAlignment === 'conflicting') {
+          trendScore = Math.max(30, trendScore - 20);
+        }
+
+        // ============ PATIENCE CANDLE ANALYSIS ============
+        const candle5m = bars5m.length >= 3 ? this.detectPatienceCandle(bars5m) : null;
+        const candle15m = bars15m.length >= 3 ? this.detectPatienceCandle(bars15m) : null;
+        const candle1h = bars1h.length >= 3 ? this.detectPatienceCandle(bars1h) : null;
+
+        // Patience score
+        let patienceScore = 40; // Base score
+        if (candle5m?.confirmed) patienceScore += 20;
+        else if (candle5m?.forming) patienceScore += 10;
+        if (candle15m?.confirmed) patienceScore += 25;
+        else if (candle15m?.forming) patienceScore += 12;
+        if (candle1h?.confirmed) patienceScore += 15;
+        else if (candle1h?.forming) patienceScore += 8;
+        patienceScore = Math.min(100, patienceScore);
+
+        // ============ OVERALL LTP GRADE ============
+        const confluenceScore = Math.round(
+          (levelScore * 0.35) + (trendScore * 0.40) + (patienceScore * 0.25)
+        );
+
+        const grade: LTPAnalysis['grade'] =
+          confluenceScore >= 90 ? 'A+' :
+          confluenceScore >= 80 ? 'A' :
+          confluenceScore >= 70 ? 'B' :
+          confluenceScore >= 60 ? 'C' :
+          confluenceScore >= 50 ? 'D' : 'F';
+
+        const setupQuality: LTPAnalysis['setupQuality'] =
+          grade === 'A+' || grade === 'A' ? 'Strong' :
+          grade === 'B' || grade === 'C' ? 'Moderate' :
+          grade === 'D' ? 'Weak' : 'No Setup';
+
+        // Generate recommendation
+        let recommendation = '';
+        if (setupQuality === 'Strong') {
+          recommendation = `${intradayTrend.toUpperCase()} setup at ${levelProximity === 'at_level' ? 'key level' : 'level zone'}. MTF aligned. ${candle15m?.confirmed ? 'Patience confirmed.' : candle5m?.forming ? 'Watch for patience confirmation.' : 'Wait for patience candle.'}`;
+        } else if (setupQuality === 'Moderate') {
+          recommendation = `Potential ${intradayTrend} setup forming. ${trendAlignment === 'conflicting' ? 'Caution: MTF conflict. ' : ''}${levelProximity === 'between_levels' ? 'Not at a key level yet.' : ''} Wait for better confluence.`;
+        } else if (setupQuality === 'Weak') {
+          recommendation = `Weak setup conditions. ${trendAlignment === 'conflicting' ? 'Timeframes conflicting. ' : ''}${levelProximity === 'between_levels' ? 'Price between levels. ' : ''}No trade recommended.`;
+        } else {
+          recommendation = 'No clear setup. Wait for price to reach a key level with trend alignment.';
+        }
+
+        return {
+          symbol,
+          timestamp: new Date().toISOString(),
+          levels: {
+            nearest,
+            pdh,
+            pdl,
+            vwap,
+            orbHigh,
+            orbLow,
+            pricePosition,
+            levelProximity,
+            levelScore,
+          },
+          trend: {
+            mtf,
+            dailyTrend,
+            intradayTrend,
+            trendAlignment,
+            trendScore,
+          },
+          patience: {
+            candle5m,
+            candle15m,
+            candle1h,
+            patienceScore,
+          },
+          confluenceScore,
+          grade,
+          setupQuality,
+          recommendation,
+        };
+      }
+    );
+
+    return result;
+  }
 }
 
 // Singleton instance
@@ -1335,6 +1699,14 @@ export async function getMarketSnapshot(ticker: string): Promise<MarketSnapshot 
 
 export async function getMarketSnapshots(tickers: string[]): Promise<Map<string, MarketSnapshot>> {
   return marketDataService.getMarketSnapshots(tickers);
+}
+
+export async function getMTFAnalysis(ticker: string): Promise<MTFAnalysis | null> {
+  return marketDataService.getMTFAnalysis(ticker);
+}
+
+export async function getLTPAnalysis(ticker: string): Promise<LTPAnalysis | null> {
+  return marketDataService.getLTPAnalysis(ticker);
 }
 
 export default marketDataService;
