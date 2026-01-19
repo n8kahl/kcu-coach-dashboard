@@ -169,9 +169,25 @@ export default function LessonPage() {
     fetchRelatedVideos();
   }, [lesson]);
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     setIsCompleted(true);
-    // In real app, save to API
+
+    // Persist completion to API
+    try {
+      await fetch('/api/learning/v2/progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lessonId: lesson.id,
+          moduleSlug: moduleSlug,
+          completed: true,
+          progressPercent: 100,
+        }),
+      });
+    } catch (error) {
+      console.error('Error saving lesson completion:', error);
+      // Still show as complete locally even if API fails
+    }
   };
 
   const handleNext = () => {

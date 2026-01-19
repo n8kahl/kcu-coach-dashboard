@@ -96,7 +96,7 @@ export default function LearnProgressPage() {
                 <AlertCircle className="w-12 h-12 text-[var(--error)]" />
                 <div>
                   <p className="font-medium text-[var(--text-primary)]">{error}</p>
-                  <Button variant="outline" onClick={handleRefresh} className="mt-4">
+                  <Button variant="secondary" onClick={handleRefresh} className="mt-4">
                     Try Again
                   </Button>
                 </div>
@@ -152,10 +152,10 @@ export default function LearnProgressPage() {
           { label: 'Learn' },
           { label: 'Progress' },
         ]}
-        action={
+        actions={
           <div className="flex items-center gap-2">
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={handleRefresh}
               disabled={isRefreshing}
@@ -164,7 +164,7 @@ export default function LearnProgressPage() {
               Refresh
             </Button>
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={handleDownloadReport}
             >

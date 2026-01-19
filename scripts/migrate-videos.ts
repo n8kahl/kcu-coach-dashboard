@@ -339,7 +339,7 @@ async function migrateVideos() {
   let moduleOrder = 0;
   const results: MigrationResult[] = [];
 
-  for (const [moduleNumber, moduleVideos] of moduleGroups) {
+  for (const [moduleNumber, moduleVideos] of Array.from(moduleGroups.entries())) {
     const firstVideo = moduleVideos[0];
     console.log(`\nProcessing Module ${moduleNumber}: ${firstVideo.moduleName}`);
     console.log('-'.repeat(50));

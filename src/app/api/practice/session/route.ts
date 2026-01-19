@@ -132,14 +132,16 @@ export async function PUT(request: Request) {
     // Calculate XP earned (10 per attempt, 25 bonus per correct)
     const xpEarned = scenariosAttempted * 10 + scenariosCorrect * 25;
 
-    // Award XP to user
-    await supabaseAdmin.rpc('award_xp', {
-      p_user_id: session.userId,
-      p_amount: xpEarned,
-      p_reason: `Practice session completed: ${scenariosCorrect}/${scenariosAttempted} correct`,
-    }).catch(() => {
+    // Award XP to user (silently ignore if function doesn't exist)
+    try {
+      await supabaseAdmin.rpc('award_xp', {
+        p_user_id: session.userId,
+        p_amount: xpEarned,
+        p_reason: `Practice session completed: ${scenariosCorrect}/${scenariosAttempted} correct`,
+      });
+    } catch {
       // XP function may not exist
-    });
+    }
 
     logger.info('Practice session ended', {
       userId: session.userId,

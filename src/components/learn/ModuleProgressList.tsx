@@ -46,7 +46,7 @@ export function ModuleProgressList({ modules, courseSlug, className = '' }: Modu
               transition={{ delay: index * 0.05 }}
             >
               <Link
-                href={isLocked ? '#' : `/learning/${courseSlug}/${module.slug}`}
+                href={isLocked ? '#' : `/learn/${courseSlug}/${module.slug}`}
                 className={isLocked ? 'cursor-not-allowed' : ''}
               >
                 <div

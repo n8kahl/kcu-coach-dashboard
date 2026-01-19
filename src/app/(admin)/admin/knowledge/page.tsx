@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Stat, StatGrid } from '@/components/ui/stat';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { useToast } from '@/components/ui/toast';
 import {
   Table,
   TableHeader,
@@ -17,7 +18,7 @@ import {
   TableHead,
   TableCell,
 } from '@/components/ui/table';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateTime, getRelativeTime } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import {
   Database,
@@ -122,6 +123,8 @@ interface ThinkificStats {
 // ============================================
 
 export default function KnowledgeCMSPage() {
+  const { showToast, updateToast, dismissToast } = useToast();
+
   // Knowledge Base State
   const [stats, setStats] = useState<KnowledgeStats | null>(null);
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
@@ -245,6 +248,13 @@ export default function KnowledgeCMSPage() {
 
   const handleYouTubeSync = async () => {
     setYoutubeSyncStatus(prev => ({ ...prev, status: 'syncing', error: undefined }));
+    const toastId = showToast({
+      type: 'loading',
+      title: 'Syncing YouTube',
+      message: 'Fetching videos and transcripts...',
+      persistent: true,
+    });
+
     try {
       const response = await fetch('/api/youtube/sync', {
         method: 'POST',
@@ -263,6 +273,11 @@ export default function KnowledgeCMSPage() {
           videosIndexed: data.stats?.indexedVideos,
           transcriptsProcessed: data.stats?.transcriptsProcessed,
         });
+        updateToast(toastId, {
+          type: 'success',
+          title: 'YouTube Sync Complete',
+          message: `${data.stats?.indexedVideos || 0} videos indexed, ${data.stats?.transcriptsProcessed || 0} transcripts processed`,
+        });
         fetchData();
       } else {
         const err = await response.json();
@@ -271,6 +286,11 @@ export default function KnowledgeCMSPage() {
           status: 'error',
           error: err.error || err.details || 'Sync failed',
         }));
+        updateToast(toastId, {
+          type: 'error',
+          title: 'YouTube Sync Failed',
+          message: err.error || err.details || 'Sync failed',
+        });
       }
     } catch (err) {
       setYoutubeSyncStatus(prev => ({
@@ -278,11 +298,23 @@ export default function KnowledgeCMSPage() {
         status: 'error',
         error: err instanceof Error ? err.message : 'Unknown error',
       }));
+      updateToast(toastId, {
+        type: 'error',
+        title: 'YouTube Sync Failed',
+        message: err instanceof Error ? err.message : 'Unknown error',
+      });
     }
   };
 
   const handleThinkificSync = async () => {
     setThinkificSyncing(true);
+    const toastId = showToast({
+      type: 'loading',
+      title: 'Syncing Thinkific',
+      message: 'Fetching courses and content...',
+      persistent: true,
+    });
+
     try {
       const response = await fetch('/api/admin/thinkific/sync', {
         method: 'POST',
@@ -292,15 +324,27 @@ export default function KnowledgeCMSPage() {
 
       if (response.ok) {
         const result = await response.json();
-        alert(result.message || `Sync completed: ${result.courses_synced} courses, ${result.chapters_synced} chapters, ${result.contents_synced} contents`);
+        updateToast(toastId, {
+          type: 'success',
+          title: 'Thinkific Sync Complete',
+          message: result.message || `${result.courses_synced} courses, ${result.chapters_synced} chapters, ${result.contents_synced} contents`,
+        });
         fetchData();
       } else {
         const err = await response.json();
-        alert(`Sync failed: ${err.error || err.detail || 'Unknown error'}`);
+        updateToast(toastId, {
+          type: 'error',
+          title: 'Sync Failed',
+          message: err.error || err.detail || 'Unknown error',
+        });
       }
     } catch (err) {
       console.error('Error syncing Thinkific:', err);
-      alert('Failed to sync Thinkific content');
+      updateToast(toastId, {
+        type: 'error',
+        title: 'Sync Failed',
+        message: 'Failed to sync Thinkific content',
+      });
     } finally {
       setThinkificSyncing(false);
     }
@@ -323,11 +367,22 @@ export default function KnowledgeCMSPage() {
 
   const handleSyncSelectedCourses = async () => {
     if (selectedCourseIds.size === 0) {
-      alert('Please select at least one course to sync');
+      showToast({
+        type: 'warning',
+        title: 'No Courses Selected',
+        message: 'Please select at least one course to sync',
+      });
       return;
     }
 
     setThinkificSyncing(true);
+    const toastId = showToast({
+      type: 'loading',
+      title: 'Syncing Courses',
+      message: `Syncing ${selectedCourseIds.size} course${selectedCourseIds.size !== 1 ? 's' : ''}...`,
+      persistent: true,
+    });
+
     try {
       const response = await fetch('/api/admin/thinkific/sync', {
         method: 'POST',
@@ -337,16 +392,28 @@ export default function KnowledgeCMSPage() {
 
       if (response.ok) {
         const result = await response.json();
-        alert(result.message || `Sync completed: ${result.courses_synced} courses, ${result.chapters_synced} chapters, ${result.contents_synced} contents`);
+        updateToast(toastId, {
+          type: 'success',
+          title: 'Courses Synced',
+          message: result.message || `${result.courses_synced} courses, ${result.chapters_synced} chapters, ${result.contents_synced} contents`,
+        });
         setSelectedCourseIds(new Set());
         fetchData();
       } else {
         const err = await response.json();
-        alert(`Sync failed: ${err.error || err.detail || 'Unknown error'}`);
+        updateToast(toastId, {
+          type: 'error',
+          title: 'Sync Failed',
+          message: err.error || err.detail || 'Unknown error',
+        });
       }
     } catch (err) {
       console.error('Error syncing selected courses:', err);
-      alert('Failed to sync selected courses');
+      updateToast(toastId, {
+        type: 'error',
+        title: 'Sync Failed',
+        message: 'Failed to sync selected courses',
+      });
     } finally {
       setThinkificSyncing(false);
     }
@@ -374,6 +441,13 @@ export default function KnowledgeCMSPage() {
 
   const handleProcessPending = async () => {
     setProcessing(true);
+    const toastId = showToast({
+      type: 'loading',
+      title: 'Processing Transcripts',
+      message: 'Extracting and embedding video content...',
+      persistent: true,
+    });
+
     try {
       const res = await fetch('/api/admin/knowledge', {
         method: 'POST',
@@ -383,15 +457,27 @@ export default function KnowledgeCMSPage() {
 
       if (res.ok) {
         const result = await res.json();
-        alert(`Processed ${result.successful} of ${result.totalProcessed} videos`);
+        updateToast(toastId, {
+          type: 'success',
+          title: 'Processing Complete',
+          message: `Processed ${result.successful} of ${result.totalProcessed} videos`,
+        });
         fetchData();
       } else {
         const err = await res.json();
-        alert(`Error: ${err.error}`);
+        updateToast(toastId, {
+          type: 'error',
+          title: 'Processing Error',
+          message: err.error,
+        });
       }
     } catch (err) {
       console.error('Error processing pending:', err);
-      alert('Failed to process videos');
+      updateToast(toastId, {
+        type: 'error',
+        title: 'Processing Failed',
+        message: 'Failed to process videos',
+      });
     } finally {
       setProcessing(false);
     }
@@ -410,15 +496,27 @@ export default function KnowledgeCMSPage() {
 
       const result = await res.json();
       if (result.success) {
-        alert(`Video added: ${result.videoId}`);
+        showToast({
+          type: 'success',
+          title: 'Video Added',
+          message: `Video ID: ${result.videoId}`,
+        });
         setNewVideoUrl('');
         fetchData();
       } else {
-        alert(`Error: ${result.error}`);
+        showToast({
+          type: 'error',
+          title: 'Failed to Add Video',
+          message: result.error,
+        });
       }
     } catch (err) {
       console.error('Error adding video:', err);
-      alert('Failed to add video');
+      showToast({
+        type: 'error',
+        title: 'Failed to Add Video',
+        message: 'An unexpected error occurred',
+      });
     } finally {
       setAddingVideo(false);
     }
@@ -434,14 +532,26 @@ export default function KnowledgeCMSPage() {
 
       const result = await res.json();
       if (result.success) {
-        alert(`Reprocessed: ${result.chunkCount} chunks created`);
+        showToast({
+          type: 'success',
+          title: 'Video Reprocessed',
+          message: `${result.chunkCount} chunks created`,
+        });
         fetchData();
       } else {
-        alert(`Error: ${result.error}`);
+        showToast({
+          type: 'error',
+          title: 'Reprocessing Failed',
+          message: result.error,
+        });
       }
     } catch (err) {
       console.error('Error reprocessing:', err);
-      alert('Failed to reprocess video');
+      showToast({
+        type: 'error',
+        title: 'Reprocessing Failed',
+        message: 'Failed to reprocess video',
+      });
     }
   };
 
@@ -456,14 +566,26 @@ export default function KnowledgeCMSPage() {
 
       if (res.ok) {
         const result = await res.json();
-        alert(`Deleted ${result.deletedChunks} chunks`);
+        showToast({
+          type: 'success',
+          title: 'Source Deleted',
+          message: `${result.deletedChunks} chunks removed`,
+        });
         fetchData();
       } else {
-        alert('Failed to delete source');
+        showToast({
+          type: 'error',
+          title: 'Delete Failed',
+          message: 'Failed to delete source',
+        });
       }
     } catch (err) {
       console.error('Error deleting:', err);
-      alert('Failed to delete source');
+      showToast({
+        type: 'error',
+        title: 'Delete Failed',
+        message: 'Failed to delete source',
+      });
     }
   };
 
@@ -659,9 +781,12 @@ export default function KnowledgeCMSPage() {
                   <CardContent className="p-4 space-y-4">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-[var(--text-secondary)]">Last Sync</span>
-                      <span className="text-[var(--text-primary)]">
+                      <span
+                        className="text-[var(--text-primary)]"
+                        title={youtubeSyncStatus.lastSync ? new Date(youtubeSyncStatus.lastSync).toLocaleString() : undefined}
+                      >
                         {youtubeSyncStatus.lastSync
-                          ? new Date(youtubeSyncStatus.lastSync).toLocaleString()
+                          ? getRelativeTime(youtubeSyncStatus.lastSync)
                           : 'Never'}
                       </span>
                     </div>
@@ -779,9 +904,12 @@ export default function KnowledgeCMSPage() {
                   <CardContent className="p-4 space-y-4">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-[var(--text-secondary)]">Last Sync</span>
-                      <span className="text-[var(--text-primary)]">
+                      <span
+                        className="text-[var(--text-primary)]"
+                        title={thinkificStats?.last_sync ? new Date(thinkificStats.last_sync).toLocaleString() : undefined}
+                      >
                         {thinkificStats?.last_sync
-                          ? new Date(thinkificStats.last_sync).toLocaleString()
+                          ? getRelativeTime(thinkificStats.last_sync)
                           : 'Never'}
                       </span>
                     </div>

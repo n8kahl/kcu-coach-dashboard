@@ -14,6 +14,7 @@ import {
   Plus,
   RefreshCw,
   Zap,
+  Clock,
 } from 'lucide-react';
 
 // UI Components
@@ -75,6 +76,8 @@ function SocialBuilderContent() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
+  const [lastSyncedDisplay, setLastSyncedDisplay] = useState<string>('Never');
 
   // Modal states
   const [showSettings, setShowSettings] = useState(false);
@@ -131,6 +134,9 @@ function SocialBuilderContent() {
         tracked_influencers: influencersData.total || 0,
         trending_topics: 3, // Mock for now
       });
+
+      // Update last synced timestamp
+      setLastSynced(new Date());
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load dashboard data';
       setError(message);
@@ -142,7 +148,39 @@ function SocialBuilderContent() {
 
   useEffect(() => {
     fetchDashboardData();
+
+    // Auto-refresh every 60 seconds
+    const refreshInterval = setInterval(fetchDashboardData, 60000);
+
+    return () => clearInterval(refreshInterval);
   }, [fetchDashboardData]);
+
+  // Update relative time display every 30 seconds
+  useEffect(() => {
+    const updateRelativeTime = () => {
+      if (lastSynced) {
+        const now = new Date();
+        const diffMs = now.getTime() - lastSynced.getTime();
+        const diffSecs = Math.floor(diffMs / 1000);
+        const diffMins = Math.floor(diffMs / 60000);
+
+        if (diffSecs < 10) {
+          setLastSyncedDisplay('Just now');
+        } else if (diffSecs < 60) {
+          setLastSyncedDisplay(`${diffSecs}s ago`);
+        } else if (diffMins < 60) {
+          setLastSyncedDisplay(`${diffMins}m ago`);
+        } else {
+          setLastSyncedDisplay(lastSynced.toLocaleTimeString());
+        }
+      }
+    };
+
+    updateRelativeTime();
+    const displayInterval = setInterval(updateRelativeTime, 30000);
+
+    return () => clearInterval(displayInterval);
+  }, [lastSynced]);
 
   // ============================================
   // Actions
@@ -360,7 +398,11 @@ function SocialBuilderContent() {
               AI-powered social media management for day trading content
             </p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex items-center gap-3">
+            <Badge variant="default" size="sm" className="flex items-center gap-1.5">
+              <Clock className="w-3 h-3" />
+              <span>Synced {lastSyncedDisplay}</span>
+            </Badge>
             <Button
               variant="primary"
               onClick={generateContent}

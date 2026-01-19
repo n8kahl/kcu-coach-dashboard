@@ -1,8 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
+import { withRateLimitAndTimeout, getEndpointUserKey } from '@/lib/rate-limit';
 
 // GET - Fetch real-time quote from Massive.com
-export async function GET(request: Request) {
+async function quoteHandler(request: NextRequest) {
   try {
     const session = await getSession();
     if (!session?.userId) {
@@ -59,3 +60,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
+// Export with rate limiting (60 requests/minute) and timeout (10 seconds)
+export const GET = withRateLimitAndTimeout(
+  quoteHandler,
+  getEndpointUserKey('market-quote'),
+  { limit: 60, windowSeconds: 60, timeoutMs: 10000 }
+);

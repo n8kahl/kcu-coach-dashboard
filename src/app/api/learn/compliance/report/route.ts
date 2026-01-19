@@ -27,8 +27,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const userRoles = (currentUser.user_role_assignments as Array<{ user_roles: { name: string } }>)
-      ?.map(ura => ura.user_roles?.name) || [];
+    const userRoles = (currentUser.user_role_assignments as unknown as Array<{ user_roles: { name: string }[] }>)
+      ?.flatMap(ura => ura.user_roles?.map(r => r.name) || []) || [];
     const isAdmin = userRoles.some(role => ['admin', 'super_admin', 'coach'].includes(role));
 
     const { searchParams } = new URL(request.url);

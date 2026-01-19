@@ -1,7 +1,13 @@
+/**
+ * @deprecated Use /api/learning/v2/progress instead
+ * This route is part of the Thinkific-based learning system.
+ * The v2 API uses local curriculum instead.
+ */
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getAuthenticatedUser } from '@/lib/auth';
 
+// GET - Fetch module progress (DEPRECATED)
 export async function GET(request: Request) {
   try {
     const sessionUser = await getAuthenticatedUser();
@@ -50,20 +56,24 @@ export async function GET(request: Request) {
           .eq('module_id', module.id)
           .eq('is_published', true);
 
+        // Get module's lesson IDs first
+        const { data: moduleLessons } = await supabaseAdmin
+          .from('course_lessons')
+          .select('id')
+          .eq('module_id', module.id)
+          .eq('is_published', true);
+
+        const lessonIds = moduleLessons?.map(l => l.id) || [];
+
         // Get completed lessons count
-        const { count: completedLessons } = await supabaseAdmin
-          .from('course_lesson_progress')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .eq('completed', true)
-          .in(
-            'lesson_id',
-            supabaseAdmin
-              .from('course_lessons')
-              .select('id')
-              .eq('module_id', module.id)
-              .eq('is_published', true)
-          );
+        const { count: completedLessons } = lessonIds.length > 0
+          ? await supabaseAdmin
+              .from('course_lesson_progress')
+              .select('*', { count: 'exact', head: true })
+              .eq('user_id', user.id)
+              .eq('completed', true)
+              .in('lesson_id', lessonIds)
+          : { count: 0 };
 
         // Get best quiz score for this module
         const { data: quizAttempt } = await supabaseAdmin

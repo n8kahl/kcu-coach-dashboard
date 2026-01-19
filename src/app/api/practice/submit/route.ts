@@ -4,12 +4,13 @@
  * POST /api/practice/submit - Submit a practice attempt with AI coaching
  */
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import { generateAttemptFeedback } from '@/lib/scenario-generator';
 import { generateAICoachingFeedback, generateQuickDrillFeedback } from '@/lib/practice-ai-coach';
 import logger from '@/lib/logger';
+import { withRateLimitAndTimeout, getEndpointUserKey } from '@/lib/rate-limit';
 
 interface SubmitRequest {
   scenarioId: string;
@@ -32,7 +33,7 @@ interface SubmitRequest {
  * POST /api/practice/submit
  * Submit a practice attempt and get feedback
  */
-export async function POST(request: Request) {
+async function practiceSubmitHandler(request: NextRequest) {
   try {
     const session = await getSession();
     if (!session?.userId) {
@@ -259,6 +260,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
+// Export with rate limiting (20 requests/minute for AI coaching) and timeout (45 seconds)
+export const POST = withRateLimitAndTimeout(
+  practiceSubmitHandler,
+  getEndpointUserKey('practice-submit'),
+  { limit: 20, windowSeconds: 60, timeoutMs: 45000 }
+);
 
 /**
  * GET /api/practice/submit

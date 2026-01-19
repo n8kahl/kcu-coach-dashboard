@@ -134,7 +134,8 @@ export async function GET(request: NextRequest) {
       }
 
       // Check module access
-      const module = lesson.module as { id: string; course_id: string };
+      const moduleData = lesson.module as unknown as { id: string; course_id: string }[] | { id: string; course_id: string };
+      const module = Array.isArray(moduleData) ? moduleData[0] : moduleData;
       const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
         p_user_id: user.id,
         p_module_id: module.id,
@@ -179,8 +180,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const userRoles = (currentUser.user_role_assignments as Array<{ user_roles: { name: string } }>)
-      ?.map(ura => ura.user_roles?.name) || [];
+    const userRoles = (currentUser.user_role_assignments as unknown as Array<{ user_roles: { name: string }[] }>)
+      ?.flatMap(ura => ura.user_roles?.map(r => r.name) || []) || [];
     const isAdmin = userRoles.some(role => ['admin', 'super_admin'].includes(role));
 
     if (!isAdmin) {
@@ -270,8 +271,8 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const userRoles = (currentUser.user_role_assignments as Array<{ user_roles: { name: string } }>)
-      ?.map(ura => ura.user_roles?.name) || [];
+    const userRoles = (currentUser.user_role_assignments as unknown as Array<{ user_roles: { name: string }[] }>)
+      ?.flatMap(ura => ura.user_roles?.map(r => r.name) || []) || [];
     const isAdmin = userRoles.some(role => ['admin', 'super_admin'].includes(role));
 
     if (!isAdmin) {

@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import { marketDataService } from '@/lib/market-data';
@@ -9,6 +9,7 @@ import {
   Bar as LTPBar,
 } from '@/lib/ltp-engine';
 import logger from '@/lib/logger';
+import { withRateLimitAndTimeout, getEndpointUserKey } from '@/lib/rate-limit';
 
 interface KeyLevelInsert {
   symbol: string;
@@ -25,7 +26,7 @@ interface KeyLevelInsert {
  * POST /api/companion/refresh
  * Manually refresh key levels for a symbol or all watchlist symbols
  */
-export async function POST(request: Request) {
+async function refreshHandler(request: NextRequest) {
   try {
     const session = await getSession();
     if (!session?.userId) {
@@ -129,6 +130,13 @@ export async function POST(request: Request) {
     }, { status: 500 });
   }
 }
+
+// Export with rate limiting (5 requests/minute - market data is expensive) and timeout (60 seconds)
+export const POST = withRateLimitAndTimeout(
+  refreshHandler,
+  getEndpointUserKey('companion-refresh'),
+  { limit: 5, windowSeconds: 60, timeoutMs: 60000 }
+);
 
 /**
  * Calculate key levels for a single symbol

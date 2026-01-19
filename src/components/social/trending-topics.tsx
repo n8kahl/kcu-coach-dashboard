@@ -12,7 +12,10 @@ import {
   Sparkles,
   Calendar,
   BarChart3,
-  AlertCircle
+  AlertCircle,
+  Zap,
+  Twitter,
+  Loader2,
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,9 +23,16 @@ import { Badge } from '@/components/ui/badge';
 import { LoadingState, ErrorState, SkeletonCard } from '@/components/ui/feedback';
 import type { TrendingTopic, TrendingCategory } from '@/types/social';
 
+// TikTok icon
+const TikTokIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-5.2 1.74 2.89 2.89 0 012.31-4.64 2.93 2.93 0 01.88.13V9.4a6.84 6.84 0 00-1-.05A6.33 6.33 0 005 20.1a6.34 6.34 0 0010.86-4.43v-7a8.16 8.16 0 004.77 1.52v-3.4a4.85 4.85 0 01-1-.1z" />
+  </svg>
+);
+
 interface TrendingTopicsProps {
   onGenerateFromTopic: (topic: TrendingTopic) => Promise<void>;
-  showToast: (toast: { type: 'success' | 'error'; title: string; message?: string }) => void;
+  showToast: (toast: { type: 'success' | 'error' | 'info'; title: string; message?: string }) => void;
 }
 
 const categoryConfig: Record<TrendingCategory, { label: string; color: string }> = {
@@ -37,99 +47,98 @@ const categoryConfig: Record<TrendingCategory, { label: string; color: string }>
   viral: { label: 'Viral', color: 'gold' },
 };
 
+const sourceConfig: Record<string, { label: string; icon: React.ReactNode }> = {
+  all: { label: 'All Sources', icon: <TrendingUp className="w-4 h-4" /> },
+  x_twitter: { label: 'X / Twitter', icon: <Twitter className="w-4 h-4" /> },
+  tiktok: { label: 'TikTok', icon: <TikTokIcon className="w-4 h-4" /> },
+  news: { label: 'News', icon: <BarChart3 className="w-4 h-4" /> },
+  ai: { label: 'AI Generated', icon: <Sparkles className="w-4 h-4" /> },
+};
+
 export function TrendingTopics({
   onGenerateFromTopic,
   showToast,
 }: TrendingTopicsProps) {
   const [topics, setTopics] = useState<TrendingTopic[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<TrendingCategory | 'all'>('all');
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
 
   useEffect(() => {
     fetchTopics();
-  }, [categoryFilter]);
+  }, [categoryFilter, sourceFilter]);
 
-  const fetchTopics = async () => {
-    setLoading(true);
+  const fetchTopics = async (refresh: boolean = false) => {
+    if (refresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
+
     try {
-      // For now, use mock data since trending topics endpoint may not exist
-      // In production, this would fetch from /api/admin/social/trending
-      const mockTopics: TrendingTopic[] = [
-        {
-          id: '1',
-          topic: 'FOMC Meeting Impact on Markets',
-          category: 'economic_data',
-          source: 'Federal Reserve',
-          source_data: {},
-          trend_score: 95,
-          mention_count: 1250,
-          velocity: 'rising',
-          content_angles: [
-            { hook: 'The Fed just changed the game. Here\'s what it means for day traders...', format: 'reel' }
-          ],
-          suggested_hooks: ['The Fed just changed the game...', 'Rate decision explained in 60 seconds'],
-          relevant_hashtags: ['#FOMC', '#FederalReserve', '#DayTrading', '#StockMarket'],
-          is_active: true,
-          processed_for_suggestions: false,
-          started_trending_at: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        {
-          id: '2',
-          topic: 'Tech Earnings Season',
-          category: 'earnings',
-          source: 'Market Data',
-          source_data: {},
-          trend_score: 88,
-          mention_count: 890,
-          velocity: 'stable',
-          content_angles: [
-            { hook: 'Big tech earnings are here. My watchlist...', format: 'feed_post' }
-          ],
-          suggested_hooks: ['Big tech earnings playbook', 'How I trade earnings season'],
-          relevant_hashtags: ['#Earnings', '#TechStocks', '#AAPL', '#MSFT', '#Trading'],
-          is_active: true,
-          processed_for_suggestions: false,
-          started_trending_at: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        {
-          id: '3',
-          topic: 'Pre-Market Gap Strategies',
-          category: 'technical',
-          source: 'Trading Community',
-          source_data: {},
-          trend_score: 72,
-          mention_count: 450,
-          velocity: 'rising',
-          content_angles: [
-            { hook: 'This gap pattern has an 80% win rate...', format: 'reel' }
-          ],
-          suggested_hooks: ['Gap trading 101', 'My favorite gap setup'],
-          relevant_hashtags: ['#GapTrading', '#PreMarket', '#TradingStrategy', '#DayTrader'],
-          is_active: true,
-          processed_for_suggestions: true,
-          started_trending_at: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      ];
+      const params = new URLSearchParams();
+      if (categoryFilter !== 'all') params.append('category', categoryFilter);
+      if (sourceFilter !== 'all') params.append('source', sourceFilter);
+      if (refresh) params.append('refresh', 'true');
+      params.append('limit', '20');
 
-      // Filter by category if selected
-      const filtered = categoryFilter === 'all'
-        ? mockTopics
-        : mockTopics.filter((t) => t.category === categoryFilter);
+      const response = await fetch(`/api/admin/social/trending?${params}`);
+      const data = await response.json();
 
-      setTopics(filtered);
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch trending topics');
+      }
+
+      setTopics(data.data || []);
+
+      if (refresh) {
+        showToast({
+          type: 'success',
+          title: 'Topics refreshed',
+          message: `Found ${data.data?.length || 0} trending topics`,
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load trending topics');
     } finally {
       setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const aggregateFromSources = async () => {
+    setRefreshing(true);
+    try {
+      const response = await fetch('/api/admin/social/trending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'refresh' }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to aggregate topics');
+      }
+
+      setTopics(data.data || []);
+      showToast({
+        type: 'success',
+        title: 'Topics aggregated',
+        message: `Scraped ${data.data?.length || 0} topics from X, TikTok, and news sources`,
+      });
+    } catch (err) {
+      showToast({
+        type: 'error',
+        title: 'Aggregation failed',
+        message: err instanceof Error ? err.message : 'Unknown error',
+      });
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -173,32 +182,83 @@ export function TrendingTopics({
     );
   }
 
+  const getSourceBadge = (source: string) => {
+    if (source?.includes('twitter') || source?.includes('x_')) {
+      return { icon: <Twitter className="w-3 h-3" />, label: 'X' };
+    }
+    if (source?.includes('tiktok')) {
+      return { icon: <TikTokIcon className="w-3 h-3" />, label: 'TikTok' };
+    }
+    if (source?.includes('news') || source?.includes('api')) {
+      return { icon: <BarChart3 className="w-3 h-3" />, label: 'News' };
+    }
+    if (source?.includes('ai') || source?.includes('fallback')) {
+      return { icon: <Sparkles className="w-3 h-3" />, label: 'AI' };
+    }
+    return { icon: <TrendingUp className="w-3 h-3" />, label: source };
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value as TrendingCategory | 'all')}
-            className="bg-[var(--bg-secondary)] border border-[var(--border-primary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
-          >
-            <option value="all">All Categories</option>
-            {Object.entries(categoryConfig).map(([key, config]) => (
-              <option key={key} value={key}>
-                {config.label}
-              </option>
-            ))}
-          </select>
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value)}
+              className="bg-[var(--bg-secondary)] border border-[var(--border-primary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+            >
+              {Object.entries(sourceConfig).map(([key, config]) => (
+                <option key={key} value={key}>
+                  {config.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value as TrendingCategory | 'all')}
+              className="bg-[var(--bg-secondary)] border border-[var(--border-primary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+            >
+              <option value="all">All Categories</option>
+              {Object.entries(categoryConfig).map(([key, config]) => (
+                <option key={key} value={key}>
+                  {config.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => fetchTopics(true)}
+              disabled={refreshing}
+              icon={refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="primary"
+              onClick={aggregateFromSources}
+              disabled={refreshing}
+              icon={<Zap className="w-4 h-4" />}
+            >
+              Scrape Now
+            </Button>
+          </div>
         </div>
 
-        <Button
-          variant="secondary"
-          onClick={fetchTopics}
-          icon={<RefreshCw className="w-4 h-4" />}
-        >
-          Refresh
-        </Button>
+        {/* Source info banner */}
+        <div className="bg-[var(--bg-secondary)] border border-[var(--border-primary)] p-3 text-xs text-[var(--text-tertiary)]">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-[var(--accent-primary)]" />
+            <span>
+              Trending topics are scraped from <strong>X/Twitter</strong>, <strong>TikTok</strong>, and <strong>financial news</strong> sources.
+              Click "Scrape Now" to fetch the latest topics about options trading, economic events, and market news.
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Topics Grid */}
@@ -223,13 +283,19 @@ export function TrendingTopics({
               >
                 <Card variant="default" padding="md" className="h-full">
                   <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Badge
                         variant={categoryConfig[topic.category]?.color as 'gold' | 'success' | 'error' | 'warning' | 'info' | 'default' || 'default'}
                         size="sm"
                       >
                         {categoryConfig[topic.category]?.label || topic.category}
                       </Badge>
+                      {topic.source && (
+                        <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] bg-[var(--bg-elevated)] text-[var(--text-tertiary)]">
+                          {getSourceBadge(topic.source).icon}
+                          {getSourceBadge(topic.source).label}
+                        </span>
+                      )}
                       {topic.processed_for_suggestions && (
                         <Badge variant="success" size="sm" dot>
                           Generated

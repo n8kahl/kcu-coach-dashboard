@@ -1,7 +1,12 @@
+/**
+ * @deprecated Use /api/achievements instead
+ * This route is part of the Thinkific-based learning system.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getAuthenticatedUser } from '@/lib/auth';
 
+// GET - Fetch learning achievements (DEPRECATED)
 export async function GET() {
   try {
     const sessionUser = await getAuthenticatedUser();

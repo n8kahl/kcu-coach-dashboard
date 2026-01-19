@@ -156,7 +156,9 @@ export interface TradeEntry {
   direction: 'long' | 'short';
   entry_price: number;
   exit_price?: number;
-  quantity: number;
+  quantity?: number; // UI field name
+  shares?: number; // DB field name (API accepts both)
+  is_options?: boolean;
   contract_type?: 'stock' | 'call' | 'put';
   strike_price?: number;
   expiration_date?: string;
@@ -166,20 +168,99 @@ export interface TradeEntry {
   pnl_percent?: number;
   setup_type?: string;
   notes?: string;
-  emotions?: string[];
+  emotions?: string | string[];
   mistakes?: string[];
   lessons?: string;
   screenshots?: string[];
   tags?: string[];
+  // LTP checklist fields (sent to API)
+  had_level?: boolean;
+  had_trend?: boolean;
+  had_patience_candle?: boolean;
+  followed_rules?: boolean;
+  // Legacy UI format (for backward compatibility)
   ltp_score?: {
     level: number;
     trend: number;
     patience: number;
     overall: number;
   };
-  status: 'open' | 'closed';
+  // API response format (server-computed)
+  ltp_grade?: {
+    score: number; // 0-100
+    grade: 'A' | 'B' | 'C' | 'D' | 'F';
+    feedback: string[];
+  };
+  status?: 'open' | 'closed';
   created_at: string;
   updated_at: string;
+
+  // Phase 1: Screenshot & Quick Entry fields
+  chart_screenshot?: string; // Base64 or URL of chart screenshot
+  ai_analysis?: ScreenshotAnalysis; // AI analysis of screenshot
+  entry_mode?: 'quick' | 'full'; // How the trade was entered
+  r_multiple?: number; // Risk/Reward multiple
+
+  // Phase 2: Psychology & Emotion Tracking
+  pre_trade_confidence?: number; // 1-5
+  pre_trade_sleep?: number; // 1-5
+  pre_trade_stress?: 'low' | 'medium' | 'high';
+  during_emotions?: string[]; // Array of emotion tags
+  post_satisfaction?: number; // 1-5
+  would_take_again?: boolean;
+  lesson_learned?: string;
+
+  // Phase 2: AI Feedback
+  ai_feedback?: TradeFeedback;
+  feedback_reviewed?: boolean;
+}
+
+// Screenshot analysis result from Claude Vision
+export interface ScreenshotAnalysis {
+  symbol: string | null;
+  timeframe: string | null;
+  trend: 'bullish' | 'bearish' | 'sideways';
+  levels: {
+    support: number[];
+    resistance: number[];
+  };
+  pattern: string | null;
+  candlestickPatterns: string[];
+  indicators: string[];
+  ltpAssessment: {
+    level: { compliant: boolean; reason: string };
+    trend: { compliant: boolean; reason: string };
+    patience: { compliant: boolean; reason: string };
+  };
+  setupType: string;
+  riskLevel: 'conservative' | 'moderate' | 'aggressive';
+  analysis: string;
+  confidence: number;
+  suggestedDirection: 'long' | 'short' | null;
+  entryPrice: number | null;
+  stopLoss: number | null;
+  targets: number[];
+}
+
+// AI-generated trade feedback
+export interface TradeFeedback {
+  overallGrade: 'A' | 'B' | 'C' | 'D' | 'F';
+  entryAnalysis: {
+    score: number;
+    feedback: string;
+  };
+  exitAnalysis: {
+    score: number;
+    feedback: string;
+  };
+  ruleAdherence: {
+    score: number;
+    feedback: string;
+  };
+  keyLesson: string;
+  improvement: string;
+  pattern?: string;
+  encouragement?: string;
 }
 
 export interface TradeStats {
@@ -484,4 +565,29 @@ export interface CurriculumLesson {
   transcript: string;
   key_takeaways: string[];
   quiz_questions?: QuizQuestion[];
+}
+
+// ============================================
+// Practice Scenario Types
+// ============================================
+
+export interface PracticeScenario {
+  id: string;
+  title: string;
+  description: string;
+  symbol: string;
+  scenario_type: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  correct_action: 'long' | 'short' | 'wait';
+  ltp_analysis: {
+    level: { score: number; reason: string };
+    trend: { score: number; reason: string };
+    patience: { score: number; reason: string };
+  };
+  explanation: string;
+  key_levels: Array<{ type: string; price: number; label: string }>;
+  tags: string[];
+  focus_area?: string;
+  related_lesson_slug?: string;
+  created_at?: string;
 }

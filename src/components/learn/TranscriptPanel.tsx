@@ -34,13 +34,13 @@ export function TranscriptPanel({
   const activeSegmentRef = useRef<HTMLDivElement>(null);
 
   // Parse transcript into paragraphs if no segments provided
-  const parsedSegments = useMemo(() => {
+  const parsedSegments: TranscriptSegment[] = useMemo(() => {
     if (segments && segments.length > 0) {
       return segments;
     }
 
     // Split by double newlines or periods followed by newlines
-    const paragraphs = transcript
+    const paragraphs: TranscriptSegment[] = transcript
       .split(/\n\n+/)
       .filter(p => p.trim().length > 0)
       .map(text => ({ text: text.trim() }));

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { usePageContext } from '@/components/ai';
 import { Header } from '@/components/layout/header';
 import { PageShell, PageSection, Grid, LoadingState, ErrorState, SkeletonStats } from '@/components/layout/page-shell';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -66,6 +67,7 @@ interface DashboardData {
 
 export default function OverviewPage() {
   const router = useRouter();
+  usePageContext();
   const [data, setData] = useState<DashboardData>({
     user: null,
     stats: emptyStats,
@@ -88,14 +90,26 @@ export default function OverviewPage() {
           fetch('/api/trades/stats'),
           fetch('/api/leaderboard?limit=5'),
           fetch('/api/achievements?latest=true'),
-          fetch('/api/progress'),
+          fetch('/api/learning/v2/progress'),
         ]);
 
         const userData = userRes.ok ? await userRes.json() : { user: null };
         const statsData = statsRes.ok ? await statsRes.json() : { stats: emptyStats };
         const leaderboardData = leaderboardRes.ok ? await leaderboardRes.json() : { entries: [] };
         const achievementsData = achievementsRes.ok ? await achievementsRes.json() : { achievements: [] };
-        const progressData = progressRes.ok ? await progressRes.json() : { overall: 0, modules: [], streak: 0 };
+        const progressRaw = progressRes.ok ? await progressRes.json() : null;
+
+        // Transform v2 progress data to expected shape
+        type ModuleProgressData = { completed: number; total: number };
+        const modulesRaw = (progressRaw?.modules || {}) as Record<string, ModuleProgressData>;
+        const progressData = {
+          overall: progressRaw?.overall?.progressPercent || 0,
+          modules: Object.entries(modulesRaw).map(([id, data]) => ({
+            name: id.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            progress: data.total > 0 ? Math.round((data.completed / data.total) * 100) : 0,
+          })),
+          streak: progressRaw?.streak?.current || 0,
+        };
 
         // Find the most recently unlocked achievement
         const earnedAchievements = (achievementsData.achievements || []).filter(

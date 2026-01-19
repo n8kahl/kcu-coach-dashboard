@@ -119,7 +119,7 @@ function verifyWebhookSignature(
  * Handle user.created webhook
  */
 async function handleUserCreated(payload: ThinkificUserPayload) {
-  console.log('Thinkific user.created:', payload.email);
+  console.log('Thinkific user.created: user_id=', payload.id);
 
   // If external_id is set, link to existing KCU user
   if (payload.external_id) {
@@ -153,7 +153,7 @@ async function handleUserCreated(payload: ThinkificUserPayload) {
  * Handle enrollment.created webhook
  */
 async function handleEnrollmentCreated(payload: ThinkificEnrollmentPayload) {
-  console.log('Thinkific enrollment.created:', payload.user_email, payload.course_name);
+  console.log('Thinkific enrollment.created: user_id=', payload.user_id, 'course=', payload.course_name);
 
   // Store enrollment
   await supabaseAdmin.from('thinkific_enrollments').upsert({
@@ -194,7 +194,7 @@ async function handleEnrollmentCreated(payload: ThinkificEnrollmentPayload) {
  * Handle enrollment.progress webhook
  */
 async function handleEnrollmentProgress(payload: ThinkificEnrollmentPayload) {
-  console.log('Thinkific enrollment.progress:', payload.user_email, payload.percentage_completed);
+  console.log('Thinkific enrollment.progress: user_id=', payload.user_id, 'progress=', payload.percentage_completed);
 
   // Update enrollment progress
   await supabaseAdmin.from('thinkific_enrollments').upsert({
@@ -214,7 +214,7 @@ async function handleEnrollmentProgress(payload: ThinkificEnrollmentPayload) {
  * Handle lesson.completed webhook
  */
 async function handleLessonCompleted(payload: ThinkificLessonCompletePayload) {
-  console.log('Thinkific lesson.completed:', payload.user_email, payload.content_name);
+  console.log('Thinkific lesson.completed: user_id=', payload.user_id, 'content=', payload.content_name);
 
   // Store lesson completion
   await supabaseAdmin.from('thinkific_lesson_completions').insert({
@@ -257,7 +257,7 @@ async function handleLessonCompleted(payload: ThinkificLessonCompletePayload) {
  * Handle course.completed webhook
  */
 async function handleCourseCompleted(payload: ThinkificCourseCompletePayload) {
-  console.log('Thinkific course.completed:', payload.user_email, payload.course_name);
+  console.log('Thinkific course.completed: user_id=', payload.user_id, 'course=', payload.course_name);
 
   // Update enrollment as completed
   await supabaseAdmin.from('thinkific_enrollments').update({
@@ -326,19 +326,63 @@ async function checkLessonAchievements(userId: string, lesson: ThinkificLessonCo
 // Main Webhook Handler
 // ============================================
 
+/**
+ * Redact sensitive fields from webhook payload for logging
+ */
+function redactSensitiveData(payload: Record<string, unknown>): Record<string, unknown> {
+  const redacted = { ...payload };
+  const sensitiveFields = ['email', 'user_email', 'first_name', 'last_name'];
+
+  for (const field of sensitiveFields) {
+    if (field in redacted) {
+      redacted[field] = '[REDACTED]';
+    }
+  }
+
+  // Handle nested payload object
+  if (redacted.payload && typeof redacted.payload === 'object') {
+    redacted.payload = redactSensitiveData(redacted.payload as Record<string, unknown>);
+  }
+
+  return redacted;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const headersList = await headers();
     const signature = headersList.get('x-thinkific-hmac-sha256');
     const rawBody = await request.text();
 
-    // Verify webhook signature if API key is configured
-    const apiKey = process.env.THINKIFIC_API_KEY;
-    if (apiKey && signature) {
-      const isValid = verifyWebhookSignature(rawBody, signature, apiKey);
+    // Fail-closed webhook signature verification
+    // In production: REQUIRE secret + signature and verify HMAC
+    const webhookSecret = process.env.THINKIFIC_WEBHOOK_SECRET;
+    const isDevelopment = process.env.NODE_ENV === 'development';
+
+    if (!isDevelopment) {
+      // Production: fail-closed - reject if missing secret or signature
+      if (!webhookSecret) {
+        console.error('THINKIFIC_WEBHOOK_SECRET not configured');
+        return NextResponse.json({ error: 'Webhook secret not configured' }, { status: 500 });
+      }
+      if (!signature) {
+        console.error('Missing webhook signature header');
+        return NextResponse.json({ error: 'Missing signature' }, { status: 401 });
+      }
+      const isValid = verifyWebhookSignature(rawBody, signature, webhookSecret);
       if (!isValid) {
         console.error('Invalid webhook signature');
         return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+      }
+    } else {
+      // Development: verify if credentials present, warn otherwise
+      if (webhookSecret && signature) {
+        const isValid = verifyWebhookSignature(rawBody, signature, webhookSecret);
+        if (!isValid) {
+          console.error('Invalid webhook signature');
+          return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+        }
+      } else if (!webhookSecret) {
+        console.warn('THINKIFIC_WEBHOOK_SECRET not set - skipping signature verification (dev only)');
       }
     }
 
@@ -374,10 +418,10 @@ export async function POST(request: NextRequest) {
         console.log(`Unhandled webhook event: ${eventType}`);
     }
 
-    // Log webhook for debugging
+    // Log webhook for debugging (with sensitive data redacted)
     await supabaseAdmin.from('thinkific_webhook_logs').insert({
       event_type: eventType,
-      payload: webhook,
+      payload: redactSensitiveData(webhook as unknown as Record<string, unknown>),
       received_at: new Date().toISOString(),
     });
 
