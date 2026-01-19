@@ -203,6 +203,25 @@ export interface MTFAnalysis {
   conflictingTimeframes: string[];
 }
 
+// Economic Calendar Event
+export interface EconomicEvent {
+  date: string;
+  time: string;
+  event: string;
+  impact: 'high' | 'medium' | 'low';
+  forecast?: string;
+  previous?: string;
+}
+
+// Earnings Event
+export interface EarningsEvent {
+  symbol: string;
+  date: string;
+  time: 'bmo' | 'amc' | 'unknown'; // Before Market Open, After Market Close
+  epsEstimate?: number;
+  revenueEstimate?: number;
+}
+
 export interface LTPAnalysis {
   symbol: string;
   timestamp: string;
@@ -215,6 +234,10 @@ export interface LTPAnalysis {
     vwap: number | null;
     orbHigh: number | null;
     orbLow: number | null;
+    ema9: number | null;
+    ema21: number | null;
+    sma200: number | null;
+    priceVsSma200: 'above' | 'below' | 'at' | null;
     pricePosition: 'above_vwap' | 'below_vwap' | 'at_vwap';
     levelProximity: 'at_level' | 'near_level' | 'between_levels';
     levelScore: number; // 0-100
@@ -1491,6 +1514,15 @@ class MarketDataService {
         const vwap = keyLevels.find(l => l.type === 'vwap')?.price || quote.vwap || null;
         const orbHigh = keyLevels.find(l => l.type === 'orb_high')?.price || null;
         const orbLow = keyLevels.find(l => l.type === 'orb_low')?.price || null;
+        const ema9 = keyLevels.find(l => l.type === 'ema9')?.price || null;
+        const ema21 = keyLevels.find(l => l.type === 'ema21')?.price || null;
+        const sma200 = keyLevels.find(l => l.type === 'sma200')?.price || null;
+
+        // Price position relative to SMA200 (major trend indicator)
+        const threshold200 = currentPrice * 0.002; // 0.2% threshold
+        const priceVsSma200: 'above' | 'below' | 'at' | null = sma200 === null ? null :
+          currentPrice > sma200 + threshold200 ? 'above' :
+          currentPrice < sma200 - threshold200 ? 'below' : 'at';
 
         // Price position relative to VWAP
         const pricePosition: 'above_vwap' | 'below_vwap' | 'at_vwap' =
@@ -1585,6 +1617,10 @@ class MarketDataService {
             vwap,
             orbHigh,
             orbLow,
+            ema9,
+            ema21,
+            sma200,
+            priceVsSma200,
             pricePosition,
             levelProximity,
             levelScore,
@@ -1611,6 +1647,196 @@ class MarketDataService {
     );
 
     return result;
+  }
+
+  // ============================================
+  // Economic Calendar & Earnings Methods
+  // ============================================
+
+  /**
+   * Get upcoming high-impact economic events
+   * Note: This uses a combination of hardcoded major events and API data when available
+   */
+  async getUpcomingEconomicEvents(daysAhead: number = 7): Promise<EconomicEvent[]> {
+    const cacheKey = `econ:upcoming:${daysAhead}`;
+
+    const result = await this.getCached<EconomicEvent[]>(
+      cacheKey,
+      CACHE_TTL.levels, // Cache for 5 minutes
+      async () => {
+        const events: EconomicEvent[] = [];
+        const today = new Date();
+        const endDate = new Date(today);
+        endDate.setDate(today.getDate() + daysAhead);
+
+        // Major recurring economic events (approximate schedules)
+        // FOMC meetings are typically every 6 weeks
+        // CPI is released around the 10th-13th of each month
+        // NFP is first Friday of each month
+        // Retail Sales is around 15th of each month
+
+        const currentMonth = today.getMonth();
+        const currentYear = today.getFullYear();
+
+        // Check for CPI (usually 2nd week of month)
+        const cpiDate = new Date(currentYear, currentMonth, 12);
+        if (cpiDate >= today && cpiDate <= endDate) {
+          events.push({
+            date: cpiDate.toISOString().split('T')[0],
+            time: '08:30 ET',
+            event: 'CPI (Consumer Price Index)',
+            impact: 'high',
+          });
+        }
+
+        // Check for NFP (first Friday)
+        const firstDay = new Date(currentYear, currentMonth, 1);
+        const firstFriday = new Date(currentYear, currentMonth, 1 + ((5 - firstDay.getDay() + 7) % 7));
+        if (firstFriday >= today && firstFriday <= endDate) {
+          events.push({
+            date: firstFriday.toISOString().split('T')[0],
+            time: '08:30 ET',
+            event: 'Non-Farm Payrolls (NFP)',
+            impact: 'high',
+          });
+        }
+
+        // Check for Retail Sales (mid-month)
+        const retailDate = new Date(currentYear, currentMonth, 15);
+        if (retailDate >= today && retailDate <= endDate) {
+          events.push({
+            date: retailDate.toISOString().split('T')[0],
+            time: '08:30 ET',
+            event: 'Retail Sales',
+            impact: 'medium',
+          });
+        }
+
+        // FOMC dates for 2024-2025 (known schedule)
+        const fomcDates = [
+          '2024-01-31', '2024-03-20', '2024-05-01', '2024-06-12',
+          '2024-07-31', '2024-09-18', '2024-11-07', '2024-12-18',
+          '2025-01-29', '2025-03-19', '2025-05-07', '2025-06-18',
+          '2025-07-30', '2025-09-17', '2025-11-05', '2025-12-17',
+          '2026-01-28', '2026-03-18',
+        ];
+
+        for (const fomcDate of fomcDates) {
+          const fomc = new Date(fomcDate);
+          if (fomc >= today && fomc <= endDate) {
+            events.push({
+              date: fomcDate,
+              time: '14:00 ET',
+              event: 'FOMC Rate Decision',
+              impact: 'high',
+            });
+          }
+        }
+
+        // Sort by date
+        events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+        return events;
+      }
+    );
+
+    return result || [];
+  }
+
+  /**
+   * Get earnings calendar for major stocks (SPY components, etc.)
+   * Uses Polygon's ticker details endpoint for earnings dates
+   */
+  async getUpcomingEarnings(tickers: string[], daysAhead: number = 7): Promise<EarningsEvent[]> {
+    const cacheKey = `earnings:${tickers.join(',')}:${daysAhead}`;
+
+    const result = await this.getCached<EarningsEvent[]>(
+      cacheKey,
+      CACHE_TTL.levels,
+      async () => {
+        const earnings: EarningsEvent[] = [];
+        const today = new Date();
+        const endDate = new Date(today);
+        endDate.setDate(today.getDate() + daysAhead);
+
+        // Fetch ticker details in parallel to get earnings dates
+        const promises = tickers.map(async (ticker) => {
+          interface TickerDetails {
+            results?: {
+              ticker?: string;
+              next_earnings_date?: string;
+            };
+          }
+
+          const data = await this.fetch<TickerDetails>(`/v3/reference/tickers/${ticker.toUpperCase()}`);
+
+          if (data?.results?.next_earnings_date) {
+            const earningsDate = new Date(data.results.next_earnings_date);
+            if (earningsDate >= today && earningsDate <= endDate) {
+              earnings.push({
+                symbol: ticker.toUpperCase(),
+                date: data.results.next_earnings_date,
+                time: 'unknown',
+              });
+            }
+          }
+        });
+
+        await Promise.all(promises);
+
+        // Sort by date
+        earnings.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+        return earnings;
+      }
+    );
+
+    return result || [];
+  }
+
+  /**
+   * Check if there are high-impact events today
+   */
+  async hasHighImpactEventToday(): Promise<{ hasEvent: boolean; events: EconomicEvent[] }> {
+    const events = await this.getUpcomingEconomicEvents(1);
+    const today = new Date().toISOString().split('T')[0];
+    const todayEvents = events.filter(e => e.date === today && e.impact === 'high');
+
+    return {
+      hasEvent: todayEvents.length > 0,
+      events: todayEvents,
+    };
+  }
+
+  /**
+   * Get market context summary including economic events
+   */
+  async getMarketContext(): Promise<{
+    marketStatus: MarketStatus;
+    vix: number;
+    volatilityLevel: 'low' | 'normal' | 'high' | 'extreme';
+    upcomingEvents: EconomicEvent[];
+    highImpactToday: boolean;
+  }> {
+    const [marketStatus, vix, events, todayCheck] = await Promise.all([
+      this.getMarketStatus(),
+      this.getVIX(),
+      this.getUpcomingEconomicEvents(7),
+      this.hasHighImpactEventToday(),
+    ]);
+
+    const volatilityLevel =
+      vix < 15 ? 'low' :
+      vix < 20 ? 'normal' :
+      vix < 30 ? 'high' : 'extreme';
+
+    return {
+      marketStatus,
+      vix,
+      volatilityLevel,
+      upcomingEvents: events,
+      highImpactToday: todayCheck.hasEvent,
+    };
   }
 }
 
@@ -1707,6 +1933,18 @@ export async function getMTFAnalysis(ticker: string): Promise<MTFAnalysis | null
 
 export async function getLTPAnalysis(ticker: string): Promise<LTPAnalysis | null> {
   return marketDataService.getLTPAnalysis(ticker);
+}
+
+export async function getUpcomingEconomicEvents(daysAhead?: number): Promise<EconomicEvent[]> {
+  return marketDataService.getUpcomingEconomicEvents(daysAhead);
+}
+
+export async function getUpcomingEarnings(tickers: string[], daysAhead?: number): Promise<EarningsEvent[]> {
+  return marketDataService.getUpcomingEarnings(tickers, daysAhead);
+}
+
+export async function getMarketContext() {
+  return marketDataService.getMarketContext();
 }
 
 export default marketDataService;

@@ -262,12 +262,11 @@ export async function POST(request: Request): Promise<Response> {
     let liveMarketContext = '';
     if (marketDataService.isConfigured()) {
       try {
-        // Get comprehensive LTP analysis for SPY and QQQ
-        const [spyLTP, qqqLTP, marketStatus, vix] = await Promise.all([
+        // Get comprehensive LTP analysis for SPY and QQQ plus economic events
+        const [spyLTP, qqqLTP, marketContext] = await Promise.all([
           marketDataService.getLTPAnalysis('SPY'),
           marketDataService.getLTPAnalysis('QQQ'),
-          marketDataService.getMarketStatus(),
-          marketDataService.getVIX(),
+          marketDataService.getMarketContext(),
         ]);
 
         const formatMTFTrends = (mtf: { timeframes: Array<{ timeframe: string; trend: string; ema9: number; ema21: number }> } | null) => {
@@ -281,11 +280,13 @@ export async function POST(request: Request): Promise<Response> {
           return `${symbol}: $${ltp.trend.mtf.currentPrice.toFixed(2)}
   LTP Grade: ${ltp.grade} (${ltp.setupQuality}) - Confluence: ${ltp.confluenceScore}%
 
-  LEVELS (Score: ${ltp.levels.levelScore}%):
-    Position: ${ltp.levels.pricePosition.replace('_', ' ')} | Proximity: ${ltp.levels.levelProximity.replace('_', ' ')}
+  KEY LEVELS (Score: ${ltp.levels.levelScore}%):
+    Position: ${ltp.levels.pricePosition.replace(/_/g, ' ')} | Proximity: ${ltp.levels.levelProximity.replace(/_/g, ' ')}
     VWAP: ${ltp.levels.vwap ? '$' + ltp.levels.vwap.toFixed(2) : 'N/A'}
     PDH: ${ltp.levels.pdh ? '$' + ltp.levels.pdh.toFixed(2) : 'N/A'} | PDL: ${ltp.levels.pdl ? '$' + ltp.levels.pdl.toFixed(2) : 'N/A'}
     ORB High: ${ltp.levels.orbHigh ? '$' + ltp.levels.orbHigh.toFixed(2) : 'N/A'} | ORB Low: ${ltp.levels.orbLow ? '$' + ltp.levels.orbLow.toFixed(2) : 'N/A'}
+    EMA9: ${ltp.levels.ema9 ? '$' + ltp.levels.ema9.toFixed(2) : 'N/A'} | EMA21: ${ltp.levels.ema21 ? '$' + ltp.levels.ema21.toFixed(2) : 'N/A'}
+    SMA200: ${ltp.levels.sma200 ? '$' + ltp.levels.sma200.toFixed(2) + ' (Price ' + (ltp.levels.priceVsSma200 || 'N/A') + ')' : 'N/A'}
 
   TREND (Score: ${ltp.trend.trendScore}%):
     Daily: ${ltp.trend.dailyTrend} | Intraday Bias: ${ltp.trend.intradayTrend}
@@ -301,16 +302,28 @@ export async function POST(request: Request): Promise<Response> {
   RECOMMENDATION: ${ltp.recommendation}`;
         };
 
+        // Format economic events
+        const formatEconomicEvents = () => {
+          if (marketContext.upcomingEvents.length === 0) return 'No major economic events in next 7 days.';
+          return marketContext.upcomingEvents.slice(0, 5).map(e =>
+            `- ${e.date} ${e.time}: ${e.event} (${e.impact.toUpperCase()} impact)`
+          ).join('\n');
+        };
+
         liveMarketContext = `
 === LIVE LTP ANALYSIS (Real-Time from Massive.com) ===
-Market Status: ${marketStatus.market} ${marketStatus.earlyHours ? '(Pre-market)' : marketStatus.afterHours ? '(After hours)' : ''}
-VIX: ${vix.toFixed(2)} ${vix < 15 ? '(Low volatility - tight ranges expected)' : vix > 25 ? '(High volatility - wide swings likely)' : '(Normal volatility)'}
+Market Status: ${marketContext.marketStatus.market} ${marketContext.marketStatus.earlyHours ? '(Pre-market)' : marketContext.marketStatus.afterHours ? '(After hours)' : ''}
+VIX: ${marketContext.vix.toFixed(2)} (${marketContext.volatilityLevel} volatility)
+${marketContext.highImpactToday ? '⚠️ HIGH-IMPACT EVENT TODAY - Trade with caution!' : ''}
 
 ${formatLTPAnalysis(spyLTP, 'SPY')}
 
 ${formatLTPAnalysis(qqqLTP, 'QQQ')}
 
-Use this LTP analysis to answer questions about setups, levels, trends, and trade recommendations. Always reference specific data when discussing market conditions.`;
+=== ECONOMIC CALENDAR ===
+${formatEconomicEvents()}
+
+Use this LTP analysis to answer questions about setups, levels, trends, and trade recommendations. Always reference specific data (price, EMAs, SMA200, VWAP, levels) when discussing market conditions. Warn users about trading during high-impact economic events.`;
       } catch (marketError) {
         logger.warn('Live market data fetch failed', {
           error: marketError instanceof Error ? marketError.message : String(marketError),
