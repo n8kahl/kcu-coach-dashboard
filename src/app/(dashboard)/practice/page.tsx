@@ -782,7 +782,7 @@ export default function PracticePage() {
                     </select>
                   </div>
                   <Button
-                    variant="accent"
+                    variant="primary"
                     size="lg"
                     className="w-full"
                     onClick={generateAIScenario}

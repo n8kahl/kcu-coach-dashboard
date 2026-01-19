@@ -350,7 +350,7 @@ export function ChartGrid({
       const style = LEVEL_STYLES[level.type] || LEVEL_STYLES.support;
       const lineSeries = chart.addLineSeries({
         color: style.color,
-        lineWidth: style.lineWidth,
+        lineWidth: style.lineWidth as 1 | 2 | 3 | 4,
         lineStyle: style.lineStyle === 'dashed' ? 1 : style.lineStyle === 'dotted' ? 2 : 0,
         priceLineVisible: false,
         lastValueVisible: false,
