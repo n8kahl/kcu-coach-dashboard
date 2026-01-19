@@ -83,7 +83,8 @@ interface PracticeChartProps {
   initialCandleCount?: number; // How many candles to show initially in replay mode
 }
 
-// Professional trading chart color scheme
+// KCU Professional trading chart color scheme
+// Following Somesh's methodology: EMA9 = Green, EMA21 = Red
 const CHART_COLORS = {
   background: '#0a0a0a',
   backgroundAlt: '#111111',
@@ -99,21 +100,27 @@ const CHART_COLORS = {
   // Volume colors
   volumeUp: 'rgba(16, 185, 129, 0.35)',
   volumeDown: 'rgba(239, 68, 68, 0.35)',
-  // Indicator colors
-  vwap: '#8b5cf6', // Purple
-  vwapBand1: 'rgba(139, 92, 246, 0.15)',
-  vwapBand2: 'rgba(139, 92, 246, 0.08)',
-  ema9: '#3b82f6', // Blue
-  ema21: '#f97316', // Orange
-  ema50: '#eab308', // Yellow
-  sma200: '#ffffff', // White
-  // EMA Ribbon
-  ribbonBullish: 'rgba(16, 185, 129, 0.2)',
-  ribbonBearish: 'rgba(239, 68, 68, 0.2)',
+  // Indicator colors - KCU Methodology
+  vwap: '#8b5cf6', // Purple - VWAP
+  vwapBand1: 'rgba(139, 92, 246, 0.3)', // +/- 1 SD band
+  vwapBand2: 'rgba(139, 92, 246, 0.15)', // +/- 2 SD band
+  ema9: '#22c55e', // GREEN - Fast EMA (KCU standard)
+  ema21: '#ef4444', // RED - Slow EMA (KCU standard)
+  ema50: '#eab308', // Yellow - 50 EMA
+  sma200: '#ffffff', // White - 200 SMA
+  // EMA Ribbon / Ripster Clouds
+  ribbonBullish: 'rgba(34, 197, 94, 0.2)', // Green cloud when EMA8 > EMA21
+  ribbonBearish: 'rgba(239, 68, 68, 0.2)', // Red cloud when EMA8 < EMA21
   ribbonNeutral: 'rgba(107, 114, 128, 0.1)',
   // Level colors
   support: '#10b981',
   resistance: '#ef4444',
+  // Pre-market levels
+  premarketHigh: '#ec4899', // Pink
+  premarketLow: '#ec4899', // Pink
+  // ORB levels
+  orbHigh: '#06b6d4', // Cyan
+  orbLow: '#06b6d4', // Cyan
   // Volume Profile
   vpBuy: 'rgba(16, 185, 129, 0.6)',
   vpSell: 'rgba(239, 68, 68, 0.6)',
@@ -129,22 +136,48 @@ const LEVEL_COLORS: Record<string, string> = {
   resistance: CHART_COLORS.resistance,
   vwap: CHART_COLORS.vwap,
   ema: CHART_COLORS.ema9,
+  ema9: CHART_COLORS.ema9,
+  ema21: CHART_COLORS.ema21,
   daily_support: CHART_COLORS.support,
   daily_resistance: CHART_COLORS.resistance,
   demand_zone: CHART_COLORS.support,
   supply_zone: CHART_COLORS.resistance,
-  premarket_high: '#ec4899',
-  premarket_low: '#ec4899',
-  pdh: '#fbbf24',
-  pdl: '#fbbf24',
+  premarket_high: CHART_COLORS.premarketHigh,
+  premarket_low: CHART_COLORS.premarketLow,
+  pm_high: CHART_COLORS.premarketHigh,
+  pm_low: CHART_COLORS.premarketLow,
+  pdh: '#fbbf24', // Previous Day High - Amber
+  pdl: '#fbbf24', // Previous Day Low - Amber
+  previous_day_high: '#fbbf24',
+  previous_day_low: '#fbbf24',
   gap_high: '#06b6d4',
   gap_low: '#06b6d4',
-  orb_high: CHART_COLORS.support,
-  orb_low: CHART_COLORS.resistance,
+  gap_top: '#06b6d4',
+  previous_close: '#a855f7', // Purple for gap fill targets
+  orb_high: CHART_COLORS.orbHigh,
+  orb_low: CHART_COLORS.orbLow,
+  opening_range_high: CHART_COLORS.orbHigh,
+  opening_range_low: CHART_COLORS.orbLow,
   round_number: '#6b7280',
   weekly_high: '#3b82f6',
   weekly_low: '#3b82f6',
-  sma_200: '#ffffff',
+  sma_200: CHART_COLORS.sma200,
+  sma200: CHART_COLORS.sma200,
+  neckline: '#f97316', // Pattern necklines
+  double_bottom: CHART_COLORS.support,
+  fib_50: '#a78bfa', // Fibonacci levels
+  extension: '#a78bfa',
+  max_pain: '#f59e0b', // Options max pain
+  call_wall: CHART_COLORS.resistance,
+  put_wall: CHART_COLORS.support,
+  liquidity: '#ef4444',
+  sweep_high: '#ef4444',
+  trap_low: CHART_COLORS.support,
+  broken_resistance: CHART_COLORS.support, // Broken R becomes S
+  breakout_high: CHART_COLORS.resistance,
+  spike_high: '#f97316',
+  range_high: CHART_COLORS.resistance,
+  range_low: CHART_COLORS.support,
   default: CHART_COLORS.text,
 };
 
@@ -155,8 +188,10 @@ interface IndicatorSettings {
   showVWAPBands: boolean;
   showEMA9: boolean;
   showEMA21: boolean;
-  showEMARibbon: boolean;
+  showEMARibbon: boolean; // Ripster Clouds (EMA 8-21 fill)
   showVolumeProfile: boolean;
+  showORBLevels: boolean; // Opening Range Breakout levels
+  showPremarketLevels: boolean; // Pre-market high/low
 }
 
 export function PracticeChart({
@@ -193,8 +228,10 @@ export function PracticeChart({
     showVWAPBands: true,
     showEMA9: true,
     showEMA21: true,
-    showEMARibbon: false,
+    showEMARibbon: true, // Ripster Clouds - enabled by default for KCU
     showVolumeProfile: false,
+    showORBLevels: true, // ORB levels - enabled by default
+    showPremarketLevels: true, // Pre-market levels - enabled by default
   });
 
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
