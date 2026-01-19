@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { usePageContext } from '@/components/ai';
 import { Header } from '@/components/layout/header';
 import { PageShell } from '@/components/layout/page-shell';
 import { Card, CardContent } from '@/components/ui/card';
@@ -70,6 +71,7 @@ interface LearningStats {
 type ModuleProgress = Record<string, { completed: number; total: number }>;
 
 export default function LearningPage() {
+  usePageContext();
   const [modules, setModules] = useState<LearningModule[]>([]);
   const [stats, setStats] = useState<LearningStats | null>(null);
   const [dataSource, setDataSource] = useState<'thinkific' | 'local'>('local');

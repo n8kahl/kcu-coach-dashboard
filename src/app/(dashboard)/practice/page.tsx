@@ -12,6 +12,7 @@ import { PracticeChart } from '@/components/practice/practice-chart';
 import { ChartGrid } from '@/components/practice/ChartGrid';
 import { DailyChallenges } from '@/components/practice/DailyChallenge';
 import { cn } from '@/lib/utils';
+import { usePageContext } from '@/components/ai';
 import {
   Target,
   TrendingUp,
@@ -171,6 +172,9 @@ const PRACTICE_MODES = [
 ];
 
 export default function PracticePage() {
+  // AI Context - update page context
+  usePageContext();
+
   // Core state
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioDetail | null>(null);
