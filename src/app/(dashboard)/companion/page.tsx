@@ -763,7 +763,7 @@ function TopControlBar({
       <div className="flex items-center justify-between">
         {/* LEFT: Market Indices */}
         <div className="flex items-center gap-4">
-          {marketStatus ? (
+          {marketStatus?.spy && marketStatus?.qqq ? (
             <>
               <MarketTicker symbol="SPY" price={marketStatus.spy.price} change={marketStatus.spy.change} />
               <MarketTicker symbol="QQQ" price={marketStatus.qqq.price} change={marketStatus.qqq.change} />

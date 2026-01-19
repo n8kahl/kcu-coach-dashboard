@@ -664,3 +664,176 @@ export function calculateRMultiple(
 
   return pnl / risk;
 }
+
+// ============================================================================
+// KCU CURRICULUM CONSTANTS - Used by AI Coaching
+// ============================================================================
+
+export const KCU_CORE_QUOTES = [
+  "Trade at KEY LEVELS with TREND alignment and PATIENCE candle confirmation.",
+  "The market will show you EXACTLY what it wants to do - be patient.",
+  "Don't chase. If you miss it, there's always another opportunity.",
+  "Levels are like magnets - price is drawn to them.",
+  "Your job is to wait for the setup, not create one.",
+  "Green candles near support = bullish patience. Red candles near resistance = bearish patience.",
+  "The 200 SMA is the line in the sand between bulls and bears.",
+  "Trade what you see, not what you think.",
+  "Size kills accounts. Risk management is everything.",
+  "One good trade a day is all you need.",
+];
+
+export const KCU_CORE_PRINCIPLES = {
+  ruleOfOnes: "One stock, one direction, one opportunity per day. Focus beats diversification.",
+  threeThingsAtLevels: ["Price action", "Volume", "Momentum"],
+  threeTypesOfTrading: ["Trend following", "Counter-trend (reversals)", "Range trading"],
+  nintyFivePercentRule: "95% of your profits come from 5% of your trades. Be patient for A+ setups.",
+  cFramework: "Conviction + Confirmation + Commitment = Consistent profits",
+};
+
+export const TIMEFRAME_RULES = [
+  { timeframe: "Weekly/Daily", description: "Identify the macro trend and key structural levels" },
+  { timeframe: "4-Hour", description: "Confirm intermediate trend and find significant S/R zones" },
+  { timeframe: "1-Hour", description: "Entry timeframe for swing trades" },
+  { timeframe: "15-Min", description: "Fine-tune entries and look for patience candles" },
+  { timeframe: "5-Min", description: "Scalp entries and precise timing" },
+];
+
+export const PATIENCE_CANDLE_TYPES = [
+  { type: "hammer", direction: "bullish", description: "Small body, long lower wick at support" },
+  { type: "inverted_hammer", direction: "bullish", description: "Small body, long upper wick at support (buyers testing)" },
+  { type: "bullish_engulfing", direction: "bullish", description: "Green candle fully engulfs prior red candle at support" },
+  { type: "morning_star", direction: "bullish", description: "Three-candle reversal pattern at support" },
+  { type: "shooting_star", direction: "bearish", description: "Small body, long upper wick at resistance" },
+  { type: "hanging_man", direction: "bearish", description: "Small body, long lower wick at resistance (sellers testing)" },
+  { type: "bearish_engulfing", direction: "bearish", description: "Red candle fully engulfs prior green candle at resistance" },
+  { type: "evening_star", direction: "bearish", description: "Three-candle reversal pattern at resistance" },
+];
+
+export const LEVEL_RULES = {
+  howToDraw: [
+    "Use the 4-hour chart to identify levels with 2+ touches",
+    "Look for areas where price has reversed multiple times",
+    "Draw from the body, not the wicks (wicks are 'noise')",
+    "Focus on levels that trapped traders (big moves away)",
+    "PDH/PDL are always important",
+    "VWAP acts as a dynamic level",
+  ],
+  keyPrinciple: "Levels are zones, not exact prices. Give yourself a buffer of 0.5-1%",
+};
+
+export const SMA_200_RULES = {
+  corePrinciple: "The 200 SMA separates bulls from bears",
+  rules: [
+    "Price above 200 SMA = bullish bias, favor calls/longs",
+    "Price below 200 SMA = bearish bias, favor puts/shorts",
+    "Price at 200 SMA = key decision zone, wait for confirmation",
+    "The slope of the 200 SMA tells you the macro trend",
+    "Bounces off 200 SMA are high-probability entries",
+  ],
+};
+
+export const PROFIT_TARGETS = [
+  "First target: 1R (risk equals reward) - take 50% off",
+  "Second target: 2R - take 25% more off",
+  "Runner: Let the remaining 25% ride with a trailing stop",
+];
+
+export const PROFIT_TAKING_METHOD = [
+  "Always have a plan BEFORE entering the trade",
+  "Scale out in thirds: 1/3 at 1R, 1/3 at 2R, let 1/3 run",
+  "Move stop to breakeven after first target hit",
+  "Never turn a winning trade into a loser",
+  "It's okay to take profits early if something doesn't feel right",
+];
+
+export const VOLUME_RULES = {
+  interpretations: [
+    { condition: "High volume at level", meaning: "Significant interest - watch for confirmation" },
+    { condition: "Low volume rally", meaning: "Weak move, likely to fail" },
+    { condition: "Volume spike on breakout", meaning: "Valid breakout, follow the move" },
+    { condition: "Volume climax", meaning: "Exhaustion - potential reversal" },
+    { condition: "Declining volume in trend", meaning: "Trend weakening, be cautious" },
+  ],
+};
+
+export const MOMENTUM_RULES = {
+  strongMomentum: [
+    "Wide-range candles",
+    "Consecutive green/red candles",
+    "Price staying at top/bottom of range",
+    "EMAs spreading apart",
+  ],
+  weakMomentum: [
+    "Small-range (doji) candles",
+    "Mixed candle colors",
+    "Wicks getting longer",
+    "EMAs converging",
+  ],
+};
+
+export const GAP_STRATEGY = {
+  gapDown: "Wait for break of pre-market low. If reclaims = CALLS",
+  gapUp: "Wait for break of pre-market high. If fails = PUTS",
+  whyItWorks: "Gaps trap traders. The 'suckers' who chase get squeezed when price reverses.",
+};
+
+export const ORB_RULES = {
+  definition: "Opening Range Breakout - the high and low of the first 15-30 minutes of trading",
+  uses: [
+    "Breakout above ORB high = bullish bias",
+    "Breakdown below ORB low = bearish bias",
+    "ORB range defines the day's initial value area",
+    "Failed ORB breakouts are high-probability reversals",
+  ],
+};
+
+export const DYNAMITE_LEVELS = {
+  definition: "DYNAMITE = Day's low, Yesterday's high/low, Next day's open, All-time highs/lows, Monthly levels, Intraday pivots, Technical levels, Earnings/events",
+  additionalLevels: "PDH, PDL, PWH, PWL, VWAP, 200 SMA, 50 SMA, 20 EMA, 9 EMA",
+  tradingRules: [
+    "More levels clustered = stronger zone",
+    "Trade the reaction, not the expectation",
+    "Wait for the candle to close before acting",
+  ],
+};
+
+export const REVERSAL_RULES = {
+  keyPrinciple: "Reversals require EXHAUSTION + LEVEL + PATIENCE CANDLE",
+  requirements: [
+    "Price at a significant support/resistance level",
+    "Signs of exhaustion (volume climax, extended move)",
+    "Patience candle confirmation on the timeframe you trade",
+    "Preferably against a bigger timeframe trend for counter-trend",
+  ],
+  successRate: "Lower probability than trend trades, but higher reward when they work",
+};
+
+export const RISK_MANAGEMENT = {
+  positionSizing: [
+    "Never risk more than 1-2% of your account on a single trade",
+    "Size based on your stop loss distance, not greed",
+    "If unsure, size DOWN not up",
+    "Bigger account = same percentage, bigger position",
+  ],
+  riskReward: [
+    "Minimum 2:1 risk/reward ratio for most trades",
+    "A+ setups can justify 3:1 or better",
+    "Never take a trade below 1:1 R/R",
+  ],
+  stopLossRules: [
+    "Stop goes on the OTHER side of the level/patience candle",
+    "Never move your stop further from entry",
+    "Mental stops will get you killed - always use hard stops",
+  ],
+};
+
+export const COMMON_MISTAKES = [
+  { mistake: "Chasing entries", solution: "Wait for pullbacks to levels" },
+  { mistake: "No stop loss", solution: "Always define risk before entry" },
+  { mistake: "Overtrading", solution: "Quality over quantity - 1-3 trades max per day" },
+  { mistake: "Moving stop further", solution: "Accept the loss, move on" },
+  { mistake: "Averaging down", solution: "Cut losers, add to winners" },
+  { mistake: "Trading FOMO", solution: "Missed trades are not losses" },
+  { mistake: "Not taking profits", solution: "Follow your profit plan religiously" },
+  { mistake: "Fighting the trend", solution: "Trade WITH the trend, not against it" },
+];
