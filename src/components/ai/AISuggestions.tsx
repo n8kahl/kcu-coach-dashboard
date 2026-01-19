@@ -160,7 +160,7 @@ export function AISuggestions({
     .slice(0, maxSuggestions);
 
   const handleDismiss = (id: string) => {
-    setDismissedIds((prev) => new Set([...prev, id]));
+    setDismissedIds((prev) => new Set([...Array.from(prev), id]));
   };
 
   const handleAction = (suggestion: AISuggestion) => {

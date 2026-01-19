@@ -7,23 +7,12 @@ import { CommandPalette } from '@/components/navigation/command-palette';
 import { ToastProvider } from '@/components/ui/toast';
 import { AIContextProvider } from '@/components/ai/AIContextProvider';
 import { AICommandCenter } from '@/components/ai/AICommandCenter';
+import { useMarketStatusBar } from '@/hooks/useMarketData';
 
-// Mock market data (would be fetched from API in production)
-const mockMarketData = {
-  spyPrice: 459.82,
-  spyChange: 0.47,
-  qqqPrice: 384.21,
-  qqqChange: 0.63,
-  vix: 15.47,
-  marketStatus: 'open' as const,
-  lastUpdated: '12:51 PM ET',
-};
+// Wrapper component to use hooks
+function DashboardContent({ children }: { children: React.ReactNode }) {
+  const { data: marketData, isLoading, isLive } = useMarketStatusBar();
 
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
   // Mock user data - would come from auth context in production
   const user = {
     id: 'mock-user-id',
@@ -39,35 +28,54 @@ export default function DashboardLayout({
   };
 
   return (
-    <ToastProvider>
-      <AIContextProvider user={user}>
-        <div className="min-h-screen bg-[var(--bg-primary)] bg-hex-pattern">
-          {/* Sidebar - Desktop */}
-          <div className="hidden lg:block">
-            <Sidebar user={user} />
-          </div>
-
-          {/* Mobile Sidebar */}
-          <MobileSidebar user={user} />
-
-          {/* Main Content */}
-          <div className="lg:ml-64">
-            {/* Market Status Bar */}
-            <MarketStatusBar {...mockMarketData} />
-
-            {/* Page Content with Premium Transitions */}
-            <PageTransition className="p-6">
-              {children}
-            </PageTransition>
-          </div>
-
-          {/* AI Command Center - Right Panel (replaces floating chat) */}
-          <AICommandCenter />
-
-          {/* Command Palette - Press Cmd+K to open */}
-          <CommandPalette />
+    <AIContextProvider user={user}>
+      <div className="min-h-screen bg-[var(--bg-primary)] bg-hex-pattern">
+        {/* Sidebar - Desktop */}
+        <div className="hidden lg:block">
+          <Sidebar user={user} />
         </div>
-      </AIContextProvider>
+
+        {/* Mobile Sidebar */}
+        <MobileSidebar user={user} />
+
+        {/* Main Content */}
+        <div className="lg:ml-64">
+          {/* Market Status Bar - Now with live data from Massive.com */}
+          <MarketStatusBar
+            spyPrice={marketData.spyPrice}
+            spyChange={marketData.spyChange}
+            qqqPrice={marketData.qqqPrice}
+            qqqChange={marketData.qqqChange}
+            vix={marketData.vix}
+            marketStatus={marketData.marketStatus}
+            lastUpdated={marketData.lastUpdated || 'Loading...'}
+            isLive={isLive}
+          />
+
+          {/* Page Content with Premium Transitions */}
+          <PageTransition className="p-6">
+            {children}
+          </PageTransition>
+        </div>
+
+        {/* AI Command Center - Right Panel (replaces floating chat) */}
+        <AICommandCenter />
+
+        {/* Command Palette - Press Cmd+K to open */}
+        <CommandPalette />
+      </div>
+    </AIContextProvider>
+  );
+}
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <ToastProvider>
+      <DashboardContent>{children}</DashboardContent>
     </ToastProvider>
   );
 }

@@ -106,6 +106,83 @@ export interface MarketStatus {
   serverTime?: string;
 }
 
+export interface IndexQuote {
+  symbol: string;
+  value: number;
+  change: number;
+  changePercent: number;
+  timestamp: string;
+}
+
+export interface TechnicalIndicator {
+  timestamp: number;
+  value: number;
+}
+
+export interface SMAResult {
+  values: TechnicalIndicator[];
+  period: number;
+}
+
+export interface EMAResult {
+  values: TechnicalIndicator[];
+  period: number;
+}
+
+export interface MACDResult {
+  values: Array<{
+    timestamp: number;
+    macd: number;
+    signal: number;
+    histogram: number;
+  }>;
+}
+
+export interface RSIResult {
+  values: TechnicalIndicator[];
+  period: number;
+}
+
+export interface KeyLevel {
+  type: 'support' | 'resistance' | 'pdh' | 'pdl' | 'vwap' | 'orb_high' | 'orb_low' | 'ema9' | 'ema21' | 'sma200';
+  price: number;
+  strength: number;
+  distance?: number;
+}
+
+export interface OptionsChain {
+  underlying: string;
+  expirationDate: string;
+  calls: OptionContract[];
+  puts: OptionContract[];
+}
+
+export interface OptionsFlow {
+  ticker: string;
+  timestamp: string;
+  type: 'call' | 'put';
+  strike: number;
+  expiration: string;
+  premium: number;
+  volume: number;
+  openInterest: number;
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+}
+
+export interface MarketSnapshot {
+  symbol: string;
+  quote: Quote;
+  keyLevels: KeyLevel[];
+  trend: 'bullish' | 'bearish' | 'neutral';
+  vwap: number;
+  patienceCandle?: {
+    timeframe: string;
+    forming: boolean;
+    confirmed: boolean;
+    direction: 'bullish' | 'bearish';
+  };
+}
+
 // Cache TTLs in seconds
 const CACHE_TTL = {
   quote: 5,
@@ -113,6 +190,9 @@ const CACHE_TTL = {
   aggregates: 60,
   levels: 300,
   marketStatus: 30,
+  indicators: 60,
+  options: 30,
+  index: 10,
 };
 
 // In-memory cache fallback
@@ -514,6 +594,660 @@ class MarketDataService {
       memoryCache.clear();
     }
   }
+
+  // ============================================
+  // Index Data Methods
+  // ============================================
+
+  /**
+   * Get index quote (VIX, SPX, NDX, DJI, etc.)
+   */
+  async getIndexQuote(index: string): Promise<IndexQuote | null> {
+    const symbol = index.toUpperCase();
+
+    // Map common index names to tickers
+    const indexMap: Record<string, string> = {
+      'VIX': 'I:VIX',
+      'SPX': 'I:SPX',
+      'NDX': 'I:NDX',
+      'DJI': 'I:DJI',
+      'RUT': 'I:RUT',
+    };
+
+    const ticker = indexMap[symbol] || `I:${symbol}`;
+
+    return this.getCached<IndexQuote>(
+      `index:${symbol}`,
+      CACHE_TTL.index,
+      async () => {
+        interface IndexResponse {
+          results?: {
+            T?: string;
+            v?: number;
+            o?: number;
+            c?: number;
+            h?: number;
+            l?: number;
+          };
+        }
+
+        // Use previous day bar for index values
+        const yesterday = this.getDateString(-1);
+        const data = await this.fetch<IndexResponse>(
+          `/v1/open-close/${ticker}/${yesterday}`
+        );
+
+        if (!data?.results) {
+          // Try snapshot endpoint as fallback
+          const snapshotData = await this.fetch<{ ticker?: { day?: { c: number; o: number } } }>(
+            `/v2/snapshot/locale/us/markets/stocks/tickers/${ticker}`
+          );
+
+          if (snapshotData?.ticker?.day) {
+            const d = snapshotData.ticker.day;
+            return {
+              symbol,
+              value: d.c || 0,
+              change: (d.c || 0) - (d.o || 0),
+              changePercent: d.o ? (((d.c || 0) - d.o) / d.o) * 100 : 0,
+              timestamp: new Date().toISOString(),
+            };
+          }
+          return null;
+        }
+
+        const r = data.results;
+        return {
+          symbol,
+          value: r.c || 0,
+          change: (r.c || 0) - (r.o || 0),
+          changePercent: r.o ? (((r.c || 0) - r.o) / r.o) * 100 : 0,
+          timestamp: new Date().toISOString(),
+        };
+      }
+    );
+  }
+
+  /**
+   * Get VIX (Volatility Index) value
+   */
+  async getVIX(): Promise<number> {
+    const vix = await this.getIndexQuote('VIX');
+    return vix?.value || 0;
+  }
+
+  // ============================================
+  // Technical Indicators
+  // ============================================
+
+  /**
+   * Get Simple Moving Average
+   */
+  async getSMA(ticker: string, period: number = 20, timespan: string = 'day', limit: number = 50): Promise<SMAResult | null> {
+    const symbol = ticker.toUpperCase();
+
+    return this.getCached<SMAResult>(
+      `sma:${symbol}:${period}:${timespan}:${limit}`,
+      CACHE_TTL.indicators,
+      async () => {
+        interface SMAResponse {
+          results?: {
+            values?: Array<{ timestamp: number; value: number }>;
+          };
+        }
+
+        const data = await this.fetch<SMAResponse>(
+          `/v1/indicators/sma/${symbol}`,
+          { timespan, 'window': period, limit, series_type: 'close' }
+        );
+
+        if (!data?.results?.values) return null;
+
+        return {
+          period,
+          values: data.results.values.map((v) => ({
+            timestamp: v.timestamp,
+            value: v.value,
+          })),
+        };
+      }
+    );
+  }
+
+  /**
+   * Get Exponential Moving Average
+   */
+  async getEMA(ticker: string, period: number = 9, timespan: string = 'day', limit: number = 50): Promise<EMAResult | null> {
+    const symbol = ticker.toUpperCase();
+
+    return this.getCached<EMAResult>(
+      `ema:${symbol}:${period}:${timespan}:${limit}`,
+      CACHE_TTL.indicators,
+      async () => {
+        interface EMAResponse {
+          results?: {
+            values?: Array<{ timestamp: number; value: number }>;
+          };
+        }
+
+        const data = await this.fetch<EMAResponse>(
+          `/v1/indicators/ema/${symbol}`,
+          { timespan, 'window': period, limit, series_type: 'close' }
+        );
+
+        if (!data?.results?.values) return null;
+
+        return {
+          period,
+          values: data.results.values.map((v) => ({
+            timestamp: v.timestamp,
+            value: v.value,
+          })),
+        };
+      }
+    );
+  }
+
+  /**
+   * Get MACD (Moving Average Convergence Divergence)
+   */
+  async getMACD(
+    ticker: string,
+    timespan: string = 'day',
+    shortWindow: number = 12,
+    longWindow: number = 26,
+    signalWindow: number = 9,
+    limit: number = 50
+  ): Promise<MACDResult | null> {
+    const symbol = ticker.toUpperCase();
+
+    return this.getCached<MACDResult>(
+      `macd:${symbol}:${timespan}:${shortWindow}:${longWindow}:${signalWindow}`,
+      CACHE_TTL.indicators,
+      async () => {
+        interface MACDResponse {
+          results?: {
+            values?: Array<{
+              timestamp: number;
+              value: number;
+              signal: number;
+              histogram: number;
+            }>;
+          };
+        }
+
+        const data = await this.fetch<MACDResponse>(
+          `/v1/indicators/macd/${symbol}`,
+          {
+            timespan,
+            short_window: shortWindow,
+            long_window: longWindow,
+            signal_window: signalWindow,
+            limit,
+            series_type: 'close',
+          }
+        );
+
+        if (!data?.results?.values) return null;
+
+        return {
+          values: data.results.values.map((v) => ({
+            timestamp: v.timestamp,
+            macd: v.value,
+            signal: v.signal,
+            histogram: v.histogram,
+          })),
+        };
+      }
+    );
+  }
+
+  /**
+   * Get RSI (Relative Strength Index)
+   */
+  async getRSI(ticker: string, period: number = 14, timespan: string = 'day', limit: number = 50): Promise<RSIResult | null> {
+    const symbol = ticker.toUpperCase();
+
+    return this.getCached<RSIResult>(
+      `rsi:${symbol}:${period}:${timespan}:${limit}`,
+      CACHE_TTL.indicators,
+      async () => {
+        interface RSIResponse {
+          results?: {
+            values?: Array<{ timestamp: number; value: number }>;
+          };
+        }
+
+        const data = await this.fetch<RSIResponse>(
+          `/v1/indicators/rsi/${symbol}`,
+          { timespan, 'window': period, limit, series_type: 'close' }
+        );
+
+        if (!data?.results?.values) return null;
+
+        return {
+          period,
+          values: data.results.values.map((v) => ({
+            timestamp: v.timestamp,
+            value: v.value,
+          })),
+        };
+      }
+    );
+  }
+
+  // ============================================
+  // Options Data Methods
+  // ============================================
+
+  /**
+   * Get options chain for a ticker
+   */
+  async getOptionsChain(ticker: string, expirationDate?: string): Promise<OptionsChain | null> {
+    const symbol = ticker.toUpperCase();
+    const expDate = expirationDate || this.getNextFridayDate();
+
+    return this.getCached<OptionsChain>(
+      `options:${symbol}:${expDate}`,
+      CACHE_TTL.options,
+      async () => {
+        interface OptionsResponse {
+          results?: Array<{
+            ticker: string;
+            underlying_ticker: string;
+            contract_type: 'call' | 'put';
+            strike_price: number;
+            expiration_date: string;
+            day?: {
+              open: number;
+              high: number;
+              low: number;
+              close: number;
+              volume: number;
+              vwap: number;
+            };
+            last_quote?: {
+              bid: number;
+              ask: number;
+              last_updated: number;
+            };
+            open_interest?: number;
+            implied_volatility?: number;
+            greeks?: {
+              delta: number;
+              gamma: number;
+              theta: number;
+              vega: number;
+            };
+          }>;
+        }
+
+        const data = await this.fetch<OptionsResponse>(
+          `/v3/snapshot/options/${symbol}`,
+          { expiration_date: expDate, limit: 250 }
+        );
+
+        if (!data?.results) return null;
+
+        const calls: OptionContract[] = [];
+        const puts: OptionContract[] = [];
+
+        for (const opt of data.results) {
+          const contract: OptionContract = {
+            ticker: opt.ticker,
+            underlying: opt.underlying_ticker,
+            type: opt.contract_type,
+            strike: opt.strike_price,
+            expiration: opt.expiration_date,
+            bid: opt.last_quote?.bid || 0,
+            ask: opt.last_quote?.ask || 0,
+            last: opt.day?.close || 0,
+            volume: opt.day?.volume || 0,
+            openInterest: opt.open_interest || 0,
+            impliedVolatility: opt.implied_volatility || 0,
+            delta: opt.greeks?.delta || 0,
+            gamma: opt.greeks?.gamma || 0,
+            theta: opt.greeks?.theta || 0,
+            vega: opt.greeks?.vega || 0,
+          };
+
+          if (opt.contract_type === 'call') {
+            calls.push(contract);
+          } else {
+            puts.push(contract);
+          }
+        }
+
+        // Sort by strike price
+        calls.sort((a, b) => a.strike - b.strike);
+        puts.sort((a, b) => a.strike - b.strike);
+
+        return {
+          underlying: symbol,
+          expirationDate: expDate,
+          calls,
+          puts,
+        };
+      }
+    );
+  }
+
+  /**
+   * Get next Friday's date (common options expiration)
+   */
+  private getNextFridayDate(): string {
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const daysUntilFriday = (5 - dayOfWeek + 7) % 7 || 7;
+    const nextFriday = new Date(today);
+    nextFriday.setDate(today.getDate() + daysUntilFriday);
+    return nextFriday.toISOString().split('T')[0];
+  }
+
+  // ============================================
+  // Historical Data Methods
+  // ============================================
+
+  /**
+   * Get historical bars for a specific date range
+   * Useful for analyzing price action during events (FOMC, earnings, etc.)
+   */
+  async getHistoricalBars(
+    ticker: string,
+    fromDate: string,
+    toDate: string,
+    timespan: string = 'minute',
+    multiplier: number = 5
+  ): Promise<Bar[]> {
+    const symbol = ticker.toUpperCase();
+    const cacheKey = `hist:${symbol}:${fromDate}:${toDate}:${timespan}:${multiplier}`;
+
+    const bars = await this.getCached<Bar[]>(
+      cacheKey,
+      CACHE_TTL.aggregates * 10, // Cache historical data longer
+      async () => {
+        interface AggregatesResponse {
+          results?: Array<{
+            t: number;
+            o: number;
+            h: number;
+            l: number;
+            c: number;
+            v: number;
+            vw?: number;
+          }>;
+        }
+
+        const data = await this.fetch<AggregatesResponse>(
+          `/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${fromDate}/${toDate}`,
+          { limit: 50000, sort: 'asc' }
+        );
+
+        if (!data?.results) return [];
+
+        return data.results.map((bar) => ({
+          t: bar.t,
+          timestamp: bar.t,
+          date: new Date(bar.t).toISOString(),
+          o: bar.o,
+          h: bar.h,
+          l: bar.l,
+          c: bar.c,
+          v: bar.v,
+          vw: bar.vw,
+          open: bar.o,
+          high: bar.h,
+          low: bar.l,
+          close: bar.c,
+          volume: bar.v,
+          vwap: bar.vw,
+        }));
+      }
+    );
+
+    return bars || [];
+  }
+
+  /**
+   * Get bars around a specific event date (e.g., FOMC meeting)
+   * Returns data from daysBefore to daysAfter the event
+   */
+  async getEventBars(
+    ticker: string,
+    eventDate: string,
+    daysBefore: number = 2,
+    daysAfter: number = 2,
+    timespan: string = 'minute',
+    multiplier: number = 5
+  ): Promise<Bar[]> {
+    const event = new Date(eventDate);
+    const from = new Date(event);
+    from.setDate(event.getDate() - daysBefore);
+    const to = new Date(event);
+    to.setDate(event.getDate() + daysAfter);
+
+    return this.getHistoricalBars(
+      ticker,
+      from.toISOString().split('T')[0],
+      to.toISOString().split('T')[0],
+      timespan,
+      multiplier
+    );
+  }
+
+  // ============================================
+  // Key Levels & Analysis Methods
+  // ============================================
+
+  /**
+   * Calculate key levels for a ticker using real market data
+   */
+  async getKeyLevels(ticker: string): Promise<KeyLevel[]> {
+    const symbol = ticker.toUpperCase();
+
+    const result = await this.getCached<KeyLevel[]>(
+      `levels:${symbol}`,
+      CACHE_TTL.levels,
+      async () => {
+        const levels: KeyLevel[] = [];
+        const quote = await this.getQuote(symbol);
+        if (!quote) return levels;
+
+        const currentPrice = quote.price;
+
+        // PDH/PDL from quote
+        if (quote.prevHigh) {
+          levels.push({
+            type: 'pdh',
+            price: quote.prevHigh,
+            strength: 85,
+            distance: ((currentPrice - quote.prevHigh) / currentPrice) * 100,
+          });
+        }
+        if (quote.prevLow) {
+          levels.push({
+            type: 'pdl',
+            price: quote.prevLow,
+            strength: 85,
+            distance: ((currentPrice - quote.prevLow) / currentPrice) * 100,
+          });
+        }
+
+        // VWAP from quote
+        if (quote.vwap) {
+          levels.push({
+            type: 'vwap',
+            price: quote.vwap,
+            strength: 90,
+            distance: ((currentPrice - quote.vwap) / currentPrice) * 100,
+          });
+        }
+
+        // Get EMAs
+        const [ema9, ema21] = await Promise.all([
+          this.getEMA(symbol, 9, 'day', 1),
+          this.getEMA(symbol, 21, 'day', 1),
+        ]);
+
+        if (ema9?.values?.[0]) {
+          levels.push({
+            type: 'ema9',
+            price: ema9.values[0].value,
+            strength: 70,
+            distance: ((currentPrice - ema9.values[0].value) / currentPrice) * 100,
+          });
+        }
+        if (ema21?.values?.[0]) {
+          levels.push({
+            type: 'ema21',
+            price: ema21.values[0].value,
+            strength: 75,
+            distance: ((currentPrice - ema21.values[0].value) / currentPrice) * 100,
+          });
+        }
+
+        // Get SMA 200 for major support/resistance
+        const sma200 = await this.getSMA(symbol, 200, 'day', 1);
+        if (sma200?.values?.[0]) {
+          levels.push({
+            type: 'sma200',
+            price: sma200.values[0].value,
+            strength: 95,
+            distance: ((currentPrice - sma200.values[0].value) / currentPrice) * 100,
+          });
+        }
+
+        // Get ORB levels from intraday data
+        const intradayBars = await this.getIntradayBars(symbol, 1);
+        if (intradayBars.length > 0) {
+          // First 15 minutes (15 one-minute bars)
+          const orbBars = intradayBars.slice(0, 15);
+          if (orbBars.length > 0) {
+            const orbHigh = Math.max(...orbBars.map((b) => b.high));
+            const orbLow = Math.min(...orbBars.map((b) => b.low));
+
+            levels.push({
+              type: 'orb_high',
+              price: orbHigh,
+              strength: 80,
+              distance: ((currentPrice - orbHigh) / currentPrice) * 100,
+            });
+            levels.push({
+              type: 'orb_low',
+              price: orbLow,
+              strength: 80,
+              distance: ((currentPrice - orbLow) / currentPrice) * 100,
+            });
+          }
+        }
+
+        // Sort by distance from current price
+        levels.sort((a, b) => Math.abs(a.distance || 0) - Math.abs(b.distance || 0));
+
+        return levels;
+      }
+    );
+
+    return result || [];
+  }
+
+  /**
+   * Detect patience candle pattern in recent bars
+   */
+  detectPatienceCandle(bars: Bar[]): { forming: boolean; confirmed: boolean; direction: 'bullish' | 'bearish' } | null {
+    if (bars.length < 3) return null;
+
+    const recentBars = bars.slice(-3);
+    const [bar1, bar2, bar3] = recentBars;
+
+    // Patience candle characteristics:
+    // - Small body relative to recent bars
+    // - Low volume relative to recent bars
+    // - Often appears after a directional move
+
+    const avgBodySize = recentBars.reduce((sum, b) => sum + Math.abs(b.close - b.open), 0) / 3;
+    const currentBodySize = Math.abs(bar3.close - bar3.open);
+    const avgVolume = recentBars.reduce((sum, b) => sum + b.volume, 0) / 3;
+
+    const isSmallBody = currentBodySize < avgBodySize * 0.5;
+    const isLowVolume = bar3.volume < avgVolume * 0.7;
+    const forming = isSmallBody && isLowVolume;
+
+    // Confirmed if next candle shows direction
+    const direction = bar3.close > bar3.open ? 'bullish' : 'bearish';
+    const confirmed = forming && (
+      (direction === 'bullish' && bar2.close < bar2.open) ||
+      (direction === 'bearish' && bar2.close > bar2.open)
+    );
+
+    return { forming, confirmed, direction };
+  }
+
+  /**
+   * Get complete market snapshot with all data for AI analysis
+   */
+  async getMarketSnapshot(ticker: string): Promise<MarketSnapshot | null> {
+    const symbol = ticker.toUpperCase();
+
+    const [quote, keyLevels, intradayBars] = await Promise.all([
+      this.getQuote(symbol),
+      this.getKeyLevels(symbol),
+      this.getIntradayBars(symbol, 5),
+    ]);
+
+    if (!quote) return null;
+
+    // Determine trend based on price vs EMAs
+    const ema9 = keyLevels.find((l) => l.type === 'ema9');
+    const ema21 = keyLevels.find((l) => l.type === 'ema21');
+    let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+
+    if (ema9 && ema21) {
+      if (quote.price > ema9.price && ema9.price > ema21.price) {
+        trend = 'bullish';
+      } else if (quote.price < ema9.price && ema9.price < ema21.price) {
+        trend = 'bearish';
+      }
+    } else if (quote.changePercent > 0.5) {
+      trend = 'bullish';
+    } else if (quote.changePercent < -0.5) {
+      trend = 'bearish';
+    }
+
+    // Detect patience candle
+    const patienceCandle = intradayBars.length > 0
+      ? this.detectPatienceCandle(intradayBars)
+      : null;
+
+    return {
+      symbol,
+      quote,
+      keyLevels,
+      trend,
+      vwap: quote.vwap,
+      patienceCandle: patienceCandle ? {
+        timeframe: '5m',
+        ...patienceCandle,
+      } : undefined,
+    };
+  }
+
+  /**
+   * Get multiple market snapshots at once
+   */
+  async getMarketSnapshots(tickers: string[]): Promise<Map<string, MarketSnapshot>> {
+    const results = new Map<string, MarketSnapshot>();
+
+    const promises = tickers.map(async (ticker) => {
+      const snapshot = await this.getMarketSnapshot(ticker);
+      if (snapshot) {
+        results.set(ticker.toUpperCase(), snapshot);
+      }
+    });
+
+    await Promise.all(promises);
+    return results;
+  }
 }
 
 // Singleton instance
@@ -542,6 +1276,65 @@ export async function getMarketStatus(): Promise<MarketStatus> {
 
 export async function isMarketOpen(): Promise<boolean> {
   return marketDataService.isMarketOpen();
+}
+
+export async function getIndexQuote(index: string): Promise<IndexQuote | null> {
+  return marketDataService.getIndexQuote(index);
+}
+
+export async function getVIX(): Promise<number> {
+  return marketDataService.getVIX();
+}
+
+export async function getSMA(ticker: string, period?: number, timespan?: string, limit?: number): Promise<SMAResult | null> {
+  return marketDataService.getSMA(ticker, period, timespan, limit);
+}
+
+export async function getEMA(ticker: string, period?: number, timespan?: string, limit?: number): Promise<EMAResult | null> {
+  return marketDataService.getEMA(ticker, period, timespan, limit);
+}
+
+export async function getMACD(ticker: string, timespan?: string): Promise<MACDResult | null> {
+  return marketDataService.getMACD(ticker, timespan);
+}
+
+export async function getRSI(ticker: string, period?: number, timespan?: string): Promise<RSIResult | null> {
+  return marketDataService.getRSI(ticker, period, timespan);
+}
+
+export async function getOptionsChain(ticker: string, expirationDate?: string): Promise<OptionsChain | null> {
+  return marketDataService.getOptionsChain(ticker, expirationDate);
+}
+
+export async function getHistoricalBars(
+  ticker: string,
+  fromDate: string,
+  toDate: string,
+  timespan?: string,
+  multiplier?: number
+): Promise<Bar[]> {
+  return marketDataService.getHistoricalBars(ticker, fromDate, toDate, timespan, multiplier);
+}
+
+export async function getEventBars(
+  ticker: string,
+  eventDate: string,
+  daysBefore?: number,
+  daysAfter?: number
+): Promise<Bar[]> {
+  return marketDataService.getEventBars(ticker, eventDate, daysBefore, daysAfter);
+}
+
+export async function getKeyLevels(ticker: string): Promise<KeyLevel[]> {
+  return marketDataService.getKeyLevels(ticker);
+}
+
+export async function getMarketSnapshot(ticker: string): Promise<MarketSnapshot | null> {
+  return marketDataService.getMarketSnapshot(ticker);
+}
+
+export async function getMarketSnapshots(tickers: string[]): Promise<Map<string, MarketSnapshot>> {
+  return marketDataService.getMarketSnapshots(tickers);
 }
 
 export default marketDataService;
