@@ -678,8 +678,9 @@ export function KCUChart({
     });
     levelSeriesRef.current.clear();
 
-    // Add new level lines
-    levels.forEach((level, index) => {
+    // Add new level lines (filter out invalid entries first)
+    const validLevels = levels.filter(l => l.price != null && !isNaN(l.price) && l.price > 0);
+    validLevels.forEach((level, index) => {
       const series = chartRef.current!.addLineSeries({
         color: level.color || LEVEL_COLORS[level.type],
         lineWidth: 1,
@@ -721,10 +722,12 @@ export function KCUChart({
     });
     gammaSeriesRef.current.clear();
 
-    if (gammaLevels.length === 0 || data.length === 0) return;
+    // Filter out gamma levels with invalid prices
+    const validGammaLevels = gammaLevels.filter(g => g.price != null && !isNaN(g.price) && g.price > 0);
+    if (validGammaLevels.length === 0 || data.length === 0) return;
 
     // Add gamma level lines with proper institutional styling
-    gammaLevels.forEach((gamma, index) => {
+    validGammaLevels.forEach((gamma, index) => {
       // Determine color and line style based on type
       let color: string;
       let lineWidth: number;
@@ -855,13 +858,18 @@ export function KCUChart({
     });
     fvgSeriesRef.current.clear();
 
-    if (fvgZones.length === 0 || data.length === 0) return;
+    // Filter out FVG zones with invalid high/low values
+    const validFvgZones = fvgZones.filter(z =>
+      z.high != null && !isNaN(z.high) && z.high > 0 &&
+      z.low != null && !isNaN(z.low) && z.low > 0
+    );
+    if (validFvgZones.length === 0 || data.length === 0) return;
 
     // Get the last timestamp for extending boxes to the right
     const lastTime = toChartTime(data[data.length - 1].time);
 
     // Render each FVG as a filled area (box)
-    fvgZones.forEach((zone, index) => {
+    validFvgZones.forEach((zone, index) => {
       const isBullish = zone.direction === 'bullish';
       const fillColor = isBullish
         ? 'rgba(34, 197, 94, 0.25)'  // Green with more opacity
