@@ -1,8 +1,58 @@
+/**
+ * @deprecated Use /api/learning/v2/progress instead
+ * This route is maintained for backward compatibility only.
+ * It proxies to the v2 API and transforms the response.
+ */
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getAuthenticatedUser } from '@/lib/auth';
 
-export async function GET() {
+export async function GET(request: Request) {
+  // Log deprecation warning
+  console.warn('[DEPRECATED] /api/progress is deprecated. Use /api/learning/v2/progress');
+
+  // Build the v2 URL from the current request
+  const url = new URL(request.url);
+  const v2Url = new URL('/api/learning/v2/progress', url.origin);
+
+  try {
+    // Fetch from v2 API (internal call)
+    const v2Response = await fetch(v2Url.toString(), {
+      headers: request.headers,
+    });
+
+    if (!v2Response.ok) {
+      const error = await v2Response.json();
+      return NextResponse.json(error, { status: v2Response.status });
+    }
+
+    const v2Data = await v2Response.json();
+
+    // Transform v2 response to legacy format
+    type ModuleProgressData = { completed: number; total: number };
+    const modulesData = (v2Data.modules || {}) as Record<string, ModuleProgressData>;
+    const legacyResponse = {
+      overall: v2Data.overall?.progressPercent || 0,
+      streak: v2Data.streak?.current || 0,
+      modules: Object.entries(modulesData).map(([id, data]) => ({
+        name: id.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()),
+        progress: data.total > 0 ? Math.round((data.completed / data.total) * 100) : 0,
+      })),
+      // Also include v2 format for consumers that support it
+      ...v2Data,
+    };
+
+    const response = NextResponse.json(legacyResponse);
+    response.headers.set('X-Deprecated', 'Use /api/learning/v2/progress');
+    return response;
+  } catch {
+    // Fallback to legacy implementation if v2 call fails
+    return legacyGetProgress();
+  }
+}
+
+// Legacy implementation as fallback
+async function legacyGetProgress() {
   try {
     const sessionUser = await getAuthenticatedUser();
 
@@ -147,7 +197,7 @@ export async function GET() {
         modulesWithProgress.length
     );
 
-    // Get user's current streak from user_profiles or calculate from activity
+    // Get user's current streak
     const { data: userProfile } = await supabaseAdmin
       .from('user_profiles')
       .select('current_streak, last_active_date')
@@ -156,28 +206,24 @@ export async function GET() {
 
     const streak = userProfile?.current_streak || 0;
 
-    // Format modules for the overview page
-    const modulesSummary = modulesWithProgress.map((m) => ({
-      name: m.name,
-      progress: m.completionPercentage,
-    }));
-
     return NextResponse.json({
       currentModule: user.current_module,
       modules: modulesWithProgress,
       overallCompletion,
-      overall: overallCompletion, // Alias for overview page compatibility
+      overall: overallCompletion,
       streak,
       totalTopicsCompleted: modulesWithProgress.reduce((sum, m) => sum + m.completedTopics, 0),
       totalTopics: modulesWithProgress.reduce((sum, m) => sum + m.totalTopics, 0),
-      // Progress by module ID for learning page
-      progress: modulesWithProgress.reduce((acc, m) => {
-        acc[`mod_${m.id}`] = {
-          completed: m.completedTopics,
-          total: m.totalTopics,
-        };
-        return acc;
-      }, {} as Record<string, { completed: number; total: number }>),
+      progress: modulesWithProgress.reduce(
+        (acc, m) => {
+          acc[`mod_${m.id}`] = {
+            completed: m.completedTopics,
+            total: m.totalTopics,
+          };
+          return acc;
+        },
+        {} as Record<string, { completed: number; total: number }>
+      ),
     });
   } catch (error) {
     console.error('Error fetching progress:', error);

@@ -331,3 +331,267 @@ export function formatEMAForChart(
     }))
     .filter((d) => d.value > 0);
 }
+
+/**
+ * VWAP Bands calculation with standard deviation
+ */
+export interface VWAPBands {
+  vwap: number[];
+  upperBand1: number[]; // +1 std dev
+  lowerBand1: number[]; // -1 std dev
+  upperBand2: number[]; // +2 std dev
+  lowerBand2: number[]; // -2 std dev
+}
+
+/**
+ * Calculate VWAP with standard deviation bands
+ * Bands show 1 and 2 standard deviations from VWAP
+ */
+export function calculateVWAPBands(bars: Bar[]): VWAPBands {
+  if (bars.length === 0) {
+    return { vwap: [], upperBand1: [], lowerBand1: [], upperBand2: [], lowerBand2: [] };
+  }
+
+  const vwap: number[] = [];
+  const upperBand1: number[] = [];
+  const lowerBand1: number[] = [];
+  const upperBand2: number[] = [];
+  const lowerBand2: number[] = [];
+
+  let cumulativeTPV = 0;
+  let cumulativeVolume = 0;
+  let cumulativeTPVSquared = 0;
+  let lastDate: string | null = null;
+
+  for (let i = 0; i < bars.length; i++) {
+    const bar = bars[i];
+    const barDate = new Date(bar.t).toISOString().split('T')[0];
+
+    // Reset at new trading day
+    if (lastDate !== null && barDate !== lastDate) {
+      cumulativeTPV = 0;
+      cumulativeVolume = 0;
+      cumulativeTPVSquared = 0;
+    }
+    lastDate = barDate;
+
+    const typicalPrice = (bar.h + bar.l + bar.c) / 3;
+    cumulativeTPV += typicalPrice * bar.v;
+    cumulativeVolume += bar.v;
+    cumulativeTPVSquared += typicalPrice * typicalPrice * bar.v;
+
+    const currentVWAP = cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : typicalPrice;
+    vwap.push(currentVWAP);
+
+    // Calculate standard deviation
+    // Variance = E[X^2] - E[X]^2
+    if (cumulativeVolume > 0) {
+      const variance = (cumulativeTPVSquared / cumulativeVolume) - (currentVWAP * currentVWAP);
+      const stdDev = Math.sqrt(Math.max(0, variance));
+
+      upperBand1.push(currentVWAP + stdDev);
+      lowerBand1.push(currentVWAP - stdDev);
+      upperBand2.push(currentVWAP + 2 * stdDev);
+      lowerBand2.push(currentVWAP - 2 * stdDev);
+    } else {
+      upperBand1.push(currentVWAP);
+      lowerBand1.push(currentVWAP);
+      upperBand2.push(currentVWAP);
+      lowerBand2.push(currentVWAP);
+    }
+  }
+
+  return { vwap, upperBand1, lowerBand1, upperBand2, lowerBand2 };
+}
+
+/**
+ * Volume Profile calculation
+ * Groups volume by price levels to show areas of high/low activity
+ */
+export interface VolumeProfileLevel {
+  price: number;
+  volume: number;
+  buyVolume: number;
+  sellVolume: number;
+  isPointOfControl: boolean;
+  isValueAreaHigh: boolean;
+  isValueAreaLow: boolean;
+}
+
+export interface VolumeProfile {
+  levels: VolumeProfileLevel[];
+  pointOfControl: number; // Price with highest volume
+  valueAreaHigh: number; // Upper boundary of 70% volume
+  valueAreaLow: number; // Lower boundary of 70% volume
+}
+
+/**
+ * Calculate Volume Profile (Price Volume Distribution)
+ * @param bars - Price bars to analyze
+ * @param numberOfLevels - How many price levels to divide the range into
+ */
+export function calculateVolumeProfile(bars: Bar[], numberOfLevels: number = 24): VolumeProfile {
+  if (bars.length === 0) {
+    return {
+      levels: [],
+      pointOfControl: 0,
+      valueAreaHigh: 0,
+      valueAreaLow: 0,
+    };
+  }
+
+  // Find price range
+  const highs = bars.map(b => b.h);
+  const lows = bars.map(b => b.l);
+  const maxPrice = Math.max(...highs);
+  const minPrice = Math.min(...lows);
+  const range = maxPrice - minPrice;
+  const levelSize = range / numberOfLevels;
+
+  // Initialize levels
+  const levels: VolumeProfileLevel[] = [];
+  for (let i = 0; i < numberOfLevels; i++) {
+    levels.push({
+      price: minPrice + (i + 0.5) * levelSize, // Middle of level
+      volume: 0,
+      buyVolume: 0,
+      sellVolume: 0,
+      isPointOfControl: false,
+      isValueAreaHigh: false,
+      isValueAreaLow: false,
+    });
+  }
+
+  // Distribute volume to levels
+  for (const bar of bars) {
+    const typicalPrice = (bar.h + bar.l + bar.c) / 3;
+    const levelIndex = Math.min(
+      numberOfLevels - 1,
+      Math.floor((typicalPrice - minPrice) / levelSize)
+    );
+
+    if (levelIndex >= 0 && levelIndex < numberOfLevels) {
+      levels[levelIndex].volume += bar.v;
+      // Estimate buy/sell based on close vs open
+      if (bar.c >= bar.o) {
+        levels[levelIndex].buyVolume += bar.v;
+      } else {
+        levels[levelIndex].sellVolume += bar.v;
+      }
+    }
+  }
+
+  // Find Point of Control (highest volume level)
+  let maxVolume = 0;
+  let pocIndex = 0;
+  for (let i = 0; i < levels.length; i++) {
+    if (levels[i].volume > maxVolume) {
+      maxVolume = levels[i].volume;
+      pocIndex = i;
+    }
+  }
+  levels[pocIndex].isPointOfControl = true;
+
+  // Calculate Value Area (70% of volume)
+  const totalVolume = levels.reduce((sum, l) => sum + l.volume, 0);
+  const targetVolume = totalVolume * 0.7;
+
+  // Expand from POC until we capture 70% of volume
+  let capturedVolume = levels[pocIndex].volume;
+  let lowIndex = pocIndex;
+  let highIndex = pocIndex;
+
+  while (capturedVolume < targetVolume && (lowIndex > 0 || highIndex < levels.length - 1)) {
+    const canGoLow = lowIndex > 0;
+    const canGoHigh = highIndex < levels.length - 1;
+
+    if (canGoLow && canGoHigh) {
+      // Add the larger of the two adjacent levels
+      if (levels[lowIndex - 1].volume >= levels[highIndex + 1].volume) {
+        lowIndex--;
+        capturedVolume += levels[lowIndex].volume;
+      } else {
+        highIndex++;
+        capturedVolume += levels[highIndex].volume;
+      }
+    } else if (canGoLow) {
+      lowIndex--;
+      capturedVolume += levels[lowIndex].volume;
+    } else if (canGoHigh) {
+      highIndex++;
+      capturedVolume += levels[highIndex].volume;
+    }
+  }
+
+  levels[lowIndex].isValueAreaLow = true;
+  levels[highIndex].isValueAreaHigh = true;
+
+  return {
+    levels,
+    pointOfControl: levels[pocIndex].price,
+    valueAreaHigh: levels[highIndex].price,
+    valueAreaLow: levels[lowIndex].price,
+  };
+}
+
+/**
+ * Timeframe type for the chart
+ */
+export type Timeframe = '1m' | '2m' | '5m' | '15m' | '30m' | '1H' | '4H' | 'D' | 'W';
+
+/**
+ * Get multiplier for converting between timeframes
+ */
+export function getTimeframeMinutes(tf: Timeframe): number {
+  const map: Record<Timeframe, number> = {
+    '1m': 1,
+    '2m': 2,
+    '5m': 5,
+    '15m': 15,
+    '30m': 30,
+    '1H': 60,
+    '4H': 240,
+    'D': 1440,
+    'W': 10080,
+  };
+  return map[tf];
+}
+
+/**
+ * Aggregate bars to a higher timeframe
+ */
+export function aggregateBars(bars: Bar[], targetTimeframe: Timeframe): Bar[] {
+  if (bars.length === 0) return [];
+
+  const targetMinutes = getTimeframeMinutes(targetTimeframe);
+  const targetMs = targetMinutes * 60 * 1000;
+
+  const aggregated: Bar[] = [];
+  let currentBar: Bar | null = null;
+  let currentPeriodStart = 0;
+
+  for (const bar of bars) {
+    const periodStart = Math.floor(bar.t / targetMs) * targetMs;
+
+    if (currentBar === null || periodStart > currentPeriodStart) {
+      // Start new bar
+      if (currentBar) {
+        aggregated.push(currentBar);
+      }
+      currentBar = { ...bar, t: periodStart };
+      currentPeriodStart = periodStart;
+    } else {
+      // Update current bar
+      currentBar.h = Math.max(currentBar.h, bar.h);
+      currentBar.l = Math.min(currentBar.l, bar.l);
+      currentBar.c = bar.c;
+      currentBar.v += bar.v;
+    }
+  }
+
+  if (currentBar) {
+    aggregated.push(currentBar);
+  }
+
+  return aggregated;
+}

@@ -16,19 +16,24 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
   // Mock user data - would come from auth context in production
   const user = {
     id: 'mock-user-id',
+    discordId: 'mock-discord-id',
     username: 'Trader',
+    avatarUrl: undefined,
+    experienceLevel: 'intermediate' as const,
+    subscriptionTier: 'premium' as const,
+    isAdmin: true,
+    createdAt: new Date('2024-01-01'),
+    // Legacy fields for sidebar compatibility
     avatar_url: undefined,
     is_admin: true,
-    experienceLevel: 'intermediate',
     currentModule: 'ltp-framework',
     streakDays: 7,
     totalQuizzes: 15,
     winRate: 65,
-    isAdmin: true,
   };
 
   return (
-    <AIContextProvider user={user}>
+    <AIContextProvider initialContext={{ user }}>
       <div className="min-h-screen bg-[var(--bg-primary)] bg-hex-pattern">
         {/* Sidebar - Desktop */}
         <div className="hidden lg:block">

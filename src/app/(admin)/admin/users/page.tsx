@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Header } from '@/components/layout/header';
 import { PageShell, PageSection } from '@/components/layout/page-shell';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -27,93 +27,126 @@ import {
   UserCheck,
   TrendingUp,
   BookOpen,
-  MoreVertical,
   Mail,
   Shield,
   Trash2,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 interface User {
   id: string;
   username: string;
   discord_id: string;
-  email: string;
+  discord_username?: string;
+  email: string | null;
+  avatar_url: string | null;
   experience_level: string;
-  total_questions_asked: number;
-  total_quizzes_taken: number;
-  current_streak: number;
-  joined_at: string;
-  last_active: string;
+  subscription_tier: string;
   is_admin: boolean;
+  streak_days: number;
+  total_quizzes: number;
+  total_questions: number;
+  current_module: string;
+  created_at: string;
+  updated_at: string;
+  disabled_at: string | null;
 }
 
-// Mock user data
-const mockUsers = [
-  {
-    id: '1',
-    username: 'PrinterKing',
-    discord_id: '123456789',
-    email: 'printer@example.com',
-    experience_level: 'advanced',
-    total_questions_asked: 234,
-    total_quizzes_taken: 45,
-    current_streak: 8,
-    joined_at: '2023-11-15T10:00:00Z',
-    last_active: '2024-01-16T09:30:00Z',
-    is_admin: false,
-  },
-  {
-    id: '2',
-    username: 'LTPMaster',
-    discord_id: '987654321',
-    email: 'ltp@example.com',
-    experience_level: 'intermediate',
-    total_questions_asked: 156,
-    total_quizzes_taken: 32,
-    current_streak: 5,
-    joined_at: '2023-12-01T14:00:00Z',
-    last_active: '2024-01-16T08:15:00Z',
-    is_admin: false,
-  },
-  {
-    id: '3',
-    username: 'TraderJoe',
-    discord_id: '456789123',
-    email: 'joe@example.com',
-    experience_level: 'beginner',
-    total_questions_asked: 89,
-    total_quizzes_taken: 18,
-    current_streak: 3,
-    joined_at: '2024-01-01T09:00:00Z',
-    last_active: '2024-01-16T10:45:00Z',
-    is_admin: false,
-  },
-];
+interface Pagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+interface Stats {
+  totalUsers: number;
+  activeToday: number;
+}
 
 export default function UsersPage() {
   const { showToast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
-  const [users, setUsers] = useState<User[]>(mockUsers);
-  const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [pagination, setPagination] = useState<Pagination>({
+    page: 1,
+    limit: 50,
+    total: 0,
+    totalPages: 0,
+  });
+  const [stats, setStats] = useState<Stats>({
+    totalUsers: 0,
+    activeToday: 0,
+  });
 
-  const filteredUsers = users.filter((user) =>
-    user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Fetch users from API
+  const fetchUsers = useCallback(async (page = 1, search = '') => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: '50',
+        ...(search && { search }),
+      });
+
+      const res = await fetch(`/api/admin/users?${params}`);
+      if (!res.ok) {
+        throw new Error('Failed to fetch users');
+      }
+
+      const data = await res.json();
+      setUsers(data.users);
+      setPagination(data.pagination);
+      if (data.stats) {
+        setStats(data.stats);
+      }
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      showToast({
+        type: 'error',
+        title: 'Failed to Load Users',
+        message: 'Could not fetch user list. Please try again.',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
+
+  // Initial fetch and refetch on search/page change
+  useEffect(() => {
+    fetchUsers(pagination.page, debouncedSearch);
+  }, [debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle page change
+  const handlePageChange = useCallback((newPage: number) => {
+    setPagination(prev => ({ ...prev, page: newPage }));
+    fetchUsers(newPage, debouncedSearch);
+  }, [fetchUsers, debouncedSearch]);
 
   // Export users to CSV
   const handleExport = useCallback(() => {
     const headers = ['Username', 'Email', 'Level', 'Questions', 'Quizzes', 'Streak', 'Joined', 'Last Active'];
-    const rows = filteredUsers.map(user => [
+    const rows = users.map(user => [
       user.username,
-      user.email,
+      user.email || '',
       user.experience_level,
-      user.total_questions_asked.toString(),
-      user.total_quizzes_taken.toString(),
-      user.current_streak.toString(),
-      new Date(user.joined_at).toLocaleDateString(),
-      new Date(user.last_active).toLocaleDateString(),
+      user.total_questions.toString(),
+      user.total_quizzes.toString(),
+      user.streak_days.toString(),
+      new Date(user.created_at).toLocaleDateString(),
+      new Date(user.updated_at).toLocaleDateString(),
     ]);
 
     const csv = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
@@ -124,12 +157,20 @@ export default function UsersPage() {
     a.download = `users-export-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [filteredUsers]);
+  }, [users]);
 
   // Send message to user (opens mailto)
   const handleSendMail = useCallback((user: User) => {
+    if (!user.email) {
+      showToast({
+        type: 'warning',
+        title: 'No Email',
+        message: 'This user has no email address on file.',
+      });
+      return;
+    }
     window.location.href = `mailto:${user.email}?subject=KCU Coach - Message for ${user.username}`;
-  }, []);
+  }, [showToast]);
 
   // Toggle admin status
   const handleToggleAdmin = useCallback(async (user: User) => {
@@ -157,10 +198,11 @@ export default function UsersPage() {
           message: `${newAdminStatus ? 'Granted' : 'Revoked'} admin privileges for ${user.username}`,
         });
       } else {
+        const error = await res.json();
         showToast({
           type: 'error',
           title: 'Update Failed',
-          message: 'Failed to update user permissions',
+          message: error.error || 'Failed to update user permissions',
         });
       }
     } catch (error) {
@@ -173,9 +215,9 @@ export default function UsersPage() {
     }
   }, [showToast]);
 
-  // Delete user
+  // Delete user (soft delete)
   const handleDeleteUser = useCallback(async (user: User) => {
-    if (!confirm(`Are you sure you want to delete ${user.username}? This action cannot be undone.`)) {
+    if (!confirm(`Are you sure you want to disable ${user.username}? This user will no longer be able to access the platform.`)) {
       return;
     }
 
@@ -188,14 +230,15 @@ export default function UsersPage() {
         setUsers(prev => prev.filter(u => u.id !== user.id));
         showToast({
           type: 'success',
-          title: 'User Deleted',
-          message: `${user.username} has been removed`,
+          title: 'User Disabled',
+          message: `${user.username} has been disabled`,
         });
       } else {
+        const error = await res.json();
         showToast({
           type: 'error',
           title: 'Delete Failed',
-          message: 'Failed to delete user',
+          message: error.error || 'Failed to disable user',
         });
       }
     } catch (error) {
@@ -203,7 +246,7 @@ export default function UsersPage() {
       showToast({
         type: 'error',
         title: 'Delete Failed',
-        message: 'Failed to delete user',
+        message: 'Failed to disable user',
       });
     }
   }, [showToast]);
@@ -215,14 +258,26 @@ export default function UsersPage() {
         subtitle="Manage Discord users and their progress"
         breadcrumbs={[{ label: 'Admin' }, { label: 'Users' }]}
         actions={
-          <Button
-            variant="primary"
-            size="sm"
-            icon={<Download className="w-4 h-4" />}
-            onClick={handleExport}
-          >
-            Export
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<RefreshCw className="w-4 h-4" />}
+              onClick={() => fetchUsers(pagination.page, debouncedSearch)}
+              disabled={loading}
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<Download className="w-4 h-4" />}
+              onClick={handleExport}
+              disabled={users.length === 0}
+            >
+              Export
+            </Button>
+          </div>
         }
       />
 
@@ -233,29 +288,29 @@ export default function UsersPage() {
             <Card padding="md">
               <Stat
                 label="Total Users"
-                value={formatNumber(1247)}
+                value={formatNumber(stats.totalUsers)}
                 icon={<Users className="w-4 h-4" />}
               />
             </Card>
             <Card padding="md">
               <Stat
                 label="Active Today"
-                value={formatNumber(89)}
+                value={formatNumber(stats.activeToday)}
                 icon={<UserCheck className="w-4 h-4" />}
                 valueColor="profit"
               />
             </Card>
             <Card padding="md">
               <Stat
-                label="Questions Today"
-                value={formatNumber(342)}
+                label="Total Questions"
+                value={formatNumber(users.reduce((sum, u) => sum + (u.total_questions || 0), 0))}
                 icon={<TrendingUp className="w-4 h-4" />}
               />
             </Card>
             <Card padding="md">
               <Stat
-                label="Quizzes Today"
-                value={formatNumber(67)}
+                label="Total Quizzes"
+                value={formatNumber(users.reduce((sum, u) => sum + (u.total_quizzes || 0), 0))}
                 icon={<BookOpen className="w-4 h-4" />}
               />
             </Card>
@@ -266,7 +321,7 @@ export default function UsersPage() {
         <PageSection>
           <Card>
             <CardHeader
-              title="All Users"
+              title={`All Users ${pagination.total > 0 ? `(${pagination.total})` : ''}`}
               action={
                 <div className="flex items-center gap-3">
                   <div className="w-64">
@@ -277,108 +332,161 @@ export default function UsersPage() {
                       leftIcon={<Search className="w-4 h-4" />}
                     />
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<Filter className="w-4 h-4" />}
-                    onClick={() => setShowFilterMenu(!showFilterMenu)}
-                  >
-                    Filter
-                  </Button>
                 </div>
               }
             />
-            <Table>
-              <TableHeader>
-                <TableRow hoverable={false}>
-                  <TableHead>User</TableHead>
-                  <TableHead>Level</TableHead>
-                  <TableHead>Questions</TableHead>
-                  <TableHead>Quizzes</TableHead>
-                  <TableHead>Streak</TableHead>
-                  <TableHead>Last Active</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredUsers.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <Avatar
-                          alt={user.username}
-                          fallback={user.username}
-                          size="sm"
-                        />
-                        <div>
-                          <p className="font-medium text-[var(--text-primary)]">
-                            {user.username}
-                          </p>
-                          <p className="text-xs text-[var(--text-tertiary)]">
-                            {user.email}
-                          </p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          user.experience_level === 'advanced'
-                            ? 'gold'
-                            : user.experience_level === 'intermediate'
-                            ? 'success'
-                            : 'default'
-                        }
+
+            {loading && users.length === 0 ? (
+              <CardContent>
+                <div className="flex items-center justify-center py-12">
+                  <RefreshCw className="w-6 h-6 animate-spin text-[var(--text-tertiary)]" />
+                  <span className="ml-2 text-[var(--text-secondary)]">Loading users...</span>
+                </div>
+              </CardContent>
+            ) : users.length === 0 ? (
+              <CardContent>
+                <div className="flex flex-col items-center justify-center py-12">
+                  <Users className="w-12 h-12 text-[var(--text-tertiary)] mb-4" />
+                  <p className="text-[var(--text-secondary)]">
+                    {debouncedSearch ? 'No users match your search' : 'No users found'}
+                  </p>
+                </div>
+              </CardContent>
+            ) : (
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow hoverable={false}>
+                      <TableHead>User</TableHead>
+                      <TableHead>Level</TableHead>
+                      <TableHead>Questions</TableHead>
+                      <TableHead>Quizzes</TableHead>
+                      <TableHead>Streak</TableHead>
+                      <TableHead>Last Active</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {users.map((user) => (
+                      <TableRow key={user.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Avatar
+                              src={user.avatar_url || undefined}
+                              alt={user.username}
+                              fallback={user.username}
+                              size="sm"
+                            />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <p className="font-medium text-[var(--text-primary)]">
+                                  {user.username}
+                                </p>
+                                {user.is_admin && (
+                                  <Badge variant="gold" size="sm">Admin</Badge>
+                                )}
+                              </div>
+                              <p className="text-xs text-[var(--text-tertiary)]">
+                                {user.email || user.discord_username || user.discord_id}
+                              </p>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              user.experience_level === 'advanced'
+                                ? 'gold'
+                                : user.experience_level === 'intermediate'
+                                ? 'success'
+                                : 'default'
+                            }
+                            size="sm"
+                          >
+                            {user.experience_level || 'beginner'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell mono>{user.total_questions || 0}</TableCell>
+                        <TableCell mono>{user.total_quizzes || 0}</TableCell>
+                        <TableCell>
+                          <span className="flex items-center gap-1 text-[var(--accent-primary)]">
+                            {user.streak_days > 0 && '🔥'} {user.streak_days || 0}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs text-[var(--text-tertiary)]">
+                            {formatDateTime(user.updated_at)}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <button
+                              className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                              onClick={() => handleSendMail(user)}
+                              title={user.email ? `Send email to ${user.username}` : 'No email available'}
+                            >
+                              <Mail className="w-4 h-4" />
+                            </button>
+                            <button
+                              className={`p-1.5 hover:text-[var(--accent-primary)] ${
+                                user.is_admin
+                                  ? 'text-[var(--accent-primary)]'
+                                  : 'text-[var(--text-tertiary)]'
+                              }`}
+                              onClick={() => handleToggleAdmin(user)}
+                              title={user.is_admin ? 'Revoke admin' : 'Grant admin'}
+                            >
+                              <Shield className="w-4 h-4" />
+                            </button>
+                            <button
+                              className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--error)]"
+                              onClick={() => handleDeleteUser(user)}
+                              title={`Disable ${user.username}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+
+                {/* Pagination */}
+                {pagination.totalPages > 1 && (
+                  <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--border-primary)]">
+                    <p className="text-sm text-[var(--text-secondary)]">
+                      Showing {((pagination.page - 1) * pagination.limit) + 1} to{' '}
+                      {Math.min(pagination.page * pagination.limit, pagination.total)} of{' '}
+                      {pagination.total} users
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
                         size="sm"
+                        icon={<ChevronLeft className="w-4 h-4" />}
+                        onClick={() => handlePageChange(pagination.page - 1)}
+                        disabled={pagination.page === 1 || loading}
                       >
-                        {user.experience_level}
-                      </Badge>
-                    </TableCell>
-                    <TableCell mono>{user.total_questions_asked}</TableCell>
-                    <TableCell mono>{user.total_quizzes_taken}</TableCell>
-                    <TableCell>
-                      <span className="flex items-center gap-1 text-[var(--accent-primary)]">
-                        🔥 {user.current_streak}
+                        Previous
+                      </Button>
+                      <span className="text-sm text-[var(--text-secondary)]">
+                        Page {pagination.page} of {pagination.totalPages}
                       </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-[var(--text-tertiary)]">
-                        {formatDateTime(user.last_active)}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <button
-                          className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                          onClick={() => handleSendMail(user)}
-                          title={`Send email to ${user.username}`}
-                        >
-                          <Mail className="w-4 h-4" />
-                        </button>
-                        <button
-                          className={`p-1.5 hover:text-[var(--accent-primary)] ${
-                            user.is_admin
-                              ? 'text-[var(--accent-primary)]'
-                              : 'text-[var(--text-tertiary)]'
-                          }`}
-                          onClick={() => handleToggleAdmin(user)}
-                          title={user.is_admin ? 'Revoke admin' : 'Grant admin'}
-                        >
-                          <Shield className="w-4 h-4" />
-                        </button>
-                        <button
-                          className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--error)]"
-                          onClick={() => handleDeleteUser(user)}
-                          title={`Delete ${user.username}`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handlePageChange(pagination.page + 1)}
+                        disabled={pagination.page >= pagination.totalPages || loading}
+                      >
+                        Next
+                        <ChevronRight className="w-4 h-4 ml-1" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </Card>
         </PageSection>
       </PageShell>

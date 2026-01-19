@@ -4,7 +4,8 @@ import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useAIContext } from './AIContextProvider';
-import { quickActionsByPage, type QuickAction } from '@/types/ai';
+import type { QuickAction } from '@/types/ai';
+import { getQuickActionsForPage } from '@/lib/ai-context';
 import {
   Search,
   TrendingUp,
@@ -90,7 +91,7 @@ export function AIQuickActions({ onAction }: AIQuickActionsProps) {
 
   // Get actions for current page
   const actions = useMemo(() => {
-    return quickActionsByPage[currentPage] || quickActionsByPage.overview;
+    return getQuickActionsForPage(currentPage);
   }, [currentPage]);
 
   // Build context-aware prompt

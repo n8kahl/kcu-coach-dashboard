@@ -1,10 +1,10 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Header } from '@/components/layout/header';
 import { PageShell } from '@/components/layout/page-shell';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ProgressBar, CircularProgress } from '@/components/ui/progress';
@@ -19,114 +19,107 @@ import {
   Trophy,
   RotateCcw,
   Home,
+  Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 
-// Mock quiz data - in real app, fetch from API
-const mockQuiz = {
-  id: 'quiz_ltp_framework',
-  title: 'LTP Framework Quiz',
-  description: 'Test your understanding of Levels, Trends, and Patience concepts.',
-  moduleId: 'mod_ltp_framework',
-  moduleSlug: 'ltp-framework',
-  moduleName: 'LTP Framework',
-  passingScore: 70,
-  timeLimit: 300, // 5 minutes in seconds
-  questions: [
-    {
-      id: 'q1',
-      question: 'What does LTP stand for in the KCU trading methodology?',
-      options: [
-        { id: 'a', text: 'Long Term Profit' },
-        { id: 'b', text: 'Levels, Trends, Patience' },
-        { id: 'c', text: 'Low Trade Price' },
-        { id: 'd', text: 'Limit Trading Position' },
-      ],
-      correctOptionId: 'b',
-      explanation:
-        'LTP stands for Levels, Trends, and Patience - the three key components that must align for a high-probability trade setup.',
-    },
-    {
-      id: 'q2',
-      question: 'What timeframe is recommended for drawing hourly levels?',
-      options: [
-        { id: 'a', text: '5-minute chart' },
-        { id: 'b', text: '15-minute chart' },
-        { id: 'c', text: '60-minute (1-hour) chart' },
-        { id: 'd', text: 'Daily chart' },
-      ],
-      correctOptionId: 'c',
-      explanation:
-        'The 60-minute chart is the preferred timeframe for drawing hourly levels as it provides the best balance of meaningful support/resistance levels.',
-    },
-    {
-      id: 'q3',
-      question: 'What is a "patience candle" in the LTP framework?',
-      options: [
-        { id: 'a', text: 'A very large bullish candle' },
-        { id: 'b', text: 'A small consolidation candle at a key level' },
-        { id: 'c', text: 'The first candle of the day' },
-        { id: 'd', text: 'A candle that closes at VWAP' },
-      ],
-      correctOptionId: 'b',
-      explanation:
-        'A patience candle is a small consolidation candle that forms at a key level, showing equilibrium between buyers and sellers before a potential breakout.',
-    },
-    {
-      id: 'q4',
-      question: 'When should you draw your hourly levels?',
-      options: [
-        { id: 'a', text: 'After market close' },
-        { id: 'b', text: 'During market hours' },
-        { id: 'c', text: 'Fresh every morning before market open' },
-        { id: 'd', text: 'Once a week on Sunday' },
-      ],
-      correctOptionId: 'c',
-      explanation:
-        'You should draw fresh levels every morning before market open. Never carry over old levels - draw them new each day.',
-    },
-    {
-      id: 'q5',
-      question: 'Where should you place your stop loss when trading a patience candle breakout?',
-      options: [
-        { id: 'a', text: 'At the previous day low' },
-        { id: 'b', text: 'On the other side of the patience candle' },
-        { id: 'c', text: 'At VWAP' },
-        { id: 'd', text: '2% below entry' },
-      ],
-      correctOptionId: 'b',
-      explanation:
-        'Your stop loss should be placed on the other side of the patience candle. This gives the trade room to breathe while invalidating the setup if the level fails.',
-    },
-  ],
-};
+interface QuizQuestion {
+  id: string;
+  question: string;
+  options: { id: string; text: string }[];
+}
+
+interface Quiz {
+  id: string;
+  moduleId: string | null;
+  moduleSlug: string | null;
+  title: string;
+  description: string | null;
+  passingScore: number;
+  timeLimit: number | null;
+  questions: QuizQuestion[];
+  questionsCount: number;
+}
+
+interface GradedAnswer {
+  questionId: string;
+  selectedOptionId: string;
+  correctOptionId: string;
+  isCorrect: boolean;
+  explanation?: string;
+}
+
+interface QuizResult {
+  attemptId: string;
+  score: number;
+  totalQuestions: number;
+  percentage: number;
+  passed: boolean;
+  timeTaken: number | null;
+  answers: GradedAnswer[];
+}
 
 export default function QuizPage() {
   const params = useParams();
   const router = useRouter();
   const quizId = params.id as string;
 
+  // Quiz data state
+  const [quiz, setQuiz] = useState<Quiz | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Quiz progress state
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
   const [showResults, setShowResults] = useState(false);
+  const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
   const [showExplanation, setShowExplanation] = useState(false);
-  const [timeRemaining, setTimeRemaining] = useState(mockQuiz.timeLimit);
+  const [timeRemaining, setTimeRemaining] = useState(0);
   const [quizStarted, setQuizStarted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const currentQuestion = mockQuiz.questions[currentQuestionIndex];
-  const selectedAnswer = selectedAnswers[currentQuestion.id];
-  const isCorrect = selectedAnswer === currentQuestion.correctOptionId;
+  // Fetch quiz data
+  useEffect(() => {
+    async function fetchQuiz() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const response = await fetch(`/api/learning/v2/quizzes/${quizId}`);
+        if (!response.ok) {
+          if (response.status === 404) {
+            setError('Quiz not found');
+          } else {
+            setError('Failed to load quiz');
+          }
+          return;
+        }
+
+        const data = await response.json();
+        setQuiz(data);
+        setTimeRemaining(data.timeLimit || 300);
+      } catch (err) {
+        console.error('Error fetching quiz:', err);
+        setError('Failed to load quiz');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchQuiz();
+  }, [quizId]);
 
   // Timer
   useEffect(() => {
-    if (!quizStarted || showResults) return;
+    if (!quizStarted || showResults || !quiz?.timeLimit) return;
 
     const timer = setInterval(() => {
       setTimeRemaining((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          setShowResults(true);
+          handleSubmitQuiz();
           return 0;
         }
         return prev - 1;
@@ -134,7 +127,7 @@ export default function QuizPage() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [quizStarted, showResults]);
+  }, [quizStarted, showResults, quiz?.timeLimit]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -143,23 +136,55 @@ export default function QuizPage() {
   };
 
   const handleSelectAnswer = (optionId: string) => {
-    if (showExplanation) return;
+    if (showExplanation || !quiz) return;
+    const currentQuestion = quiz.questions[currentQuestionIndex];
     setSelectedAnswers((prev) => ({
       ...prev,
       [currentQuestion.id]: optionId,
     }));
   };
 
-  const handleCheckAnswer = () => {
-    setShowExplanation(true);
-  };
+  const handleSubmitQuiz = useCallback(async () => {
+    if (!quiz || submitting) return;
+
+    setSubmitting(true);
+
+    try {
+      const answers = quiz.questions.map((q) => ({
+        questionId: q.id,
+        selectedOptionId: selectedAnswers[q.id] || '',
+      }));
+
+      const timeTaken = quiz.timeLimit ? quiz.timeLimit - timeRemaining : undefined;
+
+      const response = await fetch(`/api/learning/v2/quizzes/${quizId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers, timeTaken }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to submit quiz');
+      }
+
+      const result = await response.json();
+      setQuizResult(result);
+      setShowResults(true);
+    } catch (err) {
+      console.error('Error submitting quiz:', err);
+      setError('Failed to submit quiz. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [quiz, selectedAnswers, timeRemaining, quizId, submitting]);
 
   const handleNextQuestion = () => {
+    if (!quiz) return;
     setShowExplanation(false);
-    if (currentQuestionIndex < mockQuiz.questions.length - 1) {
+    if (currentQuestionIndex < quiz.questions.length - 1) {
       setCurrentQuestionIndex((prev) => prev + 1);
     } else {
-      setShowResults(true);
+      handleSubmitQuiz();
     }
   };
 
@@ -170,90 +195,105 @@ export default function QuizPage() {
     }
   };
 
-  const calculateScore = () => {
-    let correct = 0;
-    mockQuiz.questions.forEach((q) => {
-      if (selectedAnswers[q.id] === q.correctOptionId) {
-        correct++;
-      }
-    });
-    return {
-      correct,
-      total: mockQuiz.questions.length,
-      percentage: Math.round((correct / mockQuiz.questions.length) * 100),
-    };
-  };
-
   const handleRetake = () => {
     setSelectedAnswers({});
     setCurrentQuestionIndex(0);
     setShowResults(false);
+    setQuizResult(null);
     setShowExplanation(false);
-    setTimeRemaining(mockQuiz.timeLimit);
+    setTimeRemaining(quiz?.timeLimit || 300);
     setQuizStarted(true);
   };
+
+  // Loading state
+  if (loading) {
+    return (
+      <>
+        <Header title="Loading Quiz..." breadcrumbs={[{ label: 'Dashboard' }, { label: 'Quiz' }]} />
+        <PageShell>
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-primary)]" />
+            <span className="ml-3 text-[var(--text-secondary)]">Loading quiz...</span>
+          </div>
+        </PageShell>
+      </>
+    );
+  }
+
+  // Error state
+  if (error || !quiz) {
+    return (
+      <>
+        <Header title="Quiz" breadcrumbs={[{ label: 'Dashboard' }, { label: 'Quiz' }]} />
+        <PageShell>
+          <Card className="border-[var(--error)] bg-[var(--error)]/10">
+            <CardContent className="py-8">
+              <div className="flex flex-col items-center gap-4 text-center">
+                <AlertCircle className="w-12 h-12 text-[var(--error)]" />
+                <p className="font-medium text-[var(--text-primary)]">{error || 'Quiz not found'}</p>
+                <Link href="/learning">
+                  <Button variant="secondary">Back to Learning</Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        </PageShell>
+      </>
+    );
+  }
+
+  const currentQuestion = quiz.questions[currentQuestionIndex];
+  const selectedAnswer = selectedAnswers[currentQuestion?.id];
 
   // Start Screen
   if (!quizStarted) {
     return (
       <>
         <Header
-          title={mockQuiz.title}
-          subtitle={mockQuiz.moduleName}
+          title={quiz.title}
+          subtitle={quiz.moduleSlug ? `Module Quiz` : undefined}
           breadcrumbs={[
             { label: 'Dashboard' },
             { label: 'Learning', href: '/learning' },
-            { label: mockQuiz.moduleName, href: `/learning/${mockQuiz.moduleSlug}` },
+            ...(quiz.moduleSlug ? [{ label: 'Module', href: `/learning/${quiz.moduleSlug}` }] : []),
             { label: 'Quiz' },
           ]}
         />
 
         <PageShell>
           <div className="max-w-2xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
               <Card variant="glow">
                 <CardContent className="text-center py-12">
                   <div className="w-20 h-20 mx-auto mb-6 flex items-center justify-center bg-[var(--accent-primary-glow)]">
                     <Trophy className="w-10 h-10 text-[var(--accent-primary)]" />
                   </div>
 
-                  <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-2">
-                    {mockQuiz.title}
-                  </h2>
-                  <p className="text-[var(--text-secondary)] mb-8">
-                    {mockQuiz.description}
-                  </p>
+                  <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-2">{quiz.title}</h2>
+                  <p className="text-[var(--text-secondary)] mb-8">{quiz.description}</p>
 
                   <div className="grid grid-cols-3 gap-4 mb-8">
                     <div className="text-center">
                       <p className="text-2xl font-bold text-[var(--text-primary)]">
-                        {mockQuiz.questions.length}
+                        {quiz.questionsCount}
                       </p>
                       <p className="text-sm text-[var(--text-muted)]">Questions</p>
                     </div>
                     <div className="text-center">
                       <p className="text-2xl font-bold text-[var(--text-primary)]">
-                        {formatTime(mockQuiz.timeLimit)}
+                        {quiz.timeLimit ? formatTime(quiz.timeLimit) : 'No Limit'}
                       </p>
                       <p className="text-sm text-[var(--text-muted)]">Time Limit</p>
                     </div>
                     <div className="text-center">
                       <p className="text-2xl font-bold text-[var(--accent-primary)]">
-                        {mockQuiz.passingScore}%
+                        {quiz.passingScore}%
                       </p>
                       <p className="text-sm text-[var(--text-muted)]">To Pass</p>
                     </div>
                   </div>
 
-                  <Button
-                    variant="primary"
-                    size="lg"
-                    onClick={() => setQuizStarted(true)}
-                    className="px-12"
-                  >
+                  <Button variant="primary" size="lg" onClick={() => setQuizStarted(true)} className="px-12">
                     Start Quiz
                   </Button>
                 </CardContent>
@@ -266,29 +306,23 @@ export default function QuizPage() {
   }
 
   // Results Screen
-  if (showResults) {
-    const score = calculateScore();
-    const passed = score.percentage >= mockQuiz.passingScore;
-
+  if (showResults && quizResult) {
     return (
       <>
         <Header
           title="Quiz Results"
-          subtitle={mockQuiz.title}
+          subtitle={quiz.title}
           breadcrumbs={[
             { label: 'Dashboard' },
             { label: 'Learning', href: '/learning' },
-            { label: mockQuiz.moduleName, href: `/learning/${mockQuiz.moduleSlug}` },
+            ...(quiz.moduleSlug ? [{ label: 'Module', href: `/learning/${quiz.moduleSlug}` }] : []),
             { label: 'Quiz Results' },
           ]}
         />
 
         <PageShell>
           <div className="max-w-2xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-            >
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}>
               <Card variant="glow">
                 <CardContent className="text-center py-12">
                   <motion.div
@@ -297,37 +331,31 @@ export default function QuizPage() {
                     transition={{ type: 'spring', delay: 0.2 }}
                   >
                     <CircularProgress
-                      value={score.percentage}
+                      value={quizResult.percentage}
                       size={160}
                       strokeWidth={12}
-                      variant={passed ? 'success' : 'default'}
+                      variant={quizResult.passed ? 'success' : 'default'}
                       className="mx-auto mb-6"
                     />
                   </motion.div>
 
                   <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-2">
-                    {passed ? 'Congratulations!' : 'Keep Practicing!'}
+                    {quizResult.passed ? 'Congratulations!' : 'Keep Practicing!'}
                   </h2>
                   <p className="text-[var(--text-secondary)] mb-6">
-                    You scored {score.correct} out of {score.total} (
-                    {score.percentage}%)
+                    You scored {quizResult.score} out of {quizResult.totalQuestions} (
+                    {quizResult.percentage}%)
                   </p>
 
-                  <Badge
-                    variant={passed ? 'success' : 'warning'}
-                    size="lg"
-                    className="mb-8"
-                  >
-                    {passed ? 'PASSED' : 'NOT PASSED'}
+                  <Badge variant={quizResult.passed ? 'success' : 'warning'} size="lg" className="mb-8">
+                    {quizResult.passed ? 'PASSED' : 'NOT PASSED'}
                   </Badge>
 
                   <div className="grid grid-cols-2 gap-4 mb-8">
                     <div className="p-4 bg-[var(--bg-tertiary)]">
                       <div className="flex items-center justify-center gap-2 mb-2">
                         <CheckCircle2 className="w-5 h-5 text-[var(--profit)]" />
-                        <span className="text-xl font-bold text-[var(--profit)]">
-                          {score.correct}
-                        </span>
+                        <span className="text-xl font-bold text-[var(--profit)]">{quizResult.score}</span>
                       </div>
                       <p className="text-sm text-[var(--text-muted)]">Correct</p>
                     </div>
@@ -335,7 +363,7 @@ export default function QuizPage() {
                       <div className="flex items-center justify-center gap-2 mb-2">
                         <XCircle className="w-5 h-5 text-[var(--loss)]" />
                         <span className="text-xl font-bold text-[var(--loss)]">
-                          {score.total - score.correct}
+                          {quizResult.totalQuestions - quizResult.score}
                         </span>
                       </div>
                       <p className="text-sm text-[var(--text-muted)]">Incorrect</p>
@@ -343,16 +371,12 @@ export default function QuizPage() {
                   </div>
 
                   <div className="flex items-center justify-center gap-4">
-                    <Button
-                      variant="secondary"
-                      icon={<RotateCcw className="w-4 h-4" />}
-                      onClick={handleRetake}
-                    >
+                    <Button variant="secondary" icon={<RotateCcw className="w-4 h-4" />} onClick={handleRetake}>
                       Retake Quiz
                     </Button>
-                    <Link href={`/learning/${mockQuiz.moduleSlug}`}>
+                    <Link href={quiz.moduleSlug ? `/learning/${quiz.moduleSlug}` : '/learning'}>
                       <Button variant="primary" icon={<Home className="w-4 h-4" />}>
-                        Back to Module
+                        {quiz.moduleSlug ? 'Back to Module' : 'Back to Learning'}
                       </Button>
                     </Link>
                   </div>
@@ -361,47 +385,44 @@ export default function QuizPage() {
 
               {/* Question Review */}
               <div className="mt-6 space-y-4">
-                <h3 className="text-lg font-semibold text-[var(--text-primary)]">
-                  Review Answers
-                </h3>
-                {mockQuiz.questions.map((q, index) => {
-                  const userAnswer = selectedAnswers[q.id];
-                  const isCorrect = userAnswer === q.correctOptionId;
+                <h3 className="text-lg font-semibold text-[var(--text-primary)]">Review Answers</h3>
+                {quizResult.answers.map((answer, index) => {
+                  const question = quiz.questions.find((q) => q.id === answer.questionId);
+                  if (!question) return null;
 
                   return (
-                    <Card key={q.id}>
+                    <Card key={answer.questionId}>
                       <CardContent>
                         <div className="flex items-start gap-3">
                           <div
                             className={cn(
                               'w-8 h-8 flex items-center justify-center flex-shrink-0',
-                              isCorrect
+                              answer.isCorrect
                                 ? 'bg-[rgba(34,197,94,0.15)] text-[var(--profit)]'
                                 : 'bg-[rgba(239,68,68,0.15)] text-[var(--loss)]'
                             )}
                           >
-                            {isCorrect ? (
+                            {answer.isCorrect ? (
                               <CheckCircle2 className="w-5 h-5" />
                             ) : (
                               <XCircle className="w-5 h-5" />
                             )}
                           </div>
                           <div className="flex-1">
-                            <p className="text-sm text-[var(--text-muted)] mb-1">
-                              Question {index + 1}
-                            </p>
-                            <p className="font-medium text-[var(--text-primary)] mb-2">
-                              {q.question}
-                            </p>
+                            <p className="text-sm text-[var(--text-muted)] mb-1">Question {index + 1}</p>
+                            <p className="font-medium text-[var(--text-primary)] mb-2">{question.question}</p>
                             <p className="text-sm text-[var(--text-secondary)]">
                               <span className="text-[var(--profit)]">Correct: </span>
-                              {q.options.find((o) => o.id === q.correctOptionId)?.text}
+                              {question.options.find((o) => o.id === answer.correctOptionId)?.text}
                             </p>
-                            {!isCorrect && userAnswer && (
+                            {!answer.isCorrect && answer.selectedOptionId && (
                               <p className="text-sm text-[var(--text-secondary)]">
                                 <span className="text-[var(--loss)]">Your answer: </span>
-                                {q.options.find((o) => o.id === userAnswer)?.text}
+                                {question.options.find((o) => o.id === answer.selectedOptionId)?.text}
                               </p>
+                            )}
+                            {answer.explanation && (
+                              <p className="text-sm text-[var(--text-muted)] mt-2 italic">{answer.explanation}</p>
                             )}
                           </div>
                         </div>
@@ -421,12 +442,12 @@ export default function QuizPage() {
   return (
     <>
       <Header
-        title={`Question ${currentQuestionIndex + 1} of ${mockQuiz.questions.length}`}
-        subtitle={mockQuiz.title}
+        title={`Question ${currentQuestionIndex + 1} of ${quiz.questions.length}`}
+        subtitle={quiz.title}
         breadcrumbs={[
           { label: 'Dashboard' },
           { label: 'Learning', href: '/learning' },
-          { label: mockQuiz.moduleName, href: `/learning/${mockQuiz.moduleSlug}` },
+          ...(quiz.moduleSlug ? [{ label: 'Module', href: `/learning/${quiz.moduleSlug}` }] : []),
           { label: 'Quiz' },
         ]}
       />
@@ -434,11 +455,7 @@ export default function QuizPage() {
       <PageShell>
         <div className="max-w-2xl mx-auto">
           {/* Timer and Progress */}
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-6"
-          >
+          <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
             <Card>
               <CardContent>
                 <div className="flex items-center justify-between mb-3">
@@ -446,28 +463,24 @@ export default function QuizPage() {
                     <Clock
                       className={cn(
                         'w-5 h-5',
-                        timeRemaining < 60
-                          ? 'text-[var(--loss)]'
-                          : 'text-[var(--text-secondary)]'
+                        timeRemaining < 60 ? 'text-[var(--loss)]' : 'text-[var(--text-secondary)]'
                       )}
                     />
                     <span
                       className={cn(
                         'font-mono text-lg font-bold',
-                        timeRemaining < 60
-                          ? 'text-[var(--loss)]'
-                          : 'text-[var(--text-primary)]'
+                        timeRemaining < 60 ? 'text-[var(--loss)]' : 'text-[var(--text-primary)]'
                       )}
                     >
                       {formatTime(timeRemaining)}
                     </span>
                   </div>
                   <span className="text-sm text-[var(--text-muted)]">
-                    {currentQuestionIndex + 1}/{mockQuiz.questions.length}
+                    {currentQuestionIndex + 1}/{quiz.questions.length}
                   </span>
                 </div>
                 <ProgressBar
-                  value={((currentQuestionIndex + 1) / mockQuiz.questions.length) * 100}
+                  value={((currentQuestionIndex + 1) / quiz.questions.length) * 100}
                   variant="gold"
                   size="sm"
                 />
@@ -492,27 +505,17 @@ export default function QuizPage() {
                   <div className="space-y-3">
                     {currentQuestion.options.map((option) => {
                       const isSelected = selectedAnswer === option.id;
-                      const isCorrectOption =
-                        option.id === currentQuestion.correctOptionId;
-                      const showCorrect = showExplanation && isCorrectOption;
-                      const showIncorrect =
-                        showExplanation && isSelected && !isCorrectOption;
 
                       return (
                         <motion.button
                           key={option.id}
                           onClick={() => handleSelectAnswer(option.id)}
-                          disabled={showExplanation}
-                          whileHover={!showExplanation ? { scale: 1.01 } : {}}
-                          whileTap={!showExplanation ? { scale: 0.99 } : {}}
+                          whileHover={{ scale: 1.01 }}
+                          whileTap={{ scale: 0.99 }}
                           className={cn(
                             'w-full p-4 text-left transition-all duration-150',
                             'border',
-                            showCorrect
-                              ? 'bg-[rgba(34,197,94,0.15)] border-[var(--profit)] text-[var(--text-primary)]'
-                              : showIncorrect
-                              ? 'bg-[rgba(239,68,68,0.15)] border-[var(--loss)] text-[var(--text-primary)]'
-                              : isSelected
+                            isSelected
                               ? 'bg-[var(--accent-primary-glow)] border-[var(--accent-primary)] text-[var(--text-primary)]'
                               : 'bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:border-[var(--border-secondary)]'
                           )}
@@ -521,11 +524,7 @@ export default function QuizPage() {
                             <span
                               className={cn(
                                 'w-8 h-8 flex items-center justify-center text-sm font-medium',
-                                showCorrect
-                                  ? 'bg-[var(--profit)] text-white'
-                                  : showIncorrect
-                                  ? 'bg-[var(--loss)] text-white'
-                                  : isSelected
+                                isSelected
                                   ? 'bg-[var(--accent-primary)] text-black'
                                   : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)]'
                               )}
@@ -533,41 +532,11 @@ export default function QuizPage() {
                               {option.id.toUpperCase()}
                             </span>
                             <span className="flex-1">{option.text}</span>
-                            {showCorrect && (
-                              <CheckCircle2 className="w-5 h-5 text-[var(--profit)]" />
-                            )}
-                            {showIncorrect && (
-                              <XCircle className="w-5 h-5 text-[var(--loss)]" />
-                            )}
                           </div>
                         </motion.button>
                       );
                     })}
                   </div>
-
-                  {/* Explanation */}
-                  <AnimatePresence>
-                    {showExplanation && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="mt-6 p-4 bg-[var(--bg-tertiary)] border-l-4 border-[var(--accent-primary)]"
-                      >
-                        <div className="flex items-start gap-3">
-                          <AlertCircle className="w-5 h-5 text-[var(--accent-primary)] flex-shrink-0 mt-0.5" />
-                          <div>
-                            <p className="font-medium text-[var(--text-primary)] mb-1">
-                              Explanation
-                            </p>
-                            <p className="text-sm text-[var(--text-secondary)]">
-                              {currentQuestion.explanation}
-                            </p>
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
                 </CardContent>
               </Card>
             </motion.div>
@@ -592,25 +561,24 @@ export default function QuizPage() {
                     Previous
                   </Button>
 
-                  {!showExplanation ? (
-                    <Button
-                      variant="primary"
-                      onClick={handleCheckAnswer}
-                      disabled={!selectedAnswer}
-                    >
-                      Check Answer
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="primary"
-                      onClick={handleNextQuestion}
-                      icon={<ArrowRight className="w-4 h-4" />}
-                    >
-                      {currentQuestionIndex === mockQuiz.questions.length - 1
-                        ? 'See Results'
-                        : 'Next Question'}
-                    </Button>
-                  )}
+                  <Button
+                    variant="primary"
+                    onClick={handleNextQuestion}
+                    disabled={!selectedAnswer || submitting}
+                    icon={
+                      submitting ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <ArrowRight className="w-4 h-4" />
+                      )
+                    }
+                  >
+                    {currentQuestionIndex === quiz.questions.length - 1
+                      ? submitting
+                        ? 'Submitting...'
+                        : 'Submit Quiz'
+                      : 'Next Question'}
+                  </Button>
                 </div>
               </CardContent>
             </Card>

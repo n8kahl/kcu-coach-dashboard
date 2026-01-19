@@ -27,7 +27,11 @@ export async function GET(request: Request, { params }: RouteParams) {
     const { id } = await params;
 
     const { searchParams } = new URL(request.url);
-    const includeOutcome = searchParams.get('includeOutcome') === 'true';
+    const includeOutcomeParam = searchParams.get('includeOutcome') === 'true';
+
+    // Only admins can request outcome data via includeOutcome param
+    // Non-admins must have attempted the scenario to see the answer
+    const includeOutcome = includeOutcomeParam && session.isAdmin === true;
 
     const { data: scenario, error } = await supabaseAdmin
       .from('practice_scenarios')
