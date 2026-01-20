@@ -26,7 +26,7 @@
  * ```
  */
 
-import { useEffect, useRef, useCallback, useState, useLayoutEffect } from 'react';
+import { useEffect, useRef, useCallback, useState, useLayoutEffect, memo } from 'react';
 import {
   createChart,
   ColorType,
@@ -404,7 +404,7 @@ const MIN_CHART_HEIGHT = 400;
 // Enable visual debugging (set to true to show red border)
 const DEBUG_CHART = false;
 // Enable detailed console logging for debugging "Value is null" errors
-const DEBUG_LOGGING = true;
+const DEBUG_LOGGING = false;
 
 /**
  * Type guard to validate a line/area data point has valid time and value.
@@ -556,7 +556,7 @@ function createLinePoint(time: Time | null, value: unknown): LineData | null {
   return { time, value };
 }
 
-export function KCUChart({
+export const KCUChart = memo(function KCUChart({
   mode,
   data,
   levels = [],
@@ -1422,7 +1422,25 @@ export function KCUChart({
     });
 
     if (DEBUG_LOGGING) console.log('[KCUChart] Proximity Alert - found', alerts.length, 'alerts');
-    setProximityAlerts(alerts);
+
+    // CRITICAL: Only update state if alerts actually changed to prevent infinite re-renders
+    // Compare by serializing since array references will always differ
+    setProximityAlerts(prev => {
+      // Quick length check first
+      if (prev.length !== alerts.length) return alerts;
+
+      // Deep comparison - check each alert
+      const isSame = prev.every((prevAlert, i) => {
+        const newAlert = alerts[i];
+        return (
+          prevAlert.type === newAlert.type &&
+          prevAlert.price === newAlert.price &&
+          Math.abs(prevAlert.yCoordinate - newAlert.yCoordinate) < 1 // Allow tiny floating point differences
+        );
+      });
+
+      return isSame ? prev : alerts;
+    });
   }, [data, gammaLevels, isInitialized, dimensions]);
 
   // =========================================================================
@@ -1784,6 +1802,6 @@ export function KCUChart({
       )}
     </div>
   );
-}
+});
 
 export default KCUChart;
