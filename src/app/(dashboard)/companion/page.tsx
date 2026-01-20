@@ -259,15 +259,19 @@ export default function CompanionTerminal() {
 
       // If this is the selected symbol, add to chart data
       if (event.data.symbol === selectedSymbol) {
+        // Validate price data before updating chart
+        const price = event.data.price;
+        if (price == null || !isFinite(price)) return;
+
         const now = Math.floor(Date.now() / 1000);
         const newCandle: ChartCandle = {
           time: now,
           timestamp: now,
-          open: event.data.price,
-          high: event.data.price,
-          low: event.data.price,
-          close: event.data.price,
-          volume: event.data.volume,
+          open: price,
+          high: price,
+          low: price,
+          close: price,
+          volume: event.data.volume || 0,
         };
 
         setChartData(prev => {
@@ -311,21 +315,30 @@ export default function CompanionTerminal() {
       if (res.ok) {
         const data = await res.json();
         if (data.bars && data.bars.length > 0) {
-          // Convert timestamps - API returns ms, chart needs seconds
-          setChartData(data.bars.map((c: PolygonBar) => {
-            const ts = c.timestamp || c.time || 0;
-            // Convert ms to seconds if needed (lightweight-charts expects seconds)
-            const timeInSeconds = ts > 1e12 ? Math.floor(ts / 1000) : ts;
-            return {
-              time: timeInSeconds,
-              timestamp: timeInSeconds,
-              open: c.open,
-              high: c.high,
-              low: c.low,
-              close: c.close,
-              volume: c.volume,
-            };
-          }));
+          // Convert timestamps and filter out invalid bars
+          const validBars = data.bars
+            .filter((c: PolygonBar) =>
+              c.open != null && isFinite(c.open) &&
+              c.high != null && isFinite(c.high) &&
+              c.low != null && isFinite(c.low) &&
+              c.close != null && isFinite(c.close) &&
+              (c.timestamp != null || c.time != null)
+            )
+            .map((c: PolygonBar) => {
+              const ts = c.timestamp || c.time || 0;
+              // Convert ms to seconds if needed (lightweight-charts expects seconds)
+              const timeInSeconds = ts > 1e12 ? Math.floor(ts / 1000) : ts;
+              return {
+                time: timeInSeconds,
+                timestamp: timeInSeconds,
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+                volume: c.volume || 0,
+              };
+            });
+          setChartData(validBars);
           setChartError(null);
         } else {
           setChartData([]);
