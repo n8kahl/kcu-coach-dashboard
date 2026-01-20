@@ -29,9 +29,19 @@ export function isTranscriptionConfigured(): boolean {
   return !!process.env.OPENAI_API_KEY;
 }
 
+/**
+ * A timestamped segment from the transcript
+ */
+export interface TranscriptSegment {
+  start: number;    // Start time in seconds
+  end: number;      // End time in seconds
+  text: string;     // Text content of this segment
+}
+
 export interface TranscriptionResult {
   success: boolean;
   transcript?: string;
+  segments?: TranscriptSegment[];  // Timestamped segments for video linking
   duration?: number;
   error?: string;
 }
@@ -104,14 +114,33 @@ export async function transcribeAudioFromUrl(
       response_format: 'verbose_json',
     });
 
+    // Extract timestamped segments from verbose_json response
+    // Whisper returns segments with start, end, and text properties
+    const segments: TranscriptSegment[] = [];
+
+    // The verbose_json response includes a segments array
+    const rawSegments = (transcription as unknown as { segments?: Array<{ start: number; end: number; text: string }> }).segments;
+
+    if (rawSegments && Array.isArray(rawSegments)) {
+      for (const seg of rawSegments) {
+        segments.push({
+          start: seg.start,
+          end: seg.end,
+          text: seg.text.trim(),
+        });
+      }
+    }
+
     logger.info('Transcription completed successfully', {
       textLength: transcription.text.length,
       duration: transcription.duration,
+      segmentCount: segments.length,
     });
 
     return {
       success: true,
       transcript: transcription.text,
+      segments: segments.length > 0 ? segments : undefined,
       duration: transcription.duration,
     };
   } catch (error) {
