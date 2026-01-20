@@ -1252,13 +1252,22 @@ class MarketDataService {
       `options:${symbol}:${expDate}`,
       CACHE_TTL.options,
       async () => {
+        // Massive.com v3 options snapshot response structure
+        // Fields are nested under 'details' and 'underlying_asset'
         interface OptionsResponse {
           results?: Array<{
-            ticker: string;
-            underlying_ticker: string;
-            contract_type: 'call' | 'put';
-            strike_price: number;
-            expiration_date: string;
+            details: {
+              ticker: string;
+              contract_type: 'call' | 'put';
+              strike_price: number;
+              expiration_date: string;
+              shares_per_contract: number;
+              exercise_style: string;
+            };
+            underlying_asset?: {
+              ticker: string;
+              price: number;
+            };
             day?: {
               open: number;
               high: number;
@@ -1270,7 +1279,12 @@ class MarketDataService {
             last_quote?: {
               bid: number;
               ask: number;
+              midpoint: number;
               last_updated: number;
+            };
+            last_trade?: {
+              price: number;
+              size: number;
             };
             open_interest?: number;
             implied_volatility?: number;
@@ -1288,21 +1302,24 @@ class MarketDataService {
           { expiration_date: expDate, limit: 250 }
         );
 
-        if (!data?.results) return null;
+        if (!data?.results || data.results.length === 0) return null;
 
         const calls: OptionContract[] = [];
         const puts: OptionContract[] = [];
 
         for (const opt of data.results) {
+          // Skip if details is missing (malformed response)
+          if (!opt.details) continue;
+
           const contract: OptionContract = {
-            ticker: opt.ticker,
-            underlying: opt.underlying_ticker,
-            type: opt.contract_type,
-            strike: opt.strike_price,
-            expiration: opt.expiration_date,
+            ticker: opt.details.ticker,
+            underlying: opt.underlying_asset?.ticker || symbol,
+            type: opt.details.contract_type,
+            strike: opt.details.strike_price,
+            expiration: opt.details.expiration_date,
             bid: opt.last_quote?.bid || 0,
             ask: opt.last_quote?.ask || 0,
-            last: opt.day?.close || 0,
+            last: opt.last_trade?.price || opt.day?.close || 0,
             volume: opt.day?.volume || 0,
             openInterest: opt.open_interest || 0,
             impliedVolatility: opt.implied_volatility || 0,
@@ -1312,9 +1329,9 @@ class MarketDataService {
             vega: opt.greeks?.vega || 0,
           };
 
-          if (opt.contract_type === 'call') {
+          if (opt.details.contract_type === 'call') {
             calls.push(contract);
-          } else {
+          } else if (opt.details.contract_type === 'put') {
             puts.push(contract);
           }
         }
@@ -1367,16 +1384,22 @@ class MarketDataService {
         const day = dateStr.substring(4, 6);
         const expiration = `${year}-${month}-${day}`;
 
+        // Massive.com v3 options snapshot response structure
         interface OptionSnapshotResponse {
           results?: Array<{
-            ticker: string;
-            underlying_ticker: string;
-            contract_type: 'call' | 'put';
-            strike_price: number;
-            expiration_date: string;
-            last_quote?: { bid: number; ask: number };
-            last_trade?: { price: number };
-            day?: { volume: number };
+            details: {
+              ticker: string;
+              contract_type: 'call' | 'put';
+              strike_price: number;
+              expiration_date: string;
+            };
+            underlying_asset?: {
+              ticker: string;
+              price: number;
+            };
+            last_quote?: { bid: number; ask: number; midpoint: number };
+            last_trade?: { price: number; size: number };
+            day?: { volume: number; close: number };
             open_interest?: number;
             implied_volatility?: number;
             greeks?: {
@@ -1400,18 +1423,18 @@ class MarketDataService {
           }
         );
 
-        if (!data?.results?.[0]) return null;
+        if (!data?.results?.[0]?.details) return null;
 
         const opt = data.results[0];
         return {
-          ticker: opt.ticker,
-          underlying: opt.underlying_ticker,
-          type: opt.contract_type,
-          strike: opt.strike_price,
-          expiration: opt.expiration_date,
+          ticker: opt.details.ticker,
+          underlying: opt.underlying_asset?.ticker || underlying,
+          type: opt.details.contract_type,
+          strike: opt.details.strike_price,
+          expiration: opt.details.expiration_date,
           bid: opt.last_quote?.bid || 0,
           ask: opt.last_quote?.ask || 0,
-          last: opt.last_trade?.price || 0,
+          last: opt.last_trade?.price || opt.day?.close || 0,
           volume: opt.day?.volume || 0,
           openInterest: opt.open_interest || 0,
           impliedVolatility: opt.implied_volatility || 0,
