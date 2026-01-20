@@ -3,6 +3,11 @@
  *
  * Integrates with Massive.com for real-time and historical market data.
  * Uses Redis caching when available, falls back to in-memory.
+ *
+ * Data Consistency Strategy:
+ * - First checks Redis hot cache (from MarketRedistributor) for real-time data
+ * - Falls back to Massive.com REST API if cache miss or stale
+ * - This ensures REST API and WebSocket users see the same price data
  */
 
 // Redis is imported dynamically to avoid bundling issues in edge runtime
@@ -14,8 +19,30 @@ interface CacheOptions {
 interface RedisModule {
   getCache: <T>(key: string, prefix?: string) => Promise<T | null>;
   setCache: <T>(key: string, value: T, options?: CacheOptions) => Promise<boolean>;
+  getRedisClient: () => import('ioredis').Redis | null;
 }
 let redisModule: RedisModule | null = null;
+
+// MarketRedistributor module for hot cache access
+interface CachedQuote {
+  symbol: string;
+  price: number;
+  timestamp: number;
+  data: {
+    price?: number;
+    size?: number;
+    volume?: number;
+    vwap?: number;
+    open?: number;
+    high?: number;
+    low?: number;
+    close?: number;
+    timestamp?: number;
+  } | undefined;
+}
+
+// Hot cache freshness threshold (5 seconds)
+const HOT_CACHE_FRESHNESS_MS = 5000;
 
 async function getRedis() {
   if (!redisModule && typeof window === 'undefined') {
@@ -27,6 +54,36 @@ async function getRedis() {
     }
   }
   return redisModule;
+}
+
+/**
+ * Get quote from Redis hot cache (populated by market-worker)
+ * Returns null if not found or stale (> 5 seconds old)
+ */
+async function getHotCachedQuote(symbol: string): Promise<CachedQuote | null> {
+  const redis = await getRedis();
+  if (!redis) return null;
+
+  const client = redis.getRedisClient();
+  if (!client) return null;
+
+  try {
+    const cacheKey = `quote:${symbol.toUpperCase()}`;
+    const data = await client.get(cacheKey);
+    if (!data) return null;
+
+    const cached = JSON.parse(data) as CachedQuote;
+
+    // Check freshness (must be < 5 seconds old)
+    const age = Date.now() - cached.timestamp;
+    if (age > HOT_CACHE_FRESHNESS_MS) {
+      return null; // Stale cache, will fallback to REST API
+    }
+
+    return cached;
+  } catch {
+    return null;
+  }
 }
 
 async function getCacheValue<T>(key: string): Promise<T | null> {
@@ -374,10 +431,43 @@ class MarketDataService {
 
   /**
    * Get current quote for a ticker
+   *
+   * Data consistency strategy:
+   * 1. First check Redis hot cache (populated by market-worker via Redis Pub/Sub)
+   * 2. If data exists and is fresh (< 5s old), return it immediately
+   * 3. Otherwise, fallback to Massive.com REST API
+   *
+   * This ensures REST API users and WebSocket stream users see the same price data.
    */
   async getQuote(ticker: string): Promise<Quote | null> {
     const symbol = ticker.toUpperCase();
 
+    // First, check the Redis hot cache from market-worker
+    // This ensures consistency with real-time WebSocket data
+    const hotCached = await getHotCachedQuote(symbol);
+    if (hotCached) {
+      // Convert hot cache format to Quote format
+      // Note: Hot cache has limited data, so some fields may be 0
+      return {
+        symbol: hotCached.symbol,
+        last: hotCached.price,
+        price: hotCached.price,
+        change: 0, // Not available from hot cache
+        changePercent: 0, // Not available from hot cache
+        open: hotCached.data?.open || 0,
+        high: hotCached.data?.high || 0,
+        low: hotCached.data?.low || 0,
+        close: hotCached.data?.close || 0,
+        volume: hotCached.data?.volume || 0,
+        vwap: hotCached.data?.vwap || 0,
+        prevClose: 0, // Not available from hot cache
+        prevHigh: 0, // Not available from hot cache
+        prevLow: 0, // Not available from hot cache
+        timestamp: new Date(hotCached.timestamp).toISOString(),
+      };
+    }
+
+    // Fallback to REST API with standard caching
     return this.getCached<Quote>(
       `quote:${symbol}`,
       CACHE_TTL.quote,
