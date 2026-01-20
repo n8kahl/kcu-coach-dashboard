@@ -248,13 +248,27 @@ function detectInsideBars(candles: Candle[]): number[] {
 
 /**
  * Convert timestamp to lightweight-charts Time format
+ * Returns null for invalid inputs to prevent "Value is null" errors
  */
-function toChartTime(time: number | string): Time {
+function toChartTime(time: number | string | null | undefined): Time | null {
+  if (time == null) return null;
+
+  let result: number;
+
   if (typeof time === 'string') {
-    return Math.floor(new Date(time).getTime() / 1000) as Time;
+    const date = new Date(time);
+    if (isNaN(date.getTime())) return null;
+    result = Math.floor(date.getTime() / 1000);
+  } else {
+    if (!isFinite(time)) return null;
+    // If already in seconds, use directly; if in ms, convert
+    result = time > 1e12 ? Math.floor(time / 1000) : time;
   }
-  // If already in seconds, use directly; if in ms, convert
-  return (time > 1e12 ? Math.floor(time / 1000) : time) as Time;
+
+  // Final validation - must be a finite positive number
+  if (!isFinite(result) || result <= 0) return null;
+
+  return result as Time;
 }
 
 // =============================================================================
@@ -548,25 +562,37 @@ export function KCUChart({
 
     if (visibleData.length === 0) return;
 
-    // Convert to chart format
-    const candleData: CandlestickData[] = visibleData.map((c) => ({
-      time: toChartTime(c.time),
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
+    // Convert to chart format, filtering out any candles with invalid times
+    const candleData: CandlestickData[] = visibleData
+      .map((c) => {
+        const time = toChartTime(c.time);
+        if (time === null) return null;
+        return {
+          time,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        };
+      })
+      .filter((c): c is CandlestickData => c !== null);
 
     // Update candle series
     candleSeriesRef.current.setData(candleData);
 
     // Update volume series
     if (volumeSeriesRef.current && showVolume) {
-      const volumeData = visibleData.map((c) => ({
-        time: toChartTime(c.time),
-        value: c.volume || 0,
-        color: c.close >= c.open ? CHART_COLORS.volumeUp : CHART_COLORS.volumeDown,
-      }));
+      const volumeData = visibleData
+        .map((c) => {
+          const time = toChartTime(c.time);
+          if (time === null) return null;
+          return {
+            time,
+            value: c.volume || 0,
+            color: c.close >= c.open ? CHART_COLORS.volumeUp : CHART_COLORS.volumeDown,
+          };
+        })
+        .filter((v): v is NonNullable<typeof v> => v !== null);
       volumeSeriesRef.current.setData(volumeData);
     }
 
@@ -578,11 +604,12 @@ export function KCUChart({
       if (ema8SeriesRef.current) {
         const ema8Values = calculateEMA(closePrices, 8);
         const ema8Data: LineData[] = visibleData
-          .map((c, i) => ({
-            time: toChartTime(c.time),
-            value: ema8Values[i],
-          }))
-          .filter((d) => d.value != null && !isNaN(d.value));
+          .map((c, i) => {
+            const time = toChartTime(c.time);
+            if (time === null) return null;
+            return { time, value: ema8Values[i] };
+          })
+          .filter((d): d is LineData => d !== null && d.value != null && !isNaN(d.value));
         ema8SeriesRef.current.setData(ema8Data);
       }
 
@@ -590,11 +617,12 @@ export function KCUChart({
       if (ema21SeriesRef.current) {
         const ema21Values = calculateEMA(closePrices, 21);
         const ema21Data: LineData[] = visibleData
-          .map((c, i) => ({
-            time: toChartTime(c.time),
-            value: ema21Values[i],
-          }))
-          .filter((d) => d.value != null && !isNaN(d.value));
+          .map((c, i) => {
+            const time = toChartTime(c.time);
+            if (time === null) return null;
+            return { time, value: ema21Values[i] };
+          })
+          .filter((d): d is LineData => d !== null && d.value != null && !isNaN(d.value));
         ema21SeriesRef.current.setData(ema21Data);
       }
 
@@ -602,11 +630,12 @@ export function KCUChart({
       if (sma200SeriesRef.current) {
         const sma200Values = calculateSMA(closePrices, 200);
         const sma200Data: LineData[] = visibleData
-          .map((c, i) => ({
-            time: toChartTime(c.time),
-            value: sma200Values[i],
-          }))
-          .filter((d) => d.value != null && !isNaN(d.value));
+          .map((c, i) => {
+            const time = toChartTime(c.time);
+            if (time === null) return null;
+            return { time, value: sma200Values[i] };
+          })
+          .filter((d): d is LineData => d !== null && d.value != null && !isNaN(d.value));
         sma200SeriesRef.current.setData(sma200Data);
       }
 
@@ -614,11 +643,12 @@ export function KCUChart({
       if (vwapSeriesRef.current) {
         const vwapValues = calculateVWAP(visibleData);
         const vwapData: LineData[] = visibleData
-          .map((c, i) => ({
-            time: toChartTime(c.time),
-            value: vwapValues[i],
-          }))
-          .filter((d) => d.value != null && !isNaN(d.value));
+          .map((c, i) => {
+            const time = toChartTime(c.time);
+            if (time === null) return null;
+            return { time, value: vwapValues[i] };
+          })
+          .filter((d): d is LineData => d !== null && d.value != null && !isNaN(d.value));
         vwapSeriesRef.current.setData(vwapData);
       }
 
@@ -629,13 +659,15 @@ export function KCUChart({
 
         const cloudData: AreaData[] = visibleData
           .map((c, i) => {
+            const time = toChartTime(c.time);
+            if (time === null) return null;
             const ema8 = ema8Values[i];
             const ema21 = ema21Values[i];
             if (ema8 == null || ema21 == null || isNaN(ema8) || isNaN(ema21)) {
               return null;
             }
             return {
-              time: toChartTime(c.time),
+              time,
               value: Math.max(ema8, ema21),
               // Note: Area series doesn't support per-point colors directly
               // We use the higher EMA as the top line
@@ -659,14 +691,19 @@ export function KCUChart({
     // Patience Candle Markers (Inside Bars)
     if (showPatienceCandles && candleSeriesRef.current) {
       const insideBarIndices = detectInsideBars(visibleData);
-      const markers: SeriesMarker<Time>[] = insideBarIndices.map((i) => ({
-        time: toChartTime(visibleData[i].time),
-        position: 'aboveBar',
-        color: CHART_COLORS.patienceMarker,
-        shape: 'arrowDown' as SeriesMarkerShape, // Diamond-like appearance
-        text: '◆', // Diamond symbol
-        size: 1,
-      }));
+      const markers: SeriesMarker<Time>[] = [];
+      for (const i of insideBarIndices) {
+        const time = toChartTime(visibleData[i].time);
+        if (time === null) continue;
+        markers.push({
+          time,
+          position: 'aboveBar',
+          color: CHART_COLORS.patienceMarker,
+          shape: 'arrowDown' as SeriesMarkerShape, // Diamond-like appearance
+          text: '◆', // Diamond symbol
+          size: 1,
+        });
+      }
       candleSeriesRef.current.setMarkers(markers);
     }
 
@@ -724,11 +761,17 @@ export function KCUChart({
 
       // Create a horizontal line across the visible range
       if (data.length > 0) {
-        const lineData: LineData[] = [
-          { time: toChartTime(data[0].time), value: level.price },
-          { time: toChartTime(data[data.length - 1].time), value: level.price },
-        ];
-        series.setData(lineData);
+        const startTime = toChartTime(data[0].time);
+        const endTime = toChartTime(data[data.length - 1].time);
+
+        // Only set data if both times are valid
+        if (startTime !== null && endTime !== null) {
+          const lineData: LineData[] = [
+            { time: startTime, value: level.price },
+            { time: endTime, value: level.price },
+          ];
+          series.setData(lineData);
+        }
       }
 
       levelSeriesRef.current.set(`level-${index}`, series);
@@ -830,11 +873,17 @@ export function KCUChart({
       });
 
       // Create horizontal line across the full visible range
-      const lineData: LineData[] = [
-        { time: toChartTime(data[0].time), value: gamma.price },
-        { time: toChartTime(data[data.length - 1].time), value: gamma.price },
-      ];
-      series.setData(lineData);
+      const startTime = toChartTime(data[0].time);
+      const endTime = toChartTime(data[data.length - 1].time);
+
+      // Only set data if both times are valid
+      if (startTime !== null && endTime !== null) {
+        const lineData: LineData[] = [
+          { time: startTime, value: gamma.price },
+          { time: endTime, value: gamma.price },
+        ];
+        series.setData(lineData);
+      }
 
       gammaSeriesRef.current.set(`gamma-${gamma.type}-${index}`, series);
     });
@@ -942,6 +991,7 @@ export function KCUChart({
 
     // Get the last timestamp for extending boxes to the right
     const lastTime = toChartTime(data[data.length - 1].time);
+    if (lastTime === null) return; // Can't render FVG zones without valid time range
 
     // Render each FVG as a filled area (box)
     nearbyFvgZones.forEach((zone, index) => {
@@ -958,6 +1008,9 @@ export function KCUChart({
       const startTime = toChartTime(zone.startTime);
       // Extend to right edge if not filled
       const endTime = zone.filled ? toChartTime(zone.endTime) : lastTime;
+
+      // Skip this zone if time values are invalid
+      if (startTime === null || endTime === null) return;
 
       // Top boundary line
       const topSeries = chartRef.current!.addLineSeries({

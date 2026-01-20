@@ -140,14 +140,23 @@ export async function GET(request: Request) {
     }
 
     // Convert bars to chart candles (lightweight-charts format)
-    const candles: ChartCandle[] = bars.map((bar: Bar) => ({
-      time: Math.floor(bar.timestamp / 1000), // Convert to seconds
-      open: bar.open,
-      high: bar.high,
-      low: bar.low,
-      close: bar.close,
-      volume: bar.volume,
-    }));
+    // Filter out bars with invalid OHLC values to prevent chart errors
+    const candles: ChartCandle[] = bars
+      .filter((bar: Bar) =>
+        bar.timestamp != null && isFinite(bar.timestamp) &&
+        bar.open != null && isFinite(bar.open) &&
+        bar.high != null && isFinite(bar.high) &&
+        bar.low != null && isFinite(bar.low) &&
+        bar.close != null && isFinite(bar.close)
+      )
+      .map((bar: Bar) => ({
+        time: Math.floor(bar.timestamp / 1000), // Convert to seconds
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        volume: bar.volume || 0,
+      }));
 
     // Get key levels
     const levels = await marketDataService.getKeyLevels(symbol);

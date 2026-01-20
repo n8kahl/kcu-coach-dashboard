@@ -757,23 +757,32 @@ class MarketDataService {
 
         if (!data?.results) return [];
 
-        return data.results.map((bar) => ({
-          t: bar.t,
-          timestamp: bar.t,
-          date: new Date(bar.t).toISOString(),
-          o: bar.o,
-          h: bar.h,
-          l: bar.l,
-          c: bar.c,
-          v: bar.v,
-          vw: bar.vw,
-          open: bar.o,
-          high: bar.h,
-          low: bar.l,
-          close: bar.c,
-          volume: bar.v,
-          vwap: bar.vw,
-        }));
+        // Filter out bars with invalid OHLC values to prevent chart errors
+        return data.results
+          .filter((bar) =>
+            bar.t != null && isFinite(bar.t) &&
+            bar.o != null && isFinite(bar.o) &&
+            bar.h != null && isFinite(bar.h) &&
+            bar.l != null && isFinite(bar.l) &&
+            bar.c != null && isFinite(bar.c)
+          )
+          .map((bar) => ({
+            t: bar.t,
+            timestamp: bar.t,
+            date: new Date(bar.t).toISOString(),
+            o: bar.o,
+            h: bar.h,
+            l: bar.l,
+            c: bar.c,
+            v: bar.v || 0,
+            vw: bar.vw,
+            open: bar.o,
+            high: bar.h,
+            low: bar.l,
+            close: bar.c,
+            volume: bar.v || 0,
+            vwap: bar.vw,
+          }));
       }
     );
 
@@ -1539,23 +1548,32 @@ class MarketDataService {
 
         if (!data?.results) return [];
 
-        return data.results.map((bar) => ({
-          t: bar.t,
-          timestamp: bar.t,
-          date: new Date(bar.t).toISOString(),
-          o: bar.o,
-          h: bar.h,
-          l: bar.l,
-          c: bar.c,
-          v: bar.v,
-          vw: bar.vw,
-          open: bar.o,
-          high: bar.h,
-          low: bar.l,
-          close: bar.c,
-          volume: bar.v,
-          vwap: bar.vw,
-        }));
+        // Filter out bars with invalid OHLC values to prevent chart errors
+        return data.results
+          .filter((bar) =>
+            bar.t != null && isFinite(bar.t) &&
+            bar.o != null && isFinite(bar.o) &&
+            bar.h != null && isFinite(bar.h) &&
+            bar.l != null && isFinite(bar.l) &&
+            bar.c != null && isFinite(bar.c)
+          )
+          .map((bar) => ({
+            t: bar.t,
+            timestamp: bar.t,
+            date: new Date(bar.t).toISOString(),
+            o: bar.o,
+            h: bar.h,
+            l: bar.l,
+            c: bar.c,
+            v: bar.v || 0,
+            vw: bar.vw,
+            open: bar.o,
+            high: bar.h,
+            low: bar.l,
+            close: bar.c,
+            volume: bar.v || 0,
+            vwap: bar.vw,
+          }));
       }
     );
 
