@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import {
@@ -11,7 +11,8 @@ import {
   Shield,
   Hash,
   Save,
-  RotateCcw
+  RotateCcw,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -21,6 +22,7 @@ interface SettingsModalProps {
   onClose: () => void;
   onSave?: (settings: SocialSettings) => Promise<void>;
   initialSettings?: SocialSettings;
+  loading?: boolean; // Show loading state while fetching initial settings
 }
 
 export interface SocialSettings {
@@ -76,10 +78,18 @@ export function SettingsModal({
   onClose,
   onSave,
   initialSettings,
+  loading = false,
 }: SettingsModalProps) {
   const [settings, setSettings] = useState<SocialSettings>(initialSettings || defaultSettings);
   const [isSaving, setIsSaving] = useState(false);
   const [activeSection, setActiveSection] = useState<'schedule' | 'ai' | 'compliance' | 'hashtags'>('ai');
+
+  // Update settings when initialSettings changes (e.g., after fetch)
+  useEffect(() => {
+    if (initialSettings) {
+      setSettings(initialSettings);
+    }
+  }, [initialSettings]);
 
   if (!isOpen) return null;
 
@@ -169,6 +179,15 @@ export function SettingsModal({
 
                 {/* Settings content */}
                 <div className="flex-1 overflow-y-auto p-4">
+                  {loading ? (
+                    <div className="flex items-center justify-center h-full">
+                      <div className="text-center">
+                        <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-primary)] mx-auto mb-3" />
+                        <p className="text-sm text-[var(--text-secondary)]">Loading settings...</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
                   {activeSection === 'ai' && (
                     <div className="space-y-4">
                       <h3 className="text-sm font-semibold text-[var(--text-primary)] uppercase tracking-wide">
@@ -482,6 +501,8 @@ export function SettingsModal({
                         </span>
                       </label>
                     </div>
+                  )}
+                    </>
                   )}
                 </div>
               </div>
