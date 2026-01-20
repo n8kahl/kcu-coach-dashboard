@@ -750,6 +750,12 @@ export function KCUChart({
       }
     }
 
+    // Pre-calculate valid time range - only create series if we have valid data
+    if (data.length === 0) return;
+    const startTime = toChartTime(data[0].time);
+    const endTime = toChartTime(data[data.length - 1].time);
+    if (startTime === null || endTime === null) return;
+
     nearbyLevels.forEach((level, index) => {
       const series = chartRef.current!.addLineSeries({
         color: level.color || LEVEL_COLORS[level.type],
@@ -763,19 +769,11 @@ export function KCUChart({
       });
 
       // Create a horizontal line across the visible range
-      if (data.length > 0) {
-        const startTime = toChartTime(data[0].time);
-        const endTime = toChartTime(data[data.length - 1].time);
-
-        // Only set data if both times are valid
-        if (startTime !== null && endTime !== null) {
-          const lineData: LineData[] = [
-            { time: startTime, value: level.price },
-            { time: endTime, value: level.price },
-          ];
-          series.setData(lineData);
-        }
-      }
+      const lineData: LineData[] = [
+        { time: startTime, value: level.price },
+        { time: endTime, value: level.price },
+      ];
+      series.setData(lineData);
 
       levelSeriesRef.current.set(`level-${index}`, series);
     });
@@ -822,6 +820,11 @@ export function KCUChart({
     const nearbyGammaLevels = validGammaLevels.filter(g =>
       Math.abs(g.price - midPrice) <= maxDistance
     );
+
+    // Pre-calculate valid time range - only create series if we have valid data
+    const startTime = toChartTime(data[0].time);
+    const endTime = toChartTime(data[data.length - 1].time);
+    if (startTime === null || endTime === null) return;
 
     // Add gamma level lines with proper institutional styling
     // Use nearbyGammaLevels to avoid distorting the chart scale
@@ -875,18 +878,12 @@ export function KCUChart({
         crosshairMarkerRadius: 6,
       });
 
-      // Create horizontal line across the full visible range
-      const startTime = toChartTime(data[0].time);
-      const endTime = toChartTime(data[data.length - 1].time);
-
-      // Only set data if both times are valid
-      if (startTime !== null && endTime !== null) {
-        const lineData: LineData[] = [
-          { time: startTime, value: gamma.price },
-          { time: endTime, value: gamma.price },
-        ];
-        series.setData(lineData);
-      }
+      // Create horizontal line across the full visible range (times pre-validated)
+      const lineData: LineData[] = [
+        { time: startTime, value: gamma.price },
+        { time: endTime, value: gamma.price },
+      ];
+      series.setData(lineData);
 
       gammaSeriesRef.current.set(`gamma-${gamma.type}-${index}`, series);
     });
