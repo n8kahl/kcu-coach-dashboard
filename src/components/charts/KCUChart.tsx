@@ -354,12 +354,22 @@ export const KCUChart = memo(function KCUChart({
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: {
         borderColor: 'rgba(255, 255, 255, 0.1)',
-        scaleMargins: { top: 0.1, bottom: showVolume ? 0.2 : 0.1 },
+        scaleMargins: { top: 0.05, bottom: showVolume ? 0.15 : 0.05 },
+        autoScale: true,
       },
       timeScale: {
         borderColor: 'rgba(255, 255, 255, 0.1)',
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (time: number) => {
+          const date = new Date(time * 1000);
+          return date.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+            timeZone: 'America/New_York',
+          });
+        },
       },
     });
 
@@ -651,11 +661,20 @@ export const KCUChart = memo(function KCUChart({
       } catch { /* ignore */ }
     }
 
-    // Fit content
-    if (chartRef.current) {
+    // Fit content and set visible range to last ~100 bars for better scaling
+    if (chartRef.current && validData.length > 0) {
       try {
-        chartRef.current.timeScale().fitContent();
-      } catch { /* ignore */ }
+        const visibleBars = Math.min(100, validData.length);
+        chartRef.current.timeScale().setVisibleLogicalRange({
+          from: validData.length - visibleBars,
+          to: validData.length - 1,
+        });
+      } catch {
+        // Fallback to fitContent if setVisibleLogicalRange fails
+        try {
+          chartRef.current.timeScale().fitContent();
+        } catch { /* ignore */ }
+      }
     }
   }, [data, mode, replayIndex, isInitialized, showVolume, showIndicators, showPatienceCandles]);
 

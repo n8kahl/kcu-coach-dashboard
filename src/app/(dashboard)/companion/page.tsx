@@ -379,23 +379,23 @@ export default function CompanionTerminal() {
         // Build chart levels from LTP analysis response (syncs with AI scoring engine)
         const levels: Level[] = [];
 
-        // Add key levels with proper styling
-        if (data.levels?.pdh != null && isFinite(data.levels.pdh)) {
+        // Add key levels with proper styling - validate price > 0 to avoid invalid levels
+        if (data.levels?.pdh != null && isFinite(data.levels.pdh) && data.levels.pdh > 0) {
           levels.push({ price: data.levels.pdh, label: 'PDH', type: 'resistance', color: '#ef4444' });
         }
-        if (data.levels?.pdl != null && isFinite(data.levels.pdl)) {
+        if (data.levels?.pdl != null && isFinite(data.levels.pdl) && data.levels.pdl > 0) {
           levels.push({ price: data.levels.pdl, label: 'PDL', type: 'support', color: '#22c55e' });
         }
-        if (data.levels?.vwap != null && isFinite(data.levels.vwap)) {
+        if (data.levels?.vwap != null && isFinite(data.levels.vwap) && data.levels.vwap > 0) {
           levels.push({ price: data.levels.vwap, label: 'VWAP', type: 'vwap', color: '#f59e0b' });
         }
-        if (data.levels?.orbHigh != null && isFinite(data.levels.orbHigh)) {
+        if (data.levels?.orbHigh != null && isFinite(data.levels.orbHigh) && data.levels.orbHigh > 0) {
           levels.push({ price: data.levels.orbHigh, label: 'ORB High', type: 'resistance', color: '#8b5cf6', lineStyle: 'dashed' });
         }
-        if (data.levels?.orbLow != null && isFinite(data.levels.orbLow)) {
+        if (data.levels?.orbLow != null && isFinite(data.levels.orbLow) && data.levels.orbLow > 0) {
           levels.push({ price: data.levels.orbLow, label: 'ORB Low', type: 'support', color: '#8b5cf6', lineStyle: 'dashed' });
         }
-        if (data.levels?.sma200 != null && isFinite(data.levels.sma200)) {
+        if (data.levels?.sma200 != null && isFinite(data.levels.sma200) && data.levels.sma200 > 0) {
           levels.push({ price: data.levels.sma200, label: 'SMA 200', type: 'custom', color: '#f97316', lineStyle: 'dotted' });
         }
 

@@ -1627,8 +1627,8 @@ class MarketDataService {
 
         const currentPrice = quote.price;
 
-        // PDH/PDL from quote
-        if (quote.prevHigh) {
+        // PDH/PDL from quote - validate price > 0 to avoid invalid levels
+        if (quote.prevHigh && quote.prevHigh > 0) {
           levels.push({
             type: 'pdh',
             price: quote.prevHigh,
@@ -1636,7 +1636,7 @@ class MarketDataService {
             distance: ((currentPrice - quote.prevHigh) / currentPrice) * 100,
           });
         }
-        if (quote.prevLow) {
+        if (quote.prevLow && quote.prevLow > 0) {
           levels.push({
             type: 'pdl',
             price: quote.prevLow,
@@ -1645,8 +1645,8 @@ class MarketDataService {
           });
         }
 
-        // VWAP from quote
-        if (quote.vwap) {
+        // VWAP from quote - validate price > 0 to avoid invalid levels
+        if (quote.vwap && quote.vwap > 0) {
           levels.push({
             type: 'vwap',
             price: quote.vwap,
@@ -1661,7 +1661,7 @@ class MarketDataService {
           this.getEMA(symbol, 21, 'day', 1),
         ]);
 
-        if (ema9?.values?.[0]) {
+        if (ema9?.values?.[0]?.value && ema9.values[0].value > 0) {
           levels.push({
             type: 'ema9',
             price: ema9.values[0].value,
@@ -1669,7 +1669,7 @@ class MarketDataService {
             distance: ((currentPrice - ema9.values[0].value) / currentPrice) * 100,
           });
         }
-        if (ema21?.values?.[0]) {
+        if (ema21?.values?.[0]?.value && ema21.values[0].value > 0) {
           levels.push({
             type: 'ema21',
             price: ema21.values[0].value,
@@ -1680,7 +1680,7 @@ class MarketDataService {
 
         // Get SMA 200 for major support/resistance
         const sma200 = await this.getSMA(symbol, 200, 'day', 1);
-        if (sma200?.values?.[0]) {
+        if (sma200?.values?.[0]?.value && sma200.values[0].value > 0) {
           levels.push({
             type: 'sma200',
             price: sma200.values[0].value,
@@ -1698,18 +1698,23 @@ class MarketDataService {
             const orbHigh = Math.max(...orbBars.map((b) => b.high));
             const orbLow = Math.min(...orbBars.map((b) => b.low));
 
-            levels.push({
-              type: 'orb_high',
-              price: orbHigh,
-              strength: 80,
-              distance: ((currentPrice - orbHigh) / currentPrice) * 100,
-            });
-            levels.push({
-              type: 'orb_low',
-              price: orbLow,
-              strength: 80,
-              distance: ((currentPrice - orbLow) / currentPrice) * 100,
-            });
+            // Validate ORB prices > 0
+            if (orbHigh > 0) {
+              levels.push({
+                type: 'orb_high',
+                price: orbHigh,
+                strength: 80,
+                distance: ((currentPrice - orbHigh) / currentPrice) * 100,
+              });
+            }
+            if (orbLow > 0) {
+              levels.push({
+                type: 'orb_low',
+                price: orbLow,
+                strength: 80,
+                distance: ((currentPrice - orbLow) / currentPrice) * 100,
+              });
+            }
           }
         }
 

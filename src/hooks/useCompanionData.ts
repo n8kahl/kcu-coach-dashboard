@@ -63,7 +63,7 @@ export function useCompanionData(
   options: UseCompanionDataOptions = {}
 ): UseCompanionDataReturn {
   const {
-    pollInterval = 30000,
+    pollInterval = 15000, // Reduced from 30s to 15s for fresher data
     minConfluence = 50,
     autoPolling = true,
   } = options;
