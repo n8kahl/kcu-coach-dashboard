@@ -14,3 +14,4 @@ export { StudyStatsCard, StudyStatsCardModal } from './StudyStatsCard';
 export { BrainDumpInput } from './brain-dump-input';
 export { VideoContentStudio } from './video-content-studio';
 export { MarketPulse } from './market-pulse';
+export { HallOfFame } from './hall-of-fame';
