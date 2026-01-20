@@ -15,6 +15,9 @@ import {
   Save,
   RotateCcw,
   Plus,
+  Send,
+  Image as ImageIcon,
+  AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PlatformBadge, TikTokIcon } from './platform-badge';
@@ -34,12 +37,19 @@ interface EditableContent {
   platform_variants: PlatformVariants;
 }
 
+interface PublishOptions {
+  platform: SocialPlatform;
+  mediaUrl: string;
+}
+
 interface ContentPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   suggestion: ContentSuggestion | null;
   onApprove?: (id: string, edits?: Partial<EditableContent>) => Promise<void>;
   onReject?: (id: string) => Promise<void>;
+  onPublish?: (id: string, options: PublishOptions) => Promise<void>;
+  connectedPlatforms?: SocialPlatform[];
 }
 
 // ============================================
@@ -178,16 +188,24 @@ export function ContentPreviewModal({
   suggestion,
   onApprove,
   onReject,
+  onPublish,
+  connectedPlatforms = [],
 }: ContentPreviewModalProps) {
   const [copied, setCopied] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
   const [selectedPlatform, setSelectedPlatform] = useState<SocialPlatform>('instagram');
 
   // Edit mode state
   const [isEditMode, setIsEditMode] = useState(false);
   const [editedContent, setEditedContent] = useState<EditableContent | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
+
+  // Publish mode state
+  const [showPublishForm, setShowPublishForm] = useState(false);
+  const [mediaUrl, setMediaUrl] = useState('');
+  const [publishError, setPublishError] = useState<string | null>(null);
 
   // Initialize edited content when suggestion changes or modal opens
   useEffect(() => {
@@ -312,6 +330,39 @@ export function ContentPreviewModal({
       setIsRejecting(false);
     }
   };
+
+  const handlePublish = async () => {
+    if (!onPublish || !mediaUrl.trim()) {
+      setPublishError('Please enter a media URL');
+      return;
+    }
+
+    // Check if platform is connected
+    if (!connectedPlatforms.includes(selectedPlatform)) {
+      setPublishError(`${selectedPlatform} is not connected. Please connect your account first.`);
+      return;
+    }
+
+    setIsPublishing(true);
+    setPublishError(null);
+    try {
+      await onPublish(suggestion.id, {
+        platform: selectedPlatform,
+        mediaUrl: mediaUrl.trim(),
+      });
+      setShowPublishForm(false);
+      setMediaUrl('');
+      onClose();
+    } catch (error) {
+      setPublishError(error instanceof Error ? error.message : 'Publishing failed');
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  // Check if suggestion is approved
+  const isApproved = suggestion?.status === 'approved';
+  const canPublish = isApproved && connectedPlatforms.includes(selectedPlatform);
 
   const platformIcons: Record<SocialPlatform, React.ReactNode> = {
     instagram: <Instagram className="w-4 h-4" />,
@@ -539,6 +590,87 @@ export function ContentPreviewModal({
                 </div>
               </div>
 
+              {/* Publish Form (for approved suggestions) */}
+              {showPublishForm && isApproved && (
+                <div className="p-4 border-t border-[var(--border-primary)] bg-[var(--bg-elevated)]">
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                      <Send className="w-4 h-4 text-[var(--accent-primary)]" />
+                      <span>Publish to {selectedPlatform}</span>
+                    </div>
+
+                    {/* Media URL input */}
+                    <div className="space-y-1">
+                      <label className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide">
+                        Media URL (public image or video URL)
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-1">
+                          <ImageIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
+                          <input
+                            type="url"
+                            value={mediaUrl}
+                            onChange={(e) => {
+                              setMediaUrl(e.target.value);
+                              setPublishError(null);
+                            }}
+                            placeholder="https://example.com/image.jpg"
+                            className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] pl-10 pr-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-[var(--text-muted)]">
+                        Enter a publicly accessible URL to an image or video file
+                      </p>
+                    </div>
+
+                    {/* Error message */}
+                    {publishError && (
+                      <div className="flex items-center gap-2 text-sm text-[var(--error)] bg-[var(--error)]/10 px-3 py-2 border border-[var(--error)]/30">
+                        <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                        <span>{publishError}</span>
+                      </div>
+                    )}
+
+                    {/* Platform connection warning */}
+                    {!connectedPlatforms.includes(selectedPlatform) && (
+                      <div className="flex items-center gap-2 text-sm text-[var(--warning)] bg-[var(--warning)]/10 px-3 py-2 border border-[var(--warning)]/30">
+                        <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                        <span>
+                          {selectedPlatform.charAt(0).toUpperCase() + selectedPlatform.slice(1)} is not connected.
+                          Connect your account from the Overview tab.
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Publish actions */}
+                    <div className="flex items-center gap-2 pt-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setShowPublishForm(false);
+                          setMediaUrl('');
+                          setPublishError(null);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={handlePublish}
+                        loading={isPublishing}
+                        disabled={!mediaUrl.trim() || !canPublish || isPublishing}
+                        icon={<Send className="w-4 h-4" />}
+                      >
+                        Publish Now
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Footer */}
               <div className="flex items-center gap-3 p-4 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)]">
                 <Button
@@ -549,29 +681,49 @@ export function ContentPreviewModal({
                   {copied ? 'Copied!' : 'Copy'}
                 </Button>
                 <div className="flex-1" />
-                {hasChanges && (
-                  <span className="text-xs text-[var(--text-muted)] mr-2">
-                    Changes will be saved on approve
-                  </span>
+
+                {/* Show different actions based on suggestion status */}
+                {isApproved ? (
+                  // Approved suggestion: show Publish button
+                  <>
+                    {!showPublishForm && (
+                      <Button
+                        variant="primary"
+                        onClick={() => setShowPublishForm(true)}
+                        icon={<Send className="w-4 h-4" />}
+                      >
+                        Publish to {selectedPlatform.charAt(0).toUpperCase() + selectedPlatform.slice(1)}
+                      </Button>
+                    )}
+                  </>
+                ) : (
+                  // Pending suggestion: show Approve/Reject
+                  <>
+                    {hasChanges && (
+                      <span className="text-xs text-[var(--text-muted)] mr-2">
+                        Changes will be saved on approve
+                      </span>
+                    )}
+                    <Button
+                      variant="danger"
+                      onClick={handleReject}
+                      loading={isRejecting}
+                      disabled={isApproving || isRejecting || isEditMode}
+                      icon={<ThumbsDown className="w-4 h-4" />}
+                    >
+                      Reject
+                    </Button>
+                    <Button
+                      variant="success"
+                      onClick={handleApprove}
+                      loading={isApproving}
+                      disabled={isApproving || isRejecting || isEditMode}
+                      icon={<ThumbsUp className="w-4 h-4" />}
+                    >
+                      {hasChanges ? 'Approve & Save' : 'Approve'}
+                    </Button>
+                  </>
                 )}
-                <Button
-                  variant="danger"
-                  onClick={handleReject}
-                  loading={isRejecting}
-                  disabled={isApproving || isRejecting || isEditMode}
-                  icon={<ThumbsDown className="w-4 h-4" />}
-                >
-                  Reject
-                </Button>
-                <Button
-                  variant="success"
-                  onClick={handleApprove}
-                  loading={isApproving}
-                  disabled={isApproving || isRejecting || isEditMode}
-                  icon={<ThumbsUp className="w-4 h-4" />}
-                >
-                  {hasChanges ? 'Approve & Save' : 'Approve'}
-                </Button>
               </div>
             </div>
           </motion.div>

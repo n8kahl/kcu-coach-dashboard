@@ -475,6 +475,43 @@ function SocialBuilderContent() {
     }
   };
 
+  const handlePublish = async (
+    suggestionId: string,
+    options: { platform: SocialPlatform; mediaUrl: string }
+  ) => {
+    try {
+      const response = await fetch('/api/admin/social/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          suggestionId,
+          targetPlatform: options.platform,
+          mediaUrl: options.mediaUrl,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        showToast({
+          type: 'success',
+          title: 'Published Successfully',
+          message: data.data.platformUrl
+            ? `View post: ${data.data.platformUrl}`
+            : 'Content has been published',
+        });
+        // Refresh dashboard data
+        fetchDashboardData();
+      } else {
+        throw new Error(data.error || 'Publishing failed');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Publishing failed';
+      showToast({ type: 'error', title: 'Publish Failed', message });
+      throw err; // Re-throw to let the modal handle it
+    }
+  };
+
   const handleAddInfluencer = async (influencer: InfluencerProfileInput) => {
     const response = await fetch('/api/admin/social/influencers', {
       method: 'POST',
@@ -1094,6 +1131,8 @@ function SocialBuilderContent() {
         suggestion={previewSuggestion}
         onApprove={(id, edits) => handleSuggestionAction(id, 'approve', edits)}
         onReject={(id) => handleSuggestionAction(id, 'reject')}
+        onPublish={handlePublish}
+        connectedPlatforms={platforms.filter((p) => p.connected).map((p) => p.platform)}
       />
 
       {confirmAction && (
