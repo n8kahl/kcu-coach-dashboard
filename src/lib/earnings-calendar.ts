@@ -40,11 +40,10 @@ export async function fetchUpcomingEarnings(
     const today = new Date().toISOString().split('T')[0];
     const futureDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-    // Polygon earnings endpoint
-    // Note: This requires a paid Polygon subscription
+    // Massive.com earnings endpoint
     for (const symbol of symbols) {
       try {
-        const url = `https://api.polygon.io/v3/reference/tickers/${symbol}/events?types=earnings&apiKey=${apiKey}`;
+        const url = `https://api.massive.com/v3/reference/tickers/${symbol}/events?types=earnings&apiKey=${apiKey}`;
         const res = await fetch(url);
 
         if (!res.ok) continue;

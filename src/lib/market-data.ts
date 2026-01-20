@@ -291,7 +291,7 @@ class MarketDataService {
 
   constructor() {
     this.apiKey = process.env.MASSIVE_API_KEY || '';
-    this.baseUrl = 'https://api.polygon.io'; // Polygon.io API (Massive.com uses same API)
+    this.baseUrl = 'https://api.massive.com';
   }
 
   /**
