@@ -334,7 +334,8 @@ export class MarketRedistributor {
       // Invoke symbol-specific handlers
       const handlers = this.messageHandlers.get(symbol);
       if (handlers) {
-        for (const handler of handlers) {
+        const handlersArray = Array.from(handlers);
+        for (const handler of handlersArray) {
           try {
             handler(symbol, data);
           } catch (handlerError) {
@@ -344,7 +345,8 @@ export class MarketRedistributor {
       }
 
       // Invoke global handlers
-      for (const handler of this.globalHandlers) {
+      const globalHandlersArray = Array.from(this.globalHandlers);
+      for (const handler of globalHandlersArray) {
         try {
           handler(symbol, data);
         } catch (handlerError) {
