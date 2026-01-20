@@ -55,30 +55,30 @@ export function ConfirmDialog({
     <Portal>
       <AnimatePresence>
         {isOpen && (
-          <>
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
             {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
-          />
+              exit={{ opacity: 0 }}
+              onClick={onClose}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
 
-          {/* Dialog */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-md"
-          >
-            <div className="bg-[var(--bg-card)] border border-[var(--border-primary)] p-6">
-              {/* Close button */}
-              <button
-                onClick={onClose}
-                className="absolute top-4 right-4 p-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
-              >
+            {/* Dialog */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              className="relative z-10 w-full max-w-md mx-4"
+            >
+              <div className="bg-[var(--bg-card)] border border-[var(--border-primary)] p-6 relative">
+                {/* Close button */}
+                <button
+                  onClick={onClose}
+                  className="absolute top-4 right-4 p-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                >
                 <X className="w-5 h-5" />
               </button>
 
@@ -114,9 +114,9 @@ export function ConfirmDialog({
                   {confirmLabel}
                 </Button>
               </div>
-            </div>
-          </motion.div>
-          </>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </Portal>
