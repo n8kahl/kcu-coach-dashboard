@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useOptionalMarketData } from '@/providers/MarketDataProvider';
+import type { PriceData } from '@/hooks/useMarketDataStream';
 import type {
   Quote,
   MarketStatus,
   MarketSnapshot,
-  KeyLevel,
-  IndexQuote,
 } from '@/lib/market-data';
 
 // ============================================
@@ -28,15 +28,42 @@ export interface MarketDataState {
   isLive: boolean;
   error: string | null;
   lastUpdated: Date | null;
+
+  // Connection info
+  isUsingStream: boolean;
 }
 
 export interface UseMarketDataOptions {
   /** Symbols to track beyond SPY/QQQ */
   additionalSymbols?: string[];
-  /** Refresh interval in ms (default: 15000) */
+  /** Refresh interval in ms for REST fallback (default: 15000) */
   refreshInterval?: number;
-  /** Whether to auto-refresh (default: true) */
+  /** Whether to auto-refresh when using REST (default: true) */
   autoRefresh?: boolean;
+}
+
+// ============================================
+// Helper: Convert PriceData to Quote
+// ============================================
+
+function priceDataToQuote(symbol: string, data: PriceData): Quote {
+  return {
+    symbol,
+    price: data.price,
+    last: data.price,
+    change: data.change || 0,
+    changePercent: data.changePercent || 0,
+    open: data.open || 0,
+    high: data.high || 0,
+    low: data.low || 0,
+    close: data.price,
+    volume: data.volume || 0,
+    vwap: data.vwap || 0,
+    prevClose: 0,
+    prevHigh: 0,
+    prevLow: 0,
+    timestamp: new Date(data.timestamp).toISOString(),
+  };
 }
 
 // ============================================
@@ -50,7 +77,11 @@ export function useMarketData(options: UseMarketDataOptions = {}) {
     autoRefresh = true,
   } = options;
 
-  const [state, setState] = useState<MarketDataState>({
+  // Try to use the shared provider first
+  const providerData = useOptionalMarketData();
+
+  // Local state for REST fallback
+  const [restState, setRestState] = useState<MarketDataState>({
     spyQuote: null,
     qqqQuote: null,
     vix: 0,
@@ -60,17 +91,31 @@ export function useMarketData(options: UseMarketDataOptions = {}) {
     isLive: false,
     error: null,
     lastUpdated: null,
+    isUsingStream: false,
   });
 
-  const allSymbols = ['SPY', 'QQQ', ...additionalSymbols];
+  const allSymbols = useMemo(
+    () => ['SPY', 'QQQ', ...additionalSymbols],
+    [additionalSymbols]
+  );
 
+  // Subscribe to additional symbols when using provider
+  useEffect(() => {
+    if (providerData && additionalSymbols.length > 0) {
+      providerData.subscribe(additionalSymbols);
+    }
+  }, [providerData, additionalSymbols]);
+
+  // REST fallback fetch (only used when provider is not available)
   const fetchMarketData = useCallback(async () => {
+    if (providerData) return; // Skip if using provider
+
     try {
       const response = await fetch(`/api/ai/market?symbols=${allSymbols.join(',')}`);
 
       if (!response.ok) {
         if (response.status === 503) {
-          setState((prev) => ({
+          setRestState((prev) => ({
             ...prev,
             isLoading: false,
             isLive: false,
@@ -126,7 +171,7 @@ export function useMarketData(options: UseMarketDataOptions = {}) {
         earlyHours: apiStatus?.status === 'premarket',
       };
 
-      setState({
+      setRestState({
         spyQuote: spyData ? {
           symbol: 'SPY',
           price: spyData.price,
@@ -168,36 +213,80 @@ export function useMarketData(options: UseMarketDataOptions = {}) {
         isLive: true,
         error: null,
         lastUpdated: new Date(),
+        isUsingStream: false,
       });
     } catch (error) {
       console.error('Market data fetch error:', error);
-      setState((prev) => ({
+      setRestState((prev) => ({
         ...prev,
         isLoading: false,
         isLive: false,
         error: error instanceof Error ? error.message : 'Connection error',
       }));
     }
-  }, [allSymbols.join(',')]);
+  }, [allSymbols, providerData]);
 
-  // Initial fetch
+  // Initial fetch for REST fallback
   useEffect(() => {
-    fetchMarketData();
-  }, [fetchMarketData]);
+    if (!providerData) {
+      fetchMarketData();
+    }
+  }, [fetchMarketData, providerData]);
 
-  // Auto-refresh
+  // Auto-refresh for REST fallback
   useEffect(() => {
-    if (!autoRefresh) return;
+    if (!autoRefresh || providerData) return;
 
     const interval = setInterval(fetchMarketData, refreshInterval);
     return () => clearInterval(interval);
-  }, [autoRefresh, refreshInterval, fetchMarketData]);
+  }, [autoRefresh, refreshInterval, fetchMarketData, providerData]);
 
   // Manual refresh function
   const refresh = useCallback(() => {
-    setState((prev) => ({ ...prev, isLoading: true }));
+    if (providerData) {
+      // For stream, just trigger a UI update (data is already live)
+      return;
+    }
+    setRestState((prev) => ({ ...prev, isLoading: true }));
     fetchMarketData();
-  }, [fetchMarketData]);
+  }, [fetchMarketData, providerData]);
+
+  // Build state from provider or REST
+  const state = useMemo<MarketDataState>(() => {
+    if (providerData) {
+      const { prices, connectionStatus, lastUpdate, isUsingFallback } = providerData;
+
+      const spyData = prices['SPY'];
+      const qqqData = prices['QQQ'];
+      const vixData = prices['VIX'];
+
+      // Build snapshots from provider data
+      const snapshots = new Map<string, MarketSnapshot>();
+      for (const [symbol, priceData] of Object.entries(prices)) {
+        snapshots.set(symbol, {
+          symbol,
+          quote: priceDataToQuote(symbol, priceData),
+          keyLevels: [],
+          trend: (priceData.change || 0) >= 0 ? 'bullish' : 'bearish',
+          vwap: priceData.vwap || 0,
+        });
+      }
+
+      return {
+        spyQuote: spyData ? priceDataToQuote('SPY', spyData) : null,
+        qqqQuote: qqqData ? priceDataToQuote('QQQ', qqqData) : null,
+        vix: vixData?.price || 0,
+        marketStatus: { market: 'unknown', afterHours: false, earlyHours: false },
+        snapshots,
+        isLoading: connectionStatus === 'connecting',
+        isLive: connectionStatus === 'connected' || connectionStatus === 'fallback',
+        error: connectionStatus === 'error' ? 'Connection error' : null,
+        lastUpdated: lastUpdate ? new Date(lastUpdate) : null,
+        isUsingStream: !isUsingFallback,
+      };
+    }
+    return restState;
+  }, [providerData, restState]);
 
   // Get formatted data for MarketStatusBar component
   const getMarketStatusBarData = useCallback(() => {
@@ -221,6 +310,7 @@ export function useMarketData(options: UseMarketDataOptions = {}) {
           }) + ' ET'
         : '',
       isLive,
+      isUsingStream: state.isUsingStream,
     };
   }, [state]);
 
@@ -237,7 +327,7 @@ export function useMarketData(options: UseMarketDataOptions = {}) {
 
 export function useMarketStatusBar() {
   const { getMarketStatusBarData, isLoading, error, isLive } = useMarketData({
-    refreshInterval: 30000, // 30 seconds for status bar
+    refreshInterval: 30000, // 30 seconds for status bar (only used as fallback)
   });
 
   return {

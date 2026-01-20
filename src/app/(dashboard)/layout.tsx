@@ -7,6 +7,7 @@ import { CommandPalette } from '@/components/navigation/command-palette';
 import { ToastProvider } from '@/components/ui/toast';
 import { AIContextProvider } from '@/components/ai/AIContextProvider';
 import { AICommandCenter } from '@/components/ai/AICommandCenter';
+import { MarketDataProvider } from '@/providers/MarketDataProvider';
 import { useMarketStatusBar } from '@/hooks/useMarketData';
 
 // Wrapper component to use hooks
@@ -80,7 +81,9 @@ export default function DashboardLayout({
 }) {
   return (
     <ToastProvider>
-      <DashboardContent>{children}</DashboardContent>
+      <MarketDataProvider defaultSymbols={['SPY', 'QQQ', 'VIX']}>
+        <DashboardContent>{children}</DashboardContent>
+      </MarketDataProvider>
     </ToastProvider>
   );
 }
