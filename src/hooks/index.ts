@@ -23,6 +23,15 @@ export { useLearnProgress, useComplianceReport } from './useLearnProgress';
 // Market Data Hooks
 export { useMarketData, useMarketStatusBar } from './useMarketData';
 
+// Companion Hooks
+export {
+  useCompanionData,
+  type CompanionDataState,
+  type UseCompanionDataOptions,
+  type UseCompanionDataReturn,
+  type MarketStatus as CompanionMarketStatus,
+} from './useCompanionData';
+
 // Learning Ledger (Compliance Audit Trail)
 export {
   useLearningLedger,
