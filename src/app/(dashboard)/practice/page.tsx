@@ -41,12 +41,8 @@ import {
 } from 'lucide-react';
 
 // UI Components
-import { Header } from '@/components/layout/Header';
-import { PageShell, PageSection } from '@/components/layout/PageShell';
-import { Card, CardHeader, CardContent } from '@/components/ui/Card';
-import { StatGrid, Stat } from '@/components/ui/Stats';
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
+import { Header, PageShell, PageSection } from '@/components/layout';
+import { Card, CardHeader, CardContent, Stat, StatGrid, Button, Badge } from '@/components/ui';
 
 // Practice Components
 import { PracticeChart } from '@/components/practice/practice-chart';
@@ -665,14 +661,14 @@ export default function PracticePage() {
                 label="Attempts"
                 value={(userStats?.totalAttempts || 0) + sessionStats.attempted}
                 icon={<Target className="w-4 h-4" />}
-                compact
+                variant="compact"
               />
               <Stat
                 label="Correct"
                 value={(userStats?.correctAttempts || 0) + sessionStats.correct}
                 icon={<CheckCircle className="w-4 h-4" />}
                 valueColor="profit"
-                compact
+                variant="compact"
               />
               <Stat
                 label="Accuracy"
@@ -680,7 +676,7 @@ export default function PracticePage() {
                   ? sessionStats.accuracy.toFixed(0)
                   : (userStats?.accuracyPercent?.toFixed(0) || 0)}%`}
                 icon={<Trophy className="w-4 h-4" />}
-                compact
+                variant="compact"
               />
               {/* Optimistic streak display - shows session streak immediately */}
               <Stat
@@ -693,7 +689,7 @@ export default function PracticePage() {
                   sessionStats.currentStreak >= 10 && 'animate-pulse text-orange-400'
                 )} />}
                 valueColor={(sessionStats.currentStreak >= 5 || (userStats?.currentStreak && userStats.currentStreak >= 5)) ? 'profit' : undefined}
-                compact
+                variant="compact"
               />
               {/* Session XP indicator */}
               {sessionStats.sessionXp > 0 && (

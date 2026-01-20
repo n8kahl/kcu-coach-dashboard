@@ -13,7 +13,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useAIContext } from '@/components/ai';
 import { useSomeshVoice, VoiceTrigger } from './useSomeshVoice';
-import { useCandleReplay, OHLCCandle } from './useCandleReplay';
+import { useCandleReplay, AnimatingCandle } from './useCandleReplay';
 import {
   calculateLTP2Score,
   createMarketContext,
@@ -163,7 +163,7 @@ export interface ChartProps {
   gammaLevels: GammaLevel[];
   tradeLevels: KeyLevel[];
   currentPrice: number;
-  animatingCandle: OHLCCandle | null;
+  animatingCandle: AnimatingCandle | null;
   decisionPointIndex: number;
   isReplayMode: boolean;
 }
@@ -449,6 +449,22 @@ export function usePracticeEngine(options: UsePracticeEngineOptions): UsePractic
   useEffect(() => {
     if (!scenario) return;
 
+    // Map internal practice mode to PageSpecificData compatible mode
+    const mapPracticeMode = (m: PracticeMode): 'historical' | 'ai-generated' | 'daily-challenge' | undefined => {
+      switch (m) {
+        case 'ai_generated': return 'ai-generated';
+        case 'standard':
+        case 'replay':
+        case 'quick_drill':
+        case 'deep_analysis':
+          return 'historical';
+        case 'hard_mode':
+          return 'daily-challenge';
+        default:
+          return undefined;
+      }
+    };
+
     // Update AI context with scenario data
     const contextData = {
       currentScenario: {
@@ -456,14 +472,24 @@ export function usePracticeEngine(options: UsePracticeEngineOptions): UsePractic
         title: scenario.title,
         symbol: scenario.symbol,
         difficulty: scenario.difficulty,
-        scenarioType: scenario.scenarioType,
+        scenario_type: scenario.scenarioType,
         tags: [],
         description: scenario.description,
         correct_action: scenario.correctAction,
         focus_area: scenario.scenarioType,
-        ltp_analysis: scenario.ltpAnalysis,
+        ltp_analysis: scenario.ltpAnalysis || {
+          level: { score: 0, reason: 'N/A' },
+          trend: { score: 0, reason: 'N/A' },
+          patience: { score: 0, reason: 'N/A' },
+        },
+        explanation: scenario.explanation || scenario.description,
+        key_levels: scenario.keyLevels.map(l => ({
+          type: l.type,
+          price: l.price,
+          label: l.label || l.type,
+        })),
       },
-      practiceMode: mode,
+      practiceMode: mapPracticeMode(mode),
       practiceAttemptCount: sessionStats.attempted,
       practiceCorrectCount: sessionStats.correct,
     };

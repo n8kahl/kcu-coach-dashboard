@@ -167,14 +167,21 @@ export function MultiTFEngine({
         />
       ) : (
         <PracticeChart
-          chartData={{ ...scenario.chartData, candles: activeData }}
-          keyLevels={scenario.keyLevels || []}
-          decisionPoint={scenario.decisionPoint}
+          visibleCandles={activeData.map(c => ({
+            time: c.t,
+            open: c.o,
+            high: c.h,
+            low: c.l,
+            close: c.c,
+            volume: c.v,
+          }))}
+          levels={scenario.keyLevels || []}
+          decisionPointIndex={undefined}
           outcomeData={result ? scenario.outcomeData : undefined}
           symbol={scenario.symbol}
           timeframe={activeTimeframe}
           showOutcome={!!result}
-          replayMode={false}
+          isReplayMode={false}
           className="h-[450px]"
         />
       )}

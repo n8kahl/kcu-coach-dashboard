@@ -296,14 +296,21 @@ export function AIGeneratedEngine({
       {/* Chart */}
       {scenario.chartData?.candles?.length > 0 && (
         <PracticeChart
-          chartData={scenario.chartData}
-          keyLevels={scenario.keyLevels || []}
-          decisionPoint={scenario.decisionPoint}
+          visibleCandles={scenario.chartData.candles.map(c => ({
+            time: c.t,
+            open: c.o,
+            high: c.h,
+            low: c.l,
+            close: c.c,
+            volume: c.v,
+          }))}
+          levels={scenario.keyLevels || []}
+          decisionPointIndex={undefined}
           outcomeData={result ? scenario.outcomeData : undefined}
           symbol={scenario.symbol}
           timeframe={scenario.chartTimeframe || '5m'}
           showOutcome={!!result}
-          replayMode={false}
+          isReplayMode={false}
           className="h-[400px]"
         />
       )}

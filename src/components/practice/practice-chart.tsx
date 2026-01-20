@@ -37,7 +37,6 @@ import {
 import {
   useCandleReplay,
   type AnimatingCandle,
-  type OHLCCandle,
   easingFunctions,
 } from '@/hooks/useCandleReplay';
 import {
@@ -60,7 +59,7 @@ export interface PracticeChartProps {
   // Core data - controlled by parent
   visibleCandles: Candle[];
   currentIndex?: number;
-  animatingCandle?: OHLCCandle | null;
+  animatingCandle?: AnimatingCandle | null;
 
   // Levels
   levels: KeyLevel[];
@@ -654,7 +653,7 @@ export function PracticeChart({
 
       ribbon.states.forEach((state, i) => {
         const time = (timestamps[i] / 1000) as Time;
-        if (state.isBullish) {
+        if (state.color === 'bullish') {
           bullishData.push({ time, value: state.topEMA });
         } else {
           bearishData.push({ time, value: state.topEMA });

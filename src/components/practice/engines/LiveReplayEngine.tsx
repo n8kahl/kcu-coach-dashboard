@@ -268,18 +268,22 @@ export function LiveReplayEngine({
       {/* Chart with visible candles */}
       {visibleCandles.length > 0 && (
         <PracticeChart
-          chartData={{
-            ...scenario.chartData,
-            candles: showOutcome ? scenario.chartData.candles : visibleCandles,
-          }}
-          keyLevels={scenario.keyLevels || []}
-          decisionPoint={decisionReached ? scenario.decisionPoint : undefined}
+          visibleCandles={(showOutcome ? scenario.chartData.candles : visibleCandles).map(c => ({
+            time: c.t,
+            open: c.o,
+            high: c.h,
+            low: c.l,
+            close: c.c,
+            volume: c.v,
+          }))}
+          levels={scenario.keyLevels || []}
+          decisionPointIndex={decisionReached ? decisionPointIndex : undefined}
           outcomeData={showOutcome ? scenario.outcomeData : undefined}
           symbol={scenario.symbol}
           timeframe={scenario.chartTimeframe || '5m'}
           showOutcome={showOutcome}
-          replayMode={true}
-          initialCandleCount={currentIndex + 1}
+          isReplayMode={true}
+          currentIndex={currentIndex}
           className="h-[400px]"
         />
       )}
