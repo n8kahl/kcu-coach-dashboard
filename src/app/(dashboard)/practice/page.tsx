@@ -654,7 +654,7 @@ export default function PracticePage() {
       <div className="flex flex-col h-[calc(100dvh-4rem)]">
         {/* Stats Row - Flex-none */}
         <div className="flex-none px-4 py-3 bg-[var(--bg-primary)] border-b border-[var(--border-primary)]">
-          <div className="flex items-center justify-between gap-4 overflow-x-auto">
+          <div className="flex items-center justify-between gap-4 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             <div className="flex items-center gap-4 min-w-0">
               {/* Optimistic session stats - updates immediately */}
               <Stat
@@ -712,7 +712,7 @@ export default function PracticePage() {
 
         {/* Mode Selector - Flex-none */}
         <div className="flex-none px-4 py-2 bg-[var(--bg-secondary)] border-b border-[var(--border-primary)]">
-          <div className="flex gap-2 overflow-x-auto pb-1">
+          <div className="flex gap-2 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             {PRACTICE_MODES.map((mode) => {
               const Icon = mode.icon;
               const isActive = practiceMode === mode.id;

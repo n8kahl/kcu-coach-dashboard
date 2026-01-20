@@ -29,6 +29,17 @@ import {
   type StructureBreakContext,
 } from '@/lib/kcu-coaching-rules';
 import type { LTPAnalysis } from '@/lib/market-data';
+
+// Type for Polygon API bar data
+interface PolygonBar {
+  timestamp?: number;
+  time?: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
 import {
   calculateLTP2Score,
   createMarketContext,
@@ -301,8 +312,8 @@ export default function CompanionTerminal() {
         const data = await res.json();
         if (data.bars && data.bars.length > 0) {
           // Convert timestamps - API returns ms, chart needs seconds
-          setChartData(data.bars.map((c: any) => {
-            const ts = c.timestamp || c.time;
+          setChartData(data.bars.map((c: PolygonBar) => {
+            const ts = c.timestamp || c.time || 0;
             // Convert ms to seconds if needed (lightweight-charts expects seconds)
             const timeInSeconds = ts > 1e12 ? Math.floor(ts / 1000) : ts;
             return {
@@ -372,6 +383,11 @@ export default function CompanionTerminal() {
       updateCoachingMessages(symbol);
     } catch (error) {
       console.error('Error fetching analysis:', error);
+      showToast({
+        title: 'Analysis Failed',
+        description: 'Failed to load LTP analysis data. Please try again.',
+        variant: 'destructive',
+      });
     } finally {
       setAnalysisLoading(false);
     }
@@ -497,27 +513,32 @@ export default function CompanionTerminal() {
     }
   }, [selectedSymbol, ltpAnalysis, updateCoachingMessages]);
 
-  // AI Context Sync - Keep AI aware of current analysis
+  // AI Context Sync - Keep AI aware of current analysis (debounced to prevent thrashing)
   useEffect(() => {
-    // Sync selected symbol to global AI context
+    // Sync selected symbol to global AI context immediately
     setAISelectedSymbol(selectedSymbol || undefined);
 
-    // Update page context with relevant data
-    const pageData: Record<string, unknown> = {
-      watchlistSymbols: watchlist.map(w => w.symbol),
-      focusedSymbol: selectedSymbol,
-    };
+    // Debounce the page context update to prevent re-render storms from price ticks
+    const timeoutId = setTimeout(() => {
+      // Update page context with relevant data
+      const pageData: Record<string, unknown> = {
+        watchlistSymbols: watchlist.map(w => w.symbol),
+        focusedSymbol: selectedSymbol,
+      };
 
-    // Add analysis data when available
-    if (selectedSymbol && (ltpAnalysis || ltp2Score)) {
-      pageData.ltpGrade = ltp2Score?.grade || ltpAnalysis?.grade || null;
-      pageData.trendScore = ltp2Score?.breakdown?.cloudScore || ltpAnalysis?.trend?.trendScore || 0;
-      pageData.currentPrice = currentQuote?.last_price || 0;
-      pageData.gammaRegime = gammaData?.regime || null;
-      pageData.vwap = currentQuote?.vwap || 0;
-    }
+      // Add analysis data when available
+      if (selectedSymbol && (ltpAnalysis || ltp2Score)) {
+        pageData.ltpGrade = ltp2Score?.grade || ltpAnalysis?.grade || null;
+        pageData.trendScore = ltp2Score?.breakdown?.cloudScore || ltpAnalysis?.trend?.trendScore || 0;
+        pageData.currentPrice = currentQuote?.last_price || 0;
+        pageData.gammaRegime = gammaData?.regime || null;
+        pageData.vwap = currentQuote?.vwap || 0;
+      }
 
-    updatePageContext('companion', pageData);
+      updatePageContext('companion', pageData);
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeoutId);
   }, [
     selectedSymbol,
     ltpAnalysis,

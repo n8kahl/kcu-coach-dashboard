@@ -391,14 +391,22 @@ export function PracticeChart({
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
 
-    // Handle resize
+    // Handle resize with requestAnimationFrame to prevent "ResizeObserver loop limit exceeded" errors
+    let rafId: number | null = null;
     const handleResize = () => {
-      if (chartContainerRef.current) {
-        chart.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-          height: chartContainerRef.current.clientHeight,
-        });
+      // Cancel any pending RAF to debounce rapid resize events
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
       }
+      rafId = requestAnimationFrame(() => {
+        if (chartContainerRef.current && chart) {
+          chart.applyOptions({
+            width: chartContainerRef.current.clientWidth,
+            height: chartContainerRef.current.clientHeight,
+          });
+        }
+        rafId = null;
+      });
     };
 
     const resizeObserver = new ResizeObserver(handleResize);
@@ -406,6 +414,9 @@ export function PracticeChart({
     handleResize();
 
     return () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
       resizeObserver.disconnect();
       chart.remove();
       chartRef.current = null;
