@@ -737,6 +737,7 @@ export function LessonEditor({ onAddLesson }: LessonEditorProps) {
 
         {/* Tabs */}
         <Tabs
+          defaultValue="video"
           value={editorTab}
           onValueChange={(v) => setEditorTab(v as typeof editorTab)}
           className="flex-1 flex flex-col overflow-hidden"

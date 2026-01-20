@@ -770,7 +770,7 @@ function ConfirmDeleteDialog({
             Cancel
           </Button>
           <Button
-            variant="error"
+            variant="danger"
             onClick={handleConfirm}
             disabled={inputValue !== confirmText || deleting}
             className="flex-1 bg-red-600 hover:bg-red-700"

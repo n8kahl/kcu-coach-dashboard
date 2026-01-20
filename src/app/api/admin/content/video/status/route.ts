@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
-import { adminGuard } from '@/lib/admin-guard';
+import { getSession } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase';
 
 // ============================================
 // Cloudflare Stream Video Status API
@@ -55,9 +55,9 @@ interface CloudflareVideoResponse {
  */
 export async function GET(request: NextRequest) {
   // Check admin access
-  const authResult = await adminGuard(request);
-  if (authResult instanceof NextResponse) {
-    return authResult;
+  const session = await getSession();
+  if (!session?.userId || !session.isAdmin) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const { searchParams } = new URL(request.url);
@@ -151,9 +151,9 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   // Check admin access
-  const authResult = await adminGuard(request);
-  if (authResult instanceof NextResponse) {
-    return authResult;
+  const session = await getSession();
+  if (!session?.userId || !session.isAdmin) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const body = await request.json();
@@ -214,8 +214,6 @@ export async function POST(request: NextRequest) {
 
     // If lessonId provided, update the database
     if (lessonId) {
-      const supabase = await createServerClient();
-
       const updateData: Record<string, unknown> = {
         video_status: videoStatus,
         video_duration_seconds: data.result.duration ? Math.round(data.result.duration) : undefined,
@@ -223,7 +221,7 @@ export async function POST(request: NextRequest) {
         video_playback_dash: data.result.playback?.dash,
       };
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await supabaseAdmin
         .from('course_lessons')
         .update(updateData)
         .eq('id', lessonId);
