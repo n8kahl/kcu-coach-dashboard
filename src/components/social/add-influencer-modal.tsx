@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { X, UserPlus, Instagram, Youtube, AtSign, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Portal } from '@/components/ui/portal';
 import { TikTokIcon } from './platform-badge';
 import type { SocialPlatform, InfluencerProfileInput } from '@/types/social';
 
@@ -86,17 +87,18 @@ export function AddInfluencerModal({
   ];
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
-          />
+    <Portal>
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={onClose}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
+            />
 
           {/* Modal */}
           <motion.div
@@ -287,8 +289,9 @@ export function AddInfluencerModal({
               </div>
             </div>
           </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+          </>
+        )}
+      </AnimatePresence>
+    </Portal>
   );
 }

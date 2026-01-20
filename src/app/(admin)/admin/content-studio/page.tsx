@@ -65,8 +65,10 @@ import {
   LayoutGrid,
   Library,
   Youtube,
+  Scissors,
 } from 'lucide-react';
 import { LibraryManager, VideoPickerModal, type LibraryVideo } from '@/components/admin/content/library-manager';
+import { VideoContentStudio } from '@/components/social';
 
 // ============================================
 // Types
@@ -958,8 +960,8 @@ function ModuleEditorModal({
 export default function ContentStudioPage() {
   const { showToast } = useToast();
 
-  // Page Mode: 'courses' or 'library'
-  const [pageMode, setPageMode] = useState<'courses' | 'library'>('courses');
+  // Page Mode: 'courses', 'library', or 'repurpose'
+  const [pageMode, setPageMode] = useState<'courses' | 'library' | 'repurpose'>('courses');
 
   // Data State
   const [courses, setCourses] = useState<Course[]>([]);
@@ -1382,6 +1384,18 @@ export default function ContentStudioPage() {
                 <Library className="w-4 h-4 inline mr-1.5" />
                 Library
               </button>
+              <button
+                onClick={() => setPageMode('repurpose')}
+                className={cn(
+                  'px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+                  pageMode === 'repurpose'
+                    ? 'bg-[var(--bg-card)] text-[var(--text-primary)] shadow-sm'
+                    : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                )}
+              >
+                <Scissors className="w-4 h-4 inline mr-1.5" />
+                Repurpose
+              </button>
             </div>
 
             {pageMode === 'courses' && (
@@ -1405,6 +1419,13 @@ export default function ContentStudioPage() {
         {pageMode === 'library' && (
           <PageSection>
             <LibraryManager />
+          </PageSection>
+        )}
+
+        {/* Repurpose Mode */}
+        {pageMode === 'repurpose' && (
+          <PageSection>
+            <VideoContentStudio showToast={showToast} />
           </PageSection>
         )}
 

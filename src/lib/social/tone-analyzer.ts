@@ -556,3 +556,760 @@ export async function updateKCUToneProfile(
 
   return !error;
 }
+
+// ============================================
+// Hybrid Voice Profile System
+// Combines Instagram & YouTube data for Somesh's voice
+// ============================================
+
+import {
+  scrapeInstagramPosts,
+  scrapeYouTubePosts,
+} from './influencer-scraper';
+import { transcribeAudioFromUrl } from '@/lib/transcription';
+
+export interface InstagramVoiceLayer {
+  highFrequencyEmojis: Array<{ emoji: string; count: number; percentage: number }>;
+  hashtagClusters: Array<{
+    cluster: string;
+    hashtags: string[];
+    frequency: number;
+  }>;
+  captionStructures: {
+    avgLength: number;
+    hookPatterns: string[];
+    ctaPatterns: string[];
+    lineBreakStyle: 'none' | 'single' | 'double' | 'heavy';
+  };
+  topPerformingCaptions: Array<{
+    caption: string;
+    engagementRate: number;
+    hashtags: string[];
+  }>;
+  signaturePhrases: string[];
+  postingStyle: {
+    avgHashtagsPerPost: number;
+    emojiDensity: number; // per 100 chars
+    questionFrequency: number; // percentage of posts with questions
+    mentionFrequency: number;
+  };
+}
+
+export interface YouTubeVoiceLayer {
+  educationalTone: {
+    teachingPhrases: string[];
+    explanationPatterns: string[];
+    conceptIntroductions: string[];
+  };
+  deepDivePhrases: string[];
+  vocabularyProfile: {
+    technicalTerms: string[];
+    casualExpressions: string[];
+    tradingJargon: string[];
+    motivationalPhrases: string[];
+  };
+  narrativeStyle: {
+    storyOpenings: string[];
+    transitionPhrases: string[];
+    conclusionPatterns: string[];
+  };
+  speakingCadence: {
+    avgSentenceLength: number;
+    repetitionPatterns: string[];
+    emphasisPhrases: string[];
+  };
+}
+
+export interface HybridVoiceProfile {
+  id: string;
+  handle: string;
+  displayName: string;
+  instagramLayer: InstagramVoiceLayer;
+  youtubeLayer: YouTubeVoiceLayer;
+  combinedInsights: {
+    coreVocabulary: string[];
+    signaturePhrases: string[];
+    brandKeywords: string[];
+    avoidedLanguage: string[];
+    toneAttributes: Record<string, number>;
+    platformSpecificAdjustments: {
+      instagram: {
+        emojiStyle: string[];
+        hashtagStrategy: string[];
+        captionLength: 'short' | 'medium' | 'long';
+      };
+      youtube: {
+        openingStyle: string;
+        closingCTA: string;
+        segmentTransitions: string[];
+      };
+      twitter: {
+        threadStyle: boolean;
+        hashtagLimit: number;
+        mentionStyle: string;
+      };
+    };
+  };
+  lastUpdated: string;
+  dataSourcesUsed: {
+    instagramPosts: number;
+    youtubeTranscripts: number;
+  };
+}
+
+// ============================================
+// Voice Profile Analysis Prompts
+// ============================================
+
+const INSTAGRAM_ANALYSIS_PROMPT = `You are analyzing Instagram content from a day trading educator to extract their unique voice and style patterns.
+
+CAPTIONS DATA:
+{captions_json}
+
+Analyze these captions and extract:
+
+1. HIGH_FREQUENCY_EMOJIS: Top 10 emojis used, with count and percentage
+2. HASHTAG_CLUSTERS: Group related hashtags (e.g., "Trading Education" cluster: #daytrading, #tradinglife, #learntorade)
+3. CAPTION_STRUCTURES:
+   - Average caption length
+   - Common hook patterns (first line patterns)
+   - CTA patterns (call to action styles)
+   - Line break style preference
+4. SIGNATURE_PHRASES: Unique phrases they repeat (e.g., "Listen fam", "Trust the process")
+5. POSTING_STYLE: Stats on hashtags, emojis, questions, mentions
+
+Return JSON with this exact structure:
+{
+  "highFrequencyEmojis": [{"emoji": "🔥", "count": 15, "percentage": 20.5}],
+  "hashtagClusters": [{"cluster": "Trading Education", "hashtags": ["#daytrading"], "frequency": 80}],
+  "captionStructures": {
+    "avgLength": 250,
+    "hookPatterns": ["Stop doing X. Start doing Y."],
+    "ctaPatterns": ["Drop a 🔥 if you agree"],
+    "lineBreakStyle": "double"
+  },
+  "topPerformingCaptions": [{"caption": "...", "engagementRate": 5.2, "hashtags": []}],
+  "signaturePhrases": ["Listen fam", "Trust the process"],
+  "postingStyle": {
+    "avgHashtagsPerPost": 8,
+    "emojiDensity": 2.5,
+    "questionFrequency": 30,
+    "mentionFrequency": 10
+  }
+}
+
+Return ONLY valid JSON.`;
+
+const YOUTUBE_ANALYSIS_PROMPT = `You are analyzing YouTube transcript content from a day trading educator (Somesh from KCU Trading) to extract their teaching voice and educational patterns.
+
+TRANSCRIPT:
+{transcript}
+
+Analyze this transcript and extract:
+
+1. EDUCATIONAL_TONE:
+   - Teaching phrases ("Let me show you", "Here's the key")
+   - Explanation patterns (how they break down concepts)
+   - Concept introductions (how they introduce new ideas)
+
+2. DEEP_DIVE_PHRASES: Phrases used when going deep into a topic
+
+3. VOCABULARY_PROFILE:
+   - Technical terms they use frequently
+   - Casual expressions and slang
+   - Trading-specific jargon
+   - Motivational phrases
+
+4. NARRATIVE_STYLE:
+   - Story openings
+   - Transition phrases between topics
+   - Conclusion patterns
+
+5. SPEAKING_CADENCE:
+   - Average sentence length (words)
+   - Repetition patterns (phrases they repeat for emphasis)
+   - Emphasis phrases ("This is CRUCIAL", "Write this down")
+
+Return JSON with this exact structure:
+{
+  "educationalTone": {
+    "teachingPhrases": ["Let me break this down"],
+    "explanationPatterns": ["The reason for this is..."],
+    "conceptIntroductions": ["So what is X? X is..."]
+  },
+  "deepDivePhrases": ["Let's really dig into this"],
+  "vocabularyProfile": {
+    "technicalTerms": ["VWAP", "support", "resistance"],
+    "casualExpressions": ["Fam", "Y'all", "Sweet"],
+    "tradingJargon": ["LTP", "patience candle", "key level"],
+    "motivationalPhrases": ["Trust the process", "Patience pays"]
+  },
+  "narrativeStyle": {
+    "storyOpenings": ["Back when I first started..."],
+    "transitionPhrases": ["Now here's where it gets interesting"],
+    "conclusionPatterns": ["And that's the beauty of LTP"]
+  },
+  "speakingCadence": {
+    "avgSentenceLength": 12,
+    "repetitionPatterns": ["X. Let me say that again. X."],
+    "emphasisPhrases": ["This is crucial", "Write this down"]
+  }
+}
+
+Return ONLY valid JSON.`;
+
+const COMBINE_INSIGHTS_PROMPT = `You are creating a unified voice profile by combining Instagram and YouTube analysis data from Somesh (KCU Trading).
+
+INSTAGRAM ANALYSIS:
+{instagram_json}
+
+YOUTUBE ANALYSIS:
+{youtube_json}
+
+Create a combined insights profile that merges both platforms:
+
+1. CORE_VOCABULARY: Words/phrases consistent across both platforms
+2. SIGNATURE_PHRASES: Their most distinctive expressions
+3. BRAND_KEYWORDS: Key terms that define their brand
+4. AVOIDED_LANGUAGE: Terms they never use (infer from patterns)
+5. TONE_ATTRIBUTES: Scores 0-100 for:
+   - confident, humble, educational, motivational, professional, casual, authoritative, supportive, disciplined, patient
+6. PLATFORM_SPECIFIC_ADJUSTMENTS: How their voice adapts per platform
+
+Return JSON:
+{
+  "coreVocabulary": ["LTP", "patience", "level", "trend"],
+  "signaturePhrases": ["Listen fam", "Trust the process"],
+  "brandKeywords": ["LTP Framework", "price action", "patience candle"],
+  "avoidedLanguage": ["get rich quick", "guaranteed profits"],
+  "toneAttributes": {
+    "confident": 85,
+    "humble": 60,
+    "educational": 90,
+    "motivational": 80,
+    "professional": 70,
+    "casual": 75,
+    "authoritative": 80,
+    "supportive": 85,
+    "disciplined": 90,
+    "patient": 95
+  },
+  "platformSpecificAdjustments": {
+    "instagram": {
+      "emojiStyle": ["🎯", "📈", "💰"],
+      "hashtagStrategy": ["Mix popular + niche"],
+      "captionLength": "medium"
+    },
+    "youtube": {
+      "openingStyle": "Hook with problem/question",
+      "closingCTA": "Like, subscribe, join the fam",
+      "segmentTransitions": ["Now let's look at..."]
+    },
+    "twitter": {
+      "threadStyle": true,
+      "hashtagLimit": 3,
+      "mentionStyle": "Minimal, strategic"
+    }
+  }
+}
+
+Return ONLY valid JSON.`;
+
+// ============================================
+// Main updateVoiceProfile Function
+// ============================================
+
+export interface UpdateVoiceProfileOptions {
+  instagramHandle?: string;
+  youtubeChannelId?: string;
+  forceRefresh?: boolean;
+}
+
+export interface UpdateVoiceProfileResult {
+  success: boolean;
+  profile?: HybridVoiceProfile;
+  error?: string;
+  dataCollected: {
+    instagramPosts: number;
+    youtubeTranscript: boolean;
+  };
+}
+
+/**
+ * Update the voice profile by scraping Somesh's latest content
+ * from Instagram and YouTube, then analyzing to create a hybrid profile
+ */
+export async function updateVoiceProfile(
+  options: UpdateVoiceProfileOptions = {}
+): Promise<UpdateVoiceProfileResult> {
+  const {
+    instagramHandle = 'kaycapitals',
+    youtubeChannelId = 'UC_KCU_CHANNEL_ID', // Replace with actual channel ID
+    forceRefresh = false,
+  } = options;
+
+  const result: UpdateVoiceProfileResult = {
+    success: false,
+    dataCollected: {
+      instagramPosts: 0,
+      youtubeTranscript: false,
+    },
+  };
+
+  try {
+    console.log(`[VoiceProfile] Starting voice profile update for @${instagramHandle}`);
+
+    // Step 1: Scrape Instagram posts
+    console.log('[VoiceProfile] Scraping Instagram posts...');
+    const instagramPosts = await scrapeInstagramPosts(instagramHandle, 20);
+    result.dataCollected.instagramPosts = instagramPosts.length;
+
+    if (instagramPosts.length === 0) {
+      console.warn('[VoiceProfile] No Instagram posts found, using cached data if available');
+    }
+
+    // Step 2: Get YouTube transcript
+    console.log('[VoiceProfile] Fetching YouTube content...');
+    let youtubeTranscript = '';
+
+    try {
+      // Get latest YouTube videos
+      const youtubePosts = await scrapeYouTubePosts(youtubeChannelId, 5);
+
+      if (youtubePosts.length > 0) {
+        // Try to get transcript from the most recent long-form video
+        const longFormVideo = youtubePosts.find(
+          (p) => p.content_type === 'video' && (p.video_duration_seconds || 0) > 300
+        );
+
+        if (longFormVideo && longFormVideo.platform_url) {
+          // Extract video ID
+          const videoIdMatch = longFormVideo.platform_url.match(/[?&]v=([^&]+)/);
+          if (videoIdMatch) {
+            // Try to get transcript using YouTube's auto-generated captions
+            const transcriptResult = await fetchYouTubeTranscript(videoIdMatch[1]);
+            if (transcriptResult) {
+              youtubeTranscript = transcriptResult;
+              result.dataCollected.youtubeTranscript = true;
+            }
+          }
+        }
+      }
+    } catch (ytError) {
+      console.warn('[VoiceProfile] YouTube transcript fetch failed:', ytError);
+    }
+
+    // Step 3: Analyze Instagram content
+    console.log('[VoiceProfile] Analyzing Instagram voice layer...');
+    const instagramLayer = await analyzeInstagramVoice(instagramPosts);
+
+    // Step 4: Analyze YouTube content (if available)
+    console.log('[VoiceProfile] Analyzing YouTube voice layer...');
+    const youtubeLayer = await analyzeYouTubeVoice(youtubeTranscript);
+
+    // Step 5: Combine insights
+    console.log('[VoiceProfile] Creating combined voice profile...');
+    const combinedInsights = await combineVoiceInsights(instagramLayer, youtubeLayer);
+
+    // Step 6: Create the hybrid profile
+    const hybridProfile: HybridVoiceProfile = {
+      id: `voice-profile-${Date.now()}`,
+      handle: instagramHandle,
+      displayName: 'Somesh (KCU Trading)',
+      instagramLayer,
+      youtubeLayer,
+      combinedInsights,
+      lastUpdated: new Date().toISOString(),
+      dataSourcesUsed: {
+        instagramPosts: instagramPosts.length,
+        youtubeTranscripts: youtubeTranscript ? 1 : 0,
+      },
+    };
+
+    // Step 7: Save to social_builder_config
+    console.log('[VoiceProfile] Saving to database...');
+    const { error: saveError } = await supabase
+      .from('social_builder_config')
+      .upsert({
+        config_key: 'hybrid_voice_profile',
+        config_value: hybridProfile,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'config_key',
+      });
+
+    if (saveError) {
+      console.error('[VoiceProfile] Error saving profile:', saveError);
+      result.error = `Failed to save profile: ${saveError.message}`;
+      return result;
+    }
+
+    // Also update the KCU tone profile with key insights
+    await updateKCUToneProfileFromHybrid(hybridProfile);
+
+    result.success = true;
+    result.profile = hybridProfile;
+
+    console.log('[VoiceProfile] Voice profile updated successfully');
+    return result;
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('[VoiceProfile] Update failed:', errorMessage);
+    result.error = errorMessage;
+    return result;
+  }
+}
+
+/**
+ * Analyze Instagram posts to extract voice layer
+ */
+async function analyzeInstagramVoice(
+  posts: Array<{
+    caption?: string;
+    hashtags: string[];
+    likes_count: number;
+    comments_count: number;
+    views_count?: number;
+  }>
+): Promise<InstagramVoiceLayer> {
+  if (posts.length === 0) {
+    return getDefaultInstagramLayer();
+  }
+
+  try {
+    // Prepare captions data
+    const captionsData = posts.map((p, idx) => ({
+      caption: p.caption || '',
+      hashtags: p.hashtags,
+      engagement: calculatePostEngagement(p),
+    }));
+
+    const prompt = INSTAGRAM_ANALYSIS_PROMPT.replace(
+      '{captions_json}',
+      JSON.stringify(captionsData, null, 2)
+    );
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const content = response.content[0];
+    if (content.type !== 'text') {
+      throw new Error('Unexpected response type');
+    }
+
+    // Clean and parse JSON
+    let cleanedText = content.text.trim();
+    if (cleanedText.startsWith('```json')) cleanedText = cleanedText.slice(7);
+    if (cleanedText.startsWith('```')) cleanedText = cleanedText.slice(3);
+    if (cleanedText.endsWith('```')) cleanedText = cleanedText.slice(0, -3);
+
+    return JSON.parse(cleanedText.trim()) as InstagramVoiceLayer;
+  } catch (error) {
+    console.error('[VoiceProfile] Instagram analysis error:', error);
+    return getDefaultInstagramLayer();
+  }
+}
+
+/**
+ * Analyze YouTube transcript to extract voice layer
+ */
+async function analyzeYouTubeVoice(transcript: string): Promise<YouTubeVoiceLayer> {
+  if (!transcript || transcript.length < 100) {
+    return getDefaultYouTubeLayer();
+  }
+
+  try {
+    // Limit transcript to avoid token limits
+    const truncatedTranscript = transcript.substring(0, 15000);
+
+    const prompt = YOUTUBE_ANALYSIS_PROMPT.replace('{transcript}', truncatedTranscript);
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const content = response.content[0];
+    if (content.type !== 'text') {
+      throw new Error('Unexpected response type');
+    }
+
+    // Clean and parse JSON
+    let cleanedText = content.text.trim();
+    if (cleanedText.startsWith('```json')) cleanedText = cleanedText.slice(7);
+    if (cleanedText.startsWith('```')) cleanedText = cleanedText.slice(3);
+    if (cleanedText.endsWith('```')) cleanedText = cleanedText.slice(0, -3);
+
+    return JSON.parse(cleanedText.trim()) as YouTubeVoiceLayer;
+  } catch (error) {
+    console.error('[VoiceProfile] YouTube analysis error:', error);
+    return getDefaultYouTubeLayer();
+  }
+}
+
+/**
+ * Combine Instagram and YouTube insights into unified profile
+ */
+async function combineVoiceInsights(
+  instagramLayer: InstagramVoiceLayer,
+  youtubeLayer: YouTubeVoiceLayer
+): Promise<HybridVoiceProfile['combinedInsights']> {
+  try {
+    const prompt = COMBINE_INSIGHTS_PROMPT
+      .replace('{instagram_json}', JSON.stringify(instagramLayer, null, 2))
+      .replace('{youtube_json}', JSON.stringify(youtubeLayer, null, 2));
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const content = response.content[0];
+    if (content.type !== 'text') {
+      throw new Error('Unexpected response type');
+    }
+
+    // Clean and parse JSON
+    let cleanedText = content.text.trim();
+    if (cleanedText.startsWith('```json')) cleanedText = cleanedText.slice(7);
+    if (cleanedText.startsWith('```')) cleanedText = cleanedText.slice(3);
+    if (cleanedText.endsWith('```')) cleanedText = cleanedText.slice(0, -3);
+
+    return JSON.parse(cleanedText.trim());
+  } catch (error) {
+    console.error('[VoiceProfile] Combine insights error:', error);
+    return getDefaultCombinedInsights();
+  }
+}
+
+/**
+ * Fetch YouTube transcript using available methods
+ */
+async function fetchYouTubeTranscript(videoId: string): Promise<string | null> {
+  try {
+    // Method 1: Try YouTube's official caption API
+    const apiKey = process.env.YOUTUBE_API_KEY;
+
+    if (apiKey) {
+      // Get captions list
+      const captionsResponse = await fetch(
+        `https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId=${videoId}&key=${apiKey}`
+      );
+
+      if (captionsResponse.ok) {
+        const captionsData = await captionsResponse.json();
+        const englishCaption = captionsData.items?.find(
+          (item: any) => item.snippet?.language === 'en'
+        );
+
+        if (englishCaption) {
+          // Download caption (requires OAuth for official API, so fallback to alternatives)
+          console.log('[VoiceProfile] Caption found, but download requires OAuth');
+        }
+      }
+    }
+
+    // Method 2: Try third-party transcript service (if configured)
+    const transcriptApiKey = process.env.YOUTUBE_TRANSCRIPT_API_KEY;
+
+    if (transcriptApiKey) {
+      const response = await fetch(
+        `https://api.youtubetranscript.com/?id=${videoId}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${transcriptApiKey}`,
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.transcript) {
+          return data.transcript;
+        }
+      }
+    }
+
+    // Method 3: If we have the video in our library with a transcript, use that
+    const { data: videoWithTranscript } = await supabase
+      .from('course_lessons')
+      .select('transcript_text')
+      .or(`video_url.ilike.%${videoId}%,external_id.eq.${videoId}`)
+      .limit(1)
+      .single();
+
+    if (videoWithTranscript?.transcript_text) {
+      return videoWithTranscript.transcript_text;
+    }
+
+    console.log('[VoiceProfile] No transcript available for video:', videoId);
+    return null;
+  } catch (error) {
+    console.error('[VoiceProfile] Transcript fetch error:', error);
+    return null;
+  }
+}
+
+/**
+ * Update KCU tone profile from hybrid profile
+ */
+async function updateKCUToneProfileFromHybrid(
+  hybrid: HybridVoiceProfile
+): Promise<void> {
+  try {
+    const toneProfileUpdate: Partial<KCUToneProfile> = {
+      voice_attributes: hybrid.combinedInsights.toneAttributes,
+      preferred_phrases: hybrid.combinedInsights.signaturePhrases,
+      preferred_emojis: hybrid.combinedInsights.platformSpecificAdjustments.instagram.emojiStyle,
+      hook_patterns: hybrid.instagramLayer.captionStructures.hookPatterns,
+      cta_patterns: hybrid.instagramLayer.captionStructures.ctaPatterns,
+      always_use_hashtags: hybrid.instagramLayer.hashtagClusters
+        .flatMap((c) => c.hashtags)
+        .slice(0, 10),
+      updated_at: new Date().toISOString(),
+    };
+
+    await supabase
+      .from('kcu_tone_profile')
+      .update(toneProfileUpdate)
+      .eq('is_active', true);
+
+    console.log('[VoiceProfile] KCU tone profile updated from hybrid data');
+  } catch (error) {
+    console.error('[VoiceProfile] Failed to update KCU tone profile:', error);
+  }
+}
+
+/**
+ * Get the current hybrid voice profile from storage
+ */
+export async function getHybridVoiceProfile(): Promise<HybridVoiceProfile | null> {
+  try {
+    const { data, error } = await supabase
+      .from('social_builder_config')
+      .select('config_value')
+      .eq('config_key', 'hybrid_voice_profile')
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return data.config_value as HybridVoiceProfile;
+  } catch {
+    return null;
+  }
+}
+
+// ============================================
+// Helper Functions
+// ============================================
+
+function calculatePostEngagement(post: {
+  likes_count: number;
+  comments_count: number;
+  views_count?: number;
+}): number {
+  const total = post.likes_count + post.comments_count * 2;
+  const baseline = post.views_count || 10000;
+  return Math.round((total / baseline) * 10000) / 100;
+}
+
+function getDefaultInstagramLayer(): InstagramVoiceLayer {
+  return {
+    highFrequencyEmojis: [
+      { emoji: '🎯', count: 10, percentage: 15 },
+      { emoji: '📈', count: 8, percentage: 12 },
+      { emoji: '💰', count: 7, percentage: 10 },
+    ],
+    hashtagClusters: [
+      { cluster: 'Trading', hashtags: ['#daytrading', '#trading', '#stockmarket'], frequency: 80 },
+      { cluster: 'Education', hashtags: ['#tradinglife', '#learntorade'], frequency: 60 },
+    ],
+    captionStructures: {
+      avgLength: 200,
+      hookPatterns: ['Stop doing X. Start doing Y.', 'The secret to X is...'],
+      ctaPatterns: ['Save this for later', 'Drop a comment below'],
+      lineBreakStyle: 'double',
+    },
+    topPerformingCaptions: [],
+    signaturePhrases: ['Listen fam', 'Trust the process', 'LTP'],
+    postingStyle: {
+      avgHashtagsPerPost: 8,
+      emojiDensity: 2.0,
+      questionFrequency: 25,
+      mentionFrequency: 5,
+    },
+  };
+}
+
+function getDefaultYouTubeLayer(): YouTubeVoiceLayer {
+  return {
+    educationalTone: {
+      teachingPhrases: ['Let me show you', 'Here\'s the key', 'Pay attention to this'],
+      explanationPatterns: ['The reason for this is', 'What this means is'],
+      conceptIntroductions: ['So what is LTP?', 'Level, Trend, Patience'],
+    },
+    deepDivePhrases: ['Let\'s really break this down', 'Here\'s where it gets interesting'],
+    vocabularyProfile: {
+      technicalTerms: ['support', 'resistance', 'VWAP', 'price action'],
+      casualExpressions: ['Fam', 'Y\'all', 'Sweet', 'Beautiful'],
+      tradingJargon: ['LTP', 'patience candle', 'key level', 'confirmation'],
+      motivationalPhrases: ['Trust the process', 'Patience pays', 'You got this'],
+    },
+    narrativeStyle: {
+      storyOpenings: ['Back when I started', 'Let me tell you a story'],
+      transitionPhrases: ['Now here\'s the thing', 'And this is crucial'],
+      conclusionPatterns: ['And that\'s the beauty of LTP', 'Remember fam'],
+    },
+    speakingCadence: {
+      avgSentenceLength: 12,
+      repetitionPatterns: ['X. Let me say that again. X.'],
+      emphasisPhrases: ['This is CRUCIAL', 'Write this down', 'Don\'t miss this'],
+    },
+  };
+}
+
+function getDefaultCombinedInsights(): HybridVoiceProfile['combinedInsights'] {
+  return {
+    coreVocabulary: ['LTP', 'level', 'trend', 'patience', 'fam'],
+    signaturePhrases: ['Listen fam', 'Trust the process', 'The holy grail'],
+    brandKeywords: ['LTP Framework', 'price action', 'patience candle', 'KCU'],
+    avoidedLanguage: ['get rich quick', 'guaranteed profits', 'easy money'],
+    toneAttributes: {
+      confident: 85,
+      humble: 60,
+      educational: 90,
+      motivational: 80,
+      professional: 70,
+      casual: 75,
+      authoritative: 80,
+      supportive: 85,
+      disciplined: 90,
+      patient: 95,
+    },
+    platformSpecificAdjustments: {
+      instagram: {
+        emojiStyle: ['🎯', '📈', '💰', '🔥', '✅'],
+        hashtagStrategy: ['Mix 3-4 popular with 3-4 niche'],
+        captionLength: 'medium',
+      },
+      youtube: {
+        openingStyle: 'Hook with relatable problem',
+        closingCTA: 'Like, subscribe, join the fam',
+        segmentTransitions: ['Now let\'s look at', 'Here\'s where it gets good'],
+      },
+      twitter: {
+        threadStyle: true,
+        hashtagLimit: 2,
+        mentionStyle: 'Minimal',
+      },
+    },
+  };
+}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Instagram,
@@ -16,6 +16,9 @@ import {
   Zap,
   Clock,
   GraduationCap,
+  Wand2,
+  Radio,
+  Trophy,
 } from 'lucide-react';
 
 // UI Components
@@ -40,9 +43,14 @@ import {
   InfluencerList,
   TrendingTopics,
   LearningMilestones,
+  BrainDumpInput,
+  MarketPulse,
+  HallOfFame,
 } from '@/components/social';
 
+import { useSearchParams, useRouter } from 'next/navigation';
 import type { ContentSuggestion, SocialPlatform, TrendingTopic, InfluencerProfileInput, ContentCategory } from '@/types/social';
+import type { SocialSettings } from '@/components/social/settings-modal';
 
 // ============================================
 // Types
@@ -60,11 +68,27 @@ interface DashboardStats {
   trending_topics: number;
 }
 
+interface ConnectedAccount {
+  id: string;
+  platform: SocialPlatform;
+  account_id: string;
+  account_name: string;
+  account_handle: string;
+  profile_image_url?: string;
+  followers_count: number;
+  posts_count: number;
+  is_active: boolean;
+  token_status: 'valid' | 'expiring_soon' | 'expired' | 'unknown';
+  days_until_expiry: number | null;
+}
+
 interface PlatformConnection {
   platform: SocialPlatform;
   connected: boolean;
   handle?: string;
   followers?: number;
+  accountId?: string;
+  tokenStatus?: 'valid' | 'expiring_soon' | 'expired' | 'unknown';
 }
 
 // ============================================
@@ -72,6 +96,10 @@ interface PlatformConnection {
 // ============================================
 
 function SocialBuilderContent() {
+  // Router and search params for OAuth
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   // State
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [suggestions, setSuggestions] = useState<ContentSuggestion[]>([]);
@@ -93,12 +121,17 @@ function SocialBuilderContent() {
     variant: 'danger' | 'warning';
   } | null>(null);
 
-  // Platform connections (mock for now)
-  const [platforms] = useState<PlatformConnection[]>([
+  // Platform connections
+  const [platforms, setPlatforms] = useState<PlatformConnection[]>([
     { platform: 'instagram', connected: false },
     { platform: 'tiktok', connected: false },
     { platform: 'youtube', connected: false },
   ]);
+  const [connectingPlatform, setConnectingPlatform] = useState<SocialPlatform | null>(null);
+
+  // Settings state
+  const [settings, setSettings] = useState<SocialSettings | undefined>(undefined);
+  const [settingsLoading, setSettingsLoading] = useState(false);
 
   const { showToast } = useToast();
 
@@ -106,13 +139,60 @@ function SocialBuilderContent() {
   // Data Fetching
   // ============================================
 
+  const fetchConnectedAccounts = useCallback(async () => {
+    try {
+      const response = await fetch('/api/admin/social/accounts');
+      const data = await response.json();
+
+      if (data.success && data.data) {
+        const accounts: ConnectedAccount[] = data.data;
+
+        // Update platforms state with connected accounts
+        setPlatforms([
+          {
+            platform: 'instagram',
+            connected: accounts.some((a) => a.platform === 'instagram'),
+            handle: accounts.find((a) => a.platform === 'instagram')?.account_handle,
+            followers: accounts.find((a) => a.platform === 'instagram')?.followers_count,
+            accountId: accounts.find((a) => a.platform === 'instagram')?.id,
+            tokenStatus: accounts.find((a) => a.platform === 'instagram')?.token_status,
+          },
+          {
+            platform: 'tiktok',
+            connected: accounts.some((a) => a.platform === 'tiktok'),
+            handle: accounts.find((a) => a.platform === 'tiktok')?.account_handle,
+            followers: accounts.find((a) => a.platform === 'tiktok')?.followers_count,
+            accountId: accounts.find((a) => a.platform === 'tiktok')?.id,
+            tokenStatus: accounts.find((a) => a.platform === 'tiktok')?.token_status,
+          },
+          {
+            platform: 'youtube',
+            connected: accounts.some((a) => a.platform === 'youtube'),
+            handle: accounts.find((a) => a.platform === 'youtube')?.account_handle,
+            followers: accounts.find((a) => a.platform === 'youtube')?.followers_count,
+            accountId: accounts.find((a) => a.platform === 'youtube')?.id,
+            tokenStatus: accounts.find((a) => a.platform === 'youtube')?.token_status,
+          },
+        ]);
+
+        // Calculate total followers
+        const totalFollowers = accounts.reduce((sum, a) => sum + (a.followers_count || 0), 0);
+        return totalFollowers;
+      }
+    } catch (err) {
+      console.error('Failed to fetch connected accounts:', err);
+    }
+    return 0;
+  }, []);
+
   const fetchDashboardData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [suggestionsRes, influencersRes] = await Promise.all([
+      const [suggestionsRes, influencersRes, totalFollowers] = await Promise.all([
         fetch('/api/admin/social/suggestions?status=pending&limit=10'),
         fetch('/api/admin/social/influencers?limit=1'),
+        fetchConnectedAccounts(),
       ]);
 
       const suggestionsData = await suggestionsRes.json();
@@ -126,7 +206,7 @@ function SocialBuilderContent() {
 
       // Calculate stats
       setStats({
-        total_followers: 0,
+        total_followers: totalFollowers,
         followers_change_7d: 0,
         total_posts_30d: 0,
         average_engagement_rate: 0,
@@ -146,7 +226,7 @@ function SocialBuilderContent() {
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, fetchConnectedAccounts]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -156,6 +236,33 @@ function SocialBuilderContent() {
 
     return () => clearInterval(refreshInterval);
   }, [fetchDashboardData]);
+
+  // Handle OAuth callback results from URL params
+  useEffect(() => {
+    const oauthSuccess = searchParams.get('oauth_success');
+    const oauthError = searchParams.get('oauth_error');
+    const account = searchParams.get('account');
+
+    if (oauthSuccess) {
+      showToast({
+        type: 'success',
+        title: `${oauthSuccess.charAt(0).toUpperCase() + oauthSuccess.slice(1)} Connected`,
+        message: account ? `Successfully connected @${account}` : 'Account connected successfully',
+      });
+      // Refresh accounts
+      fetchConnectedAccounts();
+      // Clear URL params
+      router.replace('/admin/social-builder', { scroll: false });
+    } else if (oauthError) {
+      showToast({
+        type: 'error',
+        title: 'Connection Failed',
+        message: decodeURIComponent(oauthError),
+      });
+      // Clear URL params
+      router.replace('/admin/social-builder', { scroll: false });
+    }
+  }, [searchParams, showToast, fetchConnectedAccounts, router]);
 
   // Update relative time display every 30 seconds
   useEffect(() => {
@@ -183,6 +290,105 @@ function SocialBuilderContent() {
 
     return () => clearInterval(displayInterval);
   }, [lastSynced]);
+
+  // ============================================
+  // Settings Management
+  // ============================================
+
+  const fetchSettings = useCallback(async () => {
+    setSettingsLoading(true);
+    try {
+      const response = await fetch('/api/admin/social/settings');
+      const data = await response.json();
+
+      if (data.success) {
+        setSettings(data.data.settings);
+      } else {
+        throw new Error(data.error || 'Failed to fetch settings');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load settings';
+      showToast({ type: 'error', title: 'Error loading settings', message });
+    } finally {
+      setSettingsLoading(false);
+    }
+  }, [showToast]);
+
+  const saveSettings = async (newSettings: SocialSettings) => {
+    try {
+      const response = await fetch('/api/admin/social/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSettings),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSettings(data.data.settings);
+        showToast({ type: 'success', title: 'Settings saved' });
+      } else {
+        throw new Error(data.error || 'Failed to save settings');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save settings';
+      showToast({ type: 'error', title: 'Error saving settings', message });
+      throw err; // Re-throw to let the modal know it failed
+    }
+  };
+
+  // Fetch settings when modal opens
+  useEffect(() => {
+    if (showSettings && !settings) {
+      fetchSettings();
+    }
+  }, [showSettings, settings, fetchSettings]);
+
+  // ============================================
+  // Platform Connection Actions
+  // ============================================
+
+  const connectPlatform = async (platform: SocialPlatform) => {
+    setConnectingPlatform(platform);
+    try {
+      const response = await fetch(`/api/admin/social/connect?platform=${platform}`);
+      const data = await response.json();
+
+      if (data.success && data.authUrl) {
+        // Redirect to OAuth provider
+        window.location.href = data.authUrl;
+      } else {
+        throw new Error(data.error || 'Failed to initiate connection');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Connection failed';
+      showToast({ type: 'error', title: 'Connection Failed', message });
+      setConnectingPlatform(null);
+    }
+  };
+
+  const disconnectPlatform = async (platform: SocialPlatform, accountId: string) => {
+    try {
+      const response = await fetch(`/api/admin/social/accounts?id=${accountId}`, {
+        method: 'DELETE',
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        showToast({
+          type: 'success',
+          title: 'Account Disconnected',
+          message: `${platform.charAt(0).toUpperCase() + platform.slice(1)} account disconnected`,
+        });
+        fetchConnectedAccounts();
+      } else {
+        throw new Error(data.error || 'Failed to disconnect');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Disconnection failed';
+      showToast({ type: 'error', title: 'Error', message });
+    }
+  };
 
   // ============================================
   // Actions
@@ -225,19 +431,26 @@ function SocialBuilderContent() {
     }
   };
 
-  const handleSuggestionAction = async (id: string, action: 'approve' | 'reject') => {
+  const handleSuggestionAction = async (
+    id: string,
+    action: 'approve' | 'reject',
+    edits?: Record<string, unknown>
+  ) => {
     try {
       const response = await fetch('/api/admin/social/suggestions', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action }),
+        body: JSON.stringify({ id, action, ...edits }),
       });
 
       const data = await response.json();
       if (data.success) {
+        const hasEdits = edits && Object.keys(edits).length > 0;
         showToast({
           type: 'success',
-          title: action === 'approve' ? 'Content approved' : 'Content rejected',
+          title: action === 'approve'
+            ? hasEdits ? 'Content approved with edits' : 'Content approved'
+            : 'Content rejected',
         });
         setSuggestions((prev) => prev.filter((s) => s.id !== id));
         setStats((prev) =>
@@ -259,6 +472,43 @@ function SocialBuilderContent() {
         title: 'Action failed',
         message: err instanceof Error ? err.message : 'Unknown error',
       });
+    }
+  };
+
+  const handlePublish = async (
+    suggestionId: string,
+    options: { platform: SocialPlatform; mediaUrl: string }
+  ) => {
+    try {
+      const response = await fetch('/api/admin/social/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          suggestionId,
+          targetPlatform: options.platform,
+          mediaUrl: options.mediaUrl,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        showToast({
+          type: 'success',
+          title: 'Published Successfully',
+          message: data.data.platformUrl
+            ? `View post: ${data.data.platformUrl}`
+            : 'Content has been published',
+        });
+        // Refresh dashboard data
+        fetchDashboardData();
+      } else {
+        throw new Error(data.error || 'Publishing failed');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Publishing failed';
+      showToast({ type: 'error', title: 'Publish Failed', message });
+      throw err; // Re-throw to let the modal handle it
     }
   };
 
@@ -452,6 +702,18 @@ function SocialBuilderContent() {
             <GraduationCap className="w-4 h-4 mr-2" />
             Learning
           </TabsTrigger>
+          <TabsTrigger value="brain-dump" variant="pills">
+            <Wand2 className="w-4 h-4 mr-2" />
+            Brain Dump
+          </TabsTrigger>
+          <TabsTrigger value="market-pulse" variant="pills">
+            <Radio className="w-4 h-4 mr-2" />
+            Market Pulse
+          </TabsTrigger>
+          <TabsTrigger value="hall-of-fame" variant="pills">
+            <Trophy className="w-4 h-4 mr-2" />
+            Hall of Fame
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -527,26 +789,63 @@ function SocialBuilderContent() {
                     <p className="text-[var(--text-tertiary)] text-sm">
                       {platform.connected ? `@${platform.handle}` : 'Not connected'}
                     </p>
+                    {platform.connected && platform.followers !== undefined && platform.followers > 0 && (
+                      <p className="text-[var(--text-tertiary)] text-xs">
+                        {platform.followers.toLocaleString()} followers
+                      </p>
+                    )}
                   </div>
                   {platform.connected && (
-                    <Badge variant="success" size="sm" className="ml-auto" dot pulse>
-                      Connected
+                    <Badge
+                      variant={platform.tokenStatus === 'expiring_soon' ? 'warning' : platform.tokenStatus === 'expired' ? 'error' : 'success'}
+                      size="sm"
+                      className="ml-auto"
+                      dot
+                      pulse={platform.tokenStatus === 'valid'}
+                    >
+                      {platform.tokenStatus === 'expiring_soon' ? 'Expiring Soon' : platform.tokenStatus === 'expired' ? 'Expired' : 'Connected'}
                     </Badge>
                   )}
                 </div>
-                <Button
-                  variant={platform.connected ? 'ghost' : 'secondary'}
-                  fullWidth
-                  onClick={() =>
-                    showToast({
-                      type: 'info',
-                      title: 'Coming soon',
-                      message: `${platform.platform} connection coming soon`,
-                    })
-                  }
-                >
-                  {platform.connected ? 'Manage' : 'Connect Account'}
-                </Button>
+                {platform.connected ? (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      className="flex-1"
+                      onClick={() => connectPlatform(platform.platform)}
+                      loading={connectingPlatform === platform.platform}
+                    >
+                      Reconnect
+                    </Button>
+                    <Button
+                      variant="danger"
+                      onClick={() => {
+                        if (platform.accountId) {
+                          setConfirmAction({
+                            isOpen: true,
+                            title: 'Disconnect Account',
+                            message: `Are you sure you want to disconnect @${platform.handle}? You'll need to reconnect to post to this account.`,
+                            variant: 'danger',
+                            onConfirm: async () => {
+                              await disconnectPlatform(platform.platform, platform.accountId!);
+                            },
+                          });
+                        }
+                      }}
+                    >
+                      Disconnect
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    fullWidth
+                    onClick={() => connectPlatform(platform.platform)}
+                    loading={connectingPlatform === platform.platform}
+                  >
+                    Connect Account
+                  </Button>
+                )}
               </Card>
             ))}
           </div>
@@ -775,15 +1074,39 @@ function SocialBuilderContent() {
             onRefresh={fetchDashboardData}
           />
         </TabsContent>
+
+        {/* Brain Dump Tab */}
+        <TabsContent value="brain-dump">
+          <BrainDumpInput
+            showToast={showToast}
+            onGenerate={(output) => {
+              console.log('Brain dump generated:', output);
+              // Optionally refresh suggestions after generating
+              fetchDashboardData();
+            }}
+          />
+        </TabsContent>
+
+        {/* Market Pulse Tab */}
+        <TabsContent value="market-pulse">
+          <MarketPulse showToast={showToast} />
+        </TabsContent>
+
+        {/* Hall of Fame Tab */}
+        <TabsContent value="hall-of-fame">
+          <HallOfFame
+            showToast={(message, type) => showToast({ type, title: message })}
+          />
+        </TabsContent>
       </Tabs>
 
       {/* Modals */}
       <SettingsModal
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
-        onSave={async () => {
-          showToast({ type: 'success', title: 'Settings saved' });
-        }}
+        onSave={saveSettings}
+        initialSettings={settings}
+        loading={settingsLoading}
       />
 
       <AddInfluencerModal
@@ -796,8 +1119,10 @@ function SocialBuilderContent() {
         isOpen={!!previewSuggestion}
         onClose={() => setPreviewSuggestion(null)}
         suggestion={previewSuggestion}
-        onApprove={(id) => handleSuggestionAction(id, 'approve')}
+        onApprove={(id, edits) => handleSuggestionAction(id, 'approve', edits)}
         onReject={(id) => handleSuggestionAction(id, 'reject')}
+        onPublish={handlePublish}
+        connectedPlatforms={platforms.filter((p) => p.connected).map((p) => p.platform)}
       />
 
       {confirmAction && (
@@ -818,13 +1143,15 @@ function SocialBuilderContent() {
 }
 
 // ============================================
-// Export with Toast Provider
+// Export with Toast Provider and Suspense
 // ============================================
 
 export default function SocialBuilderPage() {
   return (
     <ToastProvider>
-      <SocialBuilderContent />
+      <Suspense fallback={<LoadingState text="Loading Social Builder..." fullPage />}>
+        <SocialBuilderContent />
+      </Suspense>
     </ToastProvider>
   );
 }
