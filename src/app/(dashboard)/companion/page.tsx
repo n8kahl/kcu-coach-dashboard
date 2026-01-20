@@ -347,6 +347,11 @@ export default function CompanionTerminal() {
 
   const fetchLTPAnalysis = async (symbol: string) => {
     setAnalysisLoading(true);
+    // Clear stale data before fetching new data
+    setLtpAnalysis(null);
+    setGammaData(null);
+    setFvgData(null);
+
     try {
       const [ltpRes, gammaRes, fvgRes] = await Promise.all([
         fetch(`/api/market/ltp?symbol=${symbol}`),
@@ -357,14 +362,21 @@ export default function CompanionTerminal() {
       if (ltpRes.ok) {
         const data = await ltpRes.json();
         setLtpAnalysis(data);
+      } else {
+        console.warn(`[Companion] LTP analysis unavailable for ${symbol}: ${ltpRes.status}`);
       }
       if (gammaRes.ok) {
         const data = await gammaRes.json();
         setGammaData(data);
+      } else {
+        // Gamma data may not be available for all symbols (requires options chain)
+        console.warn(`[Companion] Gamma data unavailable for ${symbol}: ${gammaRes.status}`);
       }
       if (fvgRes.ok) {
         const data = await fvgRes.json();
         setFvgData(data);
+      } else {
+        console.warn(`[Companion] FVG data unavailable for ${symbol}: ${fvgRes.status}`);
       }
 
       // Build chart levels from watchlist item

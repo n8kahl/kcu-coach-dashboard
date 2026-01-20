@@ -573,7 +573,7 @@ export function KCUChart({
             time: toChartTime(c.time),
             value: ema8Values[i],
           }))
-          .filter((d) => !isNaN(d.value) && d.value !== undefined);
+          .filter((d) => d.value != null && !isNaN(d.value));
         ema8SeriesRef.current.setData(ema8Data);
       }
 
@@ -585,7 +585,7 @@ export function KCUChart({
             time: toChartTime(c.time),
             value: ema21Values[i],
           }))
-          .filter((d) => !isNaN(d.value) && d.value !== undefined);
+          .filter((d) => d.value != null && !isNaN(d.value));
         ema21SeriesRef.current.setData(ema21Data);
       }
 
@@ -597,7 +597,7 @@ export function KCUChart({
             time: toChartTime(c.time),
             value: sma200Values[i],
           }))
-          .filter((d) => !isNaN(d.value) && d.value !== undefined);
+          .filter((d) => d.value != null && !isNaN(d.value));
         sma200SeriesRef.current.setData(sma200Data);
       }
 
@@ -620,7 +620,7 @@ export function KCUChart({
           .map((c, i) => {
             const ema8 = ema8Values[i];
             const ema21 = ema21Values[i];
-            if (isNaN(ema8) || isNaN(ema21) || ema8 === undefined || ema21 === undefined) {
+            if (ema8 == null || ema21 == null || isNaN(ema8) || isNaN(ema21)) {
               return null;
             }
             return {

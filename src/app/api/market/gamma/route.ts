@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getSession } from '@/lib/auth';
 import { marketDataService, type OptionContract } from '@/lib/market-data';
 
 interface GammaLevel {
@@ -237,6 +238,12 @@ function calculateGammaFromOptionsChain(
 
 export async function GET(request: NextRequest) {
   try {
+    // Auth check
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const symbol = searchParams.get('symbol');
 
@@ -249,10 +256,20 @@ export async function GET(request: NextRequest) {
 
     const upperSymbol = symbol.toUpperCase();
 
+    // Check if market data service is configured
+    if (!marketDataService.isConfigured()) {
+      console.warn(`[Gamma API] Market data service not configured`);
+      return NextResponse.json(
+        { error: 'Market data service not configured' },
+        { status: 503 }
+      );
+    }
+
     // Get current price
     const quote = await marketDataService.getQuote(upperSymbol);
 
     if (!quote || !quote.price) {
+      console.warn(`[Gamma API] Unable to fetch price for ${upperSymbol}`);
       return NextResponse.json(
         { error: `Unable to fetch price for ${symbol}` },
         { status: 404 }
@@ -263,8 +280,10 @@ export async function GET(request: NextRequest) {
     const optionsChain = await marketDataService.getOptionsChain(upperSymbol);
 
     if (!optionsChain || optionsChain.calls.length === 0 || optionsChain.puts.length === 0) {
+      // Options data may not be available for all symbols or outside market hours
+      console.warn(`[Gamma API] Options chain data unavailable for ${upperSymbol}`);
       return NextResponse.json(
-        { error: `Options chain data unavailable for ${upperSymbol}` },
+        { error: `Options chain data unavailable for ${upperSymbol}. This may be due to API plan limitations or market being closed.` },
         { status: 404 }
       );
     }
@@ -290,6 +309,12 @@ export async function GET(request: NextRequest) {
 // POST endpoint for batch gamma analysis
 export async function POST(request: NextRequest) {
   try {
+    // Auth check
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { symbols } = body;
 

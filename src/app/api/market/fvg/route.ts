@@ -5,10 +5,17 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getSession } from '@/lib/auth';
 import { fvgDetector } from '@/lib/fvg-detector';
 
 export async function GET(request: NextRequest) {
   try {
+    // Auth check
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const symbol = searchParams.get('symbol');
 
@@ -35,6 +42,12 @@ export async function GET(request: NextRequest) {
 // POST endpoint for batch FVG analysis
 export async function POST(request: NextRequest) {
   try {
+    // Auth check
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { symbols } = body;
 
