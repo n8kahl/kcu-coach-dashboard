@@ -36,7 +36,7 @@ async function barsHandler(request: NextRequest) {
     const from = fromDate.toISOString().split('T')[0];
 
     const response = await fetch(
-      `https://api.massive.com/v1/aggs/ticker/${symbol.toUpperCase()}/range/${multiplier}/${timespan}/${from}/${to}?limit=${limit}&sort=asc&apiKey=${apiKey}`
+      `https://api.massive.com/v2/aggs/ticker/${symbol.toUpperCase()}/range/${multiplier}/${timespan}/${from}/${to}?limit=${limit}&sort=asc&apiKey=${apiKey}`
     );
 
     if (!response.ok) {

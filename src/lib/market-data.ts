@@ -751,7 +751,7 @@ class MarketDataService {
         }
 
         const data = await this.fetch<AggregatesResponse>(
-          `/v1/aggs/ticker/${symbol}/range/${multiplier}/${actualTimespan}/${from}/${to}`,
+          `/v2/aggs/ticker/${symbol}/range/${multiplier}/${actualTimespan}/${from}/${to}`,
           { limit, sort: 'asc' }
         );
 
@@ -821,7 +821,7 @@ class MarketDataService {
 
         // Fetch 1-minute bars during premarket hours
         const data = await this.fetch<AggregatesResponse>(
-          `/v1/aggs/ticker/${symbol}/range/1/minute/${today}/${today}`,
+          `/v2/aggs/ticker/${symbol}/range/1/minute/${today}/${today}`,
           {
             limit: 500,
             sort: 'asc',
@@ -1510,7 +1510,7 @@ class MarketDataService {
         }
 
         const data = await this.fetch<AggregatesResponse>(
-          `/v1/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${fromDate}/${toDate}`,
+          `/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${fromDate}/${toDate}`,
           { limit: 50000, sort: 'asc' }
         );
 
