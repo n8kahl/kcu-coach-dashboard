@@ -49,6 +49,7 @@ import {
 } from '@/components/social';
 
 import type { ContentSuggestion, SocialPlatform, TrendingTopic, InfluencerProfileInput, ContentCategory } from '@/types/social';
+import type { SocialSettings } from '@/components/social/settings-modal';
 
 // ============================================
 // Types
@@ -105,6 +106,10 @@ function SocialBuilderContent() {
     { platform: 'tiktok', connected: false },
     { platform: 'youtube', connected: false },
   ]);
+
+  // Settings state
+  const [settings, setSettings] = useState<SocialSettings | undefined>(undefined);
+  const [settingsLoading, setSettingsLoading] = useState(false);
 
   const { showToast } = useToast();
 
@@ -189,6 +194,59 @@ function SocialBuilderContent() {
 
     return () => clearInterval(displayInterval);
   }, [lastSynced]);
+
+  // ============================================
+  // Settings Management
+  // ============================================
+
+  const fetchSettings = useCallback(async () => {
+    setSettingsLoading(true);
+    try {
+      const response = await fetch('/api/admin/social/settings');
+      const data = await response.json();
+
+      if (data.success) {
+        setSettings(data.data.settings);
+      } else {
+        throw new Error(data.error || 'Failed to fetch settings');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load settings';
+      showToast({ type: 'error', title: 'Error loading settings', message });
+    } finally {
+      setSettingsLoading(false);
+    }
+  }, [showToast]);
+
+  const saveSettings = async (newSettings: SocialSettings) => {
+    try {
+      const response = await fetch('/api/admin/social/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSettings),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSettings(data.data.settings);
+        showToast({ type: 'success', title: 'Settings saved' });
+      } else {
+        throw new Error(data.error || 'Failed to save settings');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save settings';
+      showToast({ type: 'error', title: 'Error saving settings', message });
+      throw err; // Re-throw to let the modal know it failed
+    }
+  };
+
+  // Fetch settings when modal opens
+  useEffect(() => {
+    if (showSettings && !settings) {
+      fetchSettings();
+    }
+  }, [showSettings, settings, fetchSettings]);
 
   // ============================================
   // Actions
@@ -823,9 +881,9 @@ function SocialBuilderContent() {
       <SettingsModal
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
-        onSave={async () => {
-          showToast({ type: 'success', title: 'Settings saved' });
-        }}
+        onSave={saveSettings}
+        initialSettings={settings}
+        loading={settingsLoading}
       />
 
       <AddInfluencerModal
