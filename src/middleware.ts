@@ -126,7 +126,7 @@ function addSecurityHeaders(response: NextResponse): NextResponse {
     "style-src 'self' 'unsafe-inline'", // Required for CSS-in-JS / Tailwind
     "img-src 'self' data: https: blob:",
     "font-src 'self' data:",
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://discord.com https://api.anthropic.com https://cdn.discordapp.com",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://discord.com https://api.anthropic.com https://cdn.discordapp.com https://api.massive.com wss://socket.massive.com",
     "frame-src 'self' https://www.youtube.com https://player.vimeo.com",
     "media-src 'self' https:",
     "object-src 'none'", // Prevent Flash/plugin exploits

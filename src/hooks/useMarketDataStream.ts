@@ -182,8 +182,8 @@ export function useMarketDataStream(
   config: MarketDataStreamConfig = {}
 ): MarketDataStreamResult {
   const {
-    // Placeholder URL - replace with actual market data WebSocket endpoint
-    url = process.env.NEXT_PUBLIC_MARKET_WS_URL || 'wss://api.example.com/market-stream',
+    // Massive.com WebSocket endpoint for real-time market data
+    url = process.env.NEXT_PUBLIC_MARKET_WS_URL || 'wss://socket.massive.com/stocks',
     symbols: initialSymbols = [],
     maxReconnectAttempts = 10,
     baseReconnectDelay = 1000,
