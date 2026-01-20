@@ -1,6 +1,20 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+/**
+ * PracticeChart - Controlled Chart Component
+ *
+ * A purely controlled chart component that renders what it is given.
+ * All game state (replayIndex, isPlaying, playbackSpeed) is managed by
+ * the parent via usePracticeEngine hook.
+ *
+ * This component is responsible only for:
+ * - Rendering candlestick data
+ * - Displaying indicators (VWAP, EMAs, Ripster Clouds)
+ * - Showing key levels and gamma levels
+ * - Animating the current candle formation (via useCandleReplay)
+ */
+
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import {
   createChart,
   IChartApi,
@@ -17,11 +31,8 @@ import {
   calculateEMA,
   calculateVWAPBands,
   calculateEMARibbon,
-  calculateVolumeProfile,
-  aggregateBars,
   Bar,
   Timeframe,
-  VolumeProfile,
 } from '@/lib/practice/indicators';
 import {
   useCandleReplay,
@@ -30,10 +41,6 @@ import {
   easingFunctions,
 } from '@/hooks/useCandleReplay';
 import {
-  Play,
-  Pause,
-  SkipForward,
-  RotateCcw,
   Eye,
   EyeOff,
   ZoomIn,
@@ -43,99 +50,113 @@ import {
   Activity,
   BarChart3,
 } from 'lucide-react';
+import type { Candle, KeyLevel, GammaLevel } from '@/hooks/usePracticeEngine';
 
-interface KeyLevel {
-  type: string;
-  price: number;
-  strength: number;
-  label: string;
-}
+// =============================================================================
+// Types
+// =============================================================================
 
-interface ChartCandle {
-  t: number;
-  o: number;
-  h: number;
-  l: number;
-  c: number;
-  v: number;
-}
+export interface PracticeChartProps {
+  // Core data - controlled by parent
+  visibleCandles: Candle[];
+  currentIndex?: number;
+  animatingCandle?: OHLCCandle | null;
 
-interface PracticeChartProps {
-  chartData: {
-    candles: ChartCandle[];
-    volume_profile?: {
-      high_vol_node?: number;
-      low_vol_node?: number;
-    };
-  };
-  keyLevels: KeyLevel[];
-  decisionPoint?: {
-    price: number;
-    time: number;
-    context: string;
-  };
+  // Levels
+  levels: KeyLevel[];
+  gammaLevels?: GammaLevel[];
+  tradeLevels?: KeyLevel[];
+
+  // Metadata
+  symbol: string;
+  timeframe?: string;
+
+  // Display options
+  showOutcome?: boolean;
+  isReplayMode?: boolean;
+  decisionReached?: boolean;
+  decisionPointIndex?: number;
+
+  // Outcome data for overlay
   outcomeData?: {
     result: string;
     exit_price?: number;
     pnl_percent?: number;
     candles_to_target?: number;
   };
-  symbol: string;
-  timeframe: string;
-  showOutcome?: boolean;
-  replayMode?: boolean;
-  onDecisionPointReached?: () => void;
+
+  // Event handlers
+  onCandleClick?: (index: number, price: number) => void;
+
+  // Styling
   className?: string;
-  initialCandleCount?: number; // How many candles to show initially in replay mode
+  height?: number;
 }
 
-// KCU Professional trading chart color scheme
+// =============================================================================
+// KCU Professional Trading Chart Color Scheme
 // Following Somesh's methodology: EMA9 = Green, EMA21 = Red
+// =============================================================================
+
 const CHART_COLORS = {
+  // Background
   background: '#0a0a0a',
   backgroundAlt: '#111111',
   text: '#9ca3af',
   textStrong: '#f3f4f6',
   grid: '#1f2937',
   border: '#374151',
+
   // Candle colors
   upColor: '#10b981',
   downColor: '#ef4444',
   wickUp: '#10b981',
   wickDown: '#ef4444',
+
   // Volume colors
   volumeUp: 'rgba(16, 185, 129, 0.35)',
   volumeDown: 'rgba(239, 68, 68, 0.35)',
-  // Indicator colors - KCU Methodology
-  vwap: '#8b5cf6', // Purple - VWAP
-  vwapBand1: 'rgba(139, 92, 246, 0.3)', // +/- 1 SD band
-  vwapBand2: 'rgba(139, 92, 246, 0.15)', // +/- 2 SD band
-  ema9: '#22c55e', // GREEN - Fast EMA (KCU standard)
-  ema21: '#ef4444', // RED - Slow EMA (KCU standard)
-  ema50: '#eab308', // Yellow - 50 EMA
+
+  // Indicator colors - KCU Methodology (CORRECTED)
+  ema9: '#22c55e',   // GREEN - Fast EMA (EMA 9)
+  ema21: '#ef4444',  // RED - Slow EMA (EMA 21)
+  ema8: '#22c55e',   // GREEN - For Ripster Clouds (EMA 8)
+  vwap: '#8b5cf6',   // PURPLE - VWAP
+  vwapBand1: 'rgba(139, 92, 246, 0.25)', // +/- 1 SD band
+  vwapBand2: 'rgba(139, 92, 246, 0.12)', // +/- 2 SD band
+  ema50: '#eab308',  // Yellow - 50 EMA
   sma200: '#ffffff', // White - 200 SMA
-  // EMA Ribbon / Ripster Clouds
-  ribbonBullish: 'rgba(34, 197, 94, 0.2)', // Green cloud when EMA8 > EMA21
-  ribbonBearish: 'rgba(239, 68, 68, 0.2)', // Red cloud when EMA8 < EMA21
+
+  // Ripster Clouds - Fill between EMA 8 and EMA 21
+  ribbonBullish: 'rgba(34, 197, 94, 0.25)',  // Green cloud when EMA8 > EMA21
+  ribbonBearish: 'rgba(239, 68, 68, 0.25)',  // Red cloud when EMA8 < EMA21
   ribbonNeutral: 'rgba(107, 114, 128, 0.1)',
+
   // Level colors
   support: '#10b981',
   resistance: '#ef4444',
+
   // Pre-market levels
-  premarketHigh: '#ec4899', // Pink
-  premarketLow: '#ec4899', // Pink
+  premarketHigh: '#ec4899',
+  premarketLow: '#ec4899',
+
   // ORB levels
-  orbHigh: '#06b6d4', // Cyan
-  orbLow: '#06b6d4', // Cyan
-  // Volume Profile
-  vpBuy: 'rgba(16, 185, 129, 0.6)',
-  vpSell: 'rgba(239, 68, 68, 0.6)',
-  vpPOC: '#f59e0b',
-  vpVA: 'rgba(96, 165, 250, 0.3)',
+  orbHigh: '#06b6d4',
+  orbLow: '#06b6d4',
+
+  // Gamma levels
+  callWall: '#ef4444',
+  putWall: '#10b981',
+  zeroGamma: '#f59e0b',
+  maxGamma: '#a855f7',
+
   // Special
   crosshair: '#6b7280',
   decisionPoint: '#f59e0b',
-};
+  entry: '#3b82f6',
+  stop: '#ef4444',
+  target: '#10b981',
+} as const;
 
 const LEVEL_COLORS: Record<string, string> = {
   support: CHART_COLORS.support,
@@ -144,6 +165,7 @@ const LEVEL_COLORS: Record<string, string> = {
   ema: CHART_COLORS.ema9,
   ema9: CHART_COLORS.ema9,
   ema21: CHART_COLORS.ema21,
+  ema8: CHART_COLORS.ema8,
   daily_support: CHART_COLORS.support,
   daily_resistance: CHART_COLORS.resistance,
   demand_zone: CHART_COLORS.support,
@@ -152,14 +174,14 @@ const LEVEL_COLORS: Record<string, string> = {
   premarket_low: CHART_COLORS.premarketLow,
   pm_high: CHART_COLORS.premarketHigh,
   pm_low: CHART_COLORS.premarketLow,
-  pdh: '#fbbf24', // Previous Day High - Amber
-  pdl: '#fbbf24', // Previous Day Low - Amber
+  pdh: '#fbbf24',
+  pdl: '#fbbf24',
   previous_day_high: '#fbbf24',
   previous_day_low: '#fbbf24',
   gap_high: '#06b6d4',
   gap_low: '#06b6d4',
   gap_top: '#06b6d4',
-  previous_close: '#a855f7', // Purple for gap fill targets
+  previous_close: '#a855f7',
   orb_high: CHART_COLORS.orbHigh,
   orb_low: CHART_COLORS.orbLow,
   opening_range_high: CHART_COLORS.orbHigh,
@@ -169,50 +191,75 @@ const LEVEL_COLORS: Record<string, string> = {
   weekly_low: '#3b82f6',
   sma_200: CHART_COLORS.sma200,
   sma200: CHART_COLORS.sma200,
-  neckline: '#f97316', // Pattern necklines
+  neckline: '#f97316',
   double_bottom: CHART_COLORS.support,
-  fib_50: '#a78bfa', // Fibonacci levels
+  fib_50: '#a78bfa',
   extension: '#a78bfa',
-  max_pain: '#f59e0b', // Options max pain
-  call_wall: CHART_COLORS.resistance,
-  put_wall: CHART_COLORS.support,
+  max_pain: '#f59e0b',
+  call_wall: CHART_COLORS.callWall,
+  put_wall: CHART_COLORS.putWall,
+  zero_gamma: CHART_COLORS.zeroGamma,
+  max_gamma: CHART_COLORS.maxGamma,
   liquidity: '#ef4444',
   sweep_high: '#ef4444',
   trap_low: CHART_COLORS.support,
-  broken_resistance: CHART_COLORS.support, // Broken R becomes S
+  broken_resistance: CHART_COLORS.support,
   breakout_high: CHART_COLORS.resistance,
   spike_high: '#f97316',
   range_high: CHART_COLORS.resistance,
   range_low: CHART_COLORS.support,
+  // Trade levels
+  entry: CHART_COLORS.entry,
+  stop: CHART_COLORS.stop,
+  target: CHART_COLORS.target,
   default: CHART_COLORS.text,
 };
 
-const TIMEFRAMES: Timeframe[] = ['2m', '5m', '15m', '1H', '4H', 'D', 'W'];
+// =============================================================================
+// Indicator Settings Interface
+// =============================================================================
 
 interface IndicatorSettings {
   showVWAP: boolean;
   showVWAPBands: boolean;
   showEMA9: boolean;
   showEMA21: boolean;
-  showEMARibbon: boolean; // Ripster Clouds (EMA 8-21 fill)
-  showVolumeProfile: boolean;
-  showORBLevels: boolean; // Opening Range Breakout levels
-  showPremarketLevels: boolean; // Pre-market high/low
+  showEMARibbon: boolean;
+  showVolume: boolean;
 }
 
+const DEFAULT_INDICATORS: IndicatorSettings = {
+  showVWAP: true,
+  showVWAPBands: true,
+  showEMA9: true,
+  showEMA21: true,
+  showEMARibbon: true,
+  showVolume: true,
+};
+
+// =============================================================================
+// Main Component
+// =============================================================================
+
 export function PracticeChart({
-  chartData,
-  keyLevels,
-  decisionPoint,
-  outcomeData,
+  visibleCandles,
+  currentIndex,
+  animatingCandle: externalAnimatingCandle,
+  levels,
+  gammaLevels = [],
+  tradeLevels = [],
   symbol,
-  timeframe: initialTimeframe,
+  timeframe = '5m',
   showOutcome = false,
-  replayMode = false,
-  onDecisionPointReached,
+  isReplayMode = false,
+  decisionReached = false,
+  decisionPointIndex,
+  outcomeData,
+  onCandleClick,
   className,
-  initialCandleCount = 50,
+  height = 450,
 }: PracticeChartProps) {
+  // Chart refs
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -220,135 +267,52 @@ export function PracticeChart({
   const indicatorSeriesRef = useRef<ISeriesApi<'Line' | 'Area'>[]>([]);
   const levelLinesRef = useRef<ISeriesApi<'Line'>[]>([]);
 
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentCandleIndex, setCurrentCandleIndex] = useState(
-    replayMode ? Math.min(initialCandleCount - 1, chartData.candles.length - 1) : chartData.candles.length - 1
-  );
+  // Local UI state (not game state)
   const [showLevels, setShowLevels] = useState(true);
-  const [decisionReached, setDecisionReached] = useState(false);
-  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>(initialTimeframe as Timeframe);
   const [showSettings, setShowSettings] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1); // 1x, 2x, 0.5x
-  const [indicators, setIndicators] = useState<IndicatorSettings>({
-    showVWAP: true,
-    showVWAPBands: true,
-    showEMA9: true,
-    showEMA21: true,
-    showEMARibbon: true, // Ripster Clouds - enabled by default for KCU
-    showVolumeProfile: false,
-    showORBLevels: true, // ORB levels - enabled by default
-    showPremarketLevels: true, // Pre-market levels - enabled by default
-  });
+  const [indicators, setIndicators] = useState<IndicatorSettings>(DEFAULT_INDICATORS);
 
-  const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Candle painting animation hook
+  // Candle animation hook - ONLY for animating the formation of current candle
   const {
-    state: candleReplayState,
     animateCandle,
     cancelAnimation,
-    isAnimating: isCandleAnimating,
+    getIntermediateCandle,
+    isAnimating,
   } = useCandleReplay({
-    duration: 500, // Paint candle over 500ms
+    duration: 400,
     easing: easingFunctions.easeOutCubic,
     realisticPath: true,
-    onComplete: (candle) => {
-      // When animation completes, finalize the candle
-      // The chart will already show the final values
-    },
-    onFrame: (animatingCandle) => {
-      // Update chart on each animation frame
-      if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
-
-      // Get all completed candles up to (but not including) the animating one
-      const completedCandles = currentBars.slice(0, currentCandleIndex);
-
-      // Create the animated candle data for the chart
-      const animatedCandleData: CandlestickData = {
-        time: (animatingCandle.t / 1000) as Time,
-        open: animatingCandle.o,
-        high: animatingCandle.currentHigh,
-        low: animatingCandle.currentLow,
-        close: animatingCandle.currentClose,
-      };
-
-      // Combine completed candles with the animating candle
-      const allCandles: CandlestickData[] = [
-        ...completedCandles.map(c => ({
-          time: (c.t / 1000) as Time,
-          open: c.o,
-          high: c.h,
-          low: c.l,
-          close: c.c,
-        })),
-        animatedCandleData,
-      ];
-
-      // Update candle series with animation frame
-      candleSeriesRef.current.setData(allCandles);
-
-      // Update volume (use proportional volume based on progress)
-      const volumeProgress = animatingCandle.progress;
-      const animatedVolume = animatingCandle.v * volumeProgress;
-      const allVolume = [
-        ...completedCandles.map(c => ({
-          time: (c.t / 1000) as Time,
-          value: c.v,
-          color: c.c >= c.o ? CHART_COLORS.volumeUp : CHART_COLORS.volumeDown,
-        })),
-        {
-          time: (animatingCandle.t / 1000) as Time,
-          value: animatedVolume,
-          color: animatingCandle.currentClose >= animatingCandle.o
-            ? CHART_COLORS.volumeUp
-            : CHART_COLORS.volumeDown,
-        },
-      ];
-      volumeSeriesRef.current.setData(allVolume);
-    },
   });
 
-  // Get bars for current timeframe
-  const getBarsForTimeframe = useCallback((): ChartCandle[] => {
-    if (selectedTimeframe === initialTimeframe) {
-      return chartData.candles;
-    }
-    // Aggregate bars to the selected timeframe
-    const bars = chartData.candles.map(c => ({
-      t: c.t,
-      o: c.o,
-      h: c.h,
-      l: c.l,
-      c: c.c,
-      v: c.v,
-    })) as Bar[];
-    const aggregated = aggregateBars(bars, selectedTimeframe);
-    return aggregated;
-  }, [chartData.candles, selectedTimeframe, initialTimeframe]);
+  // Use external animating candle if provided, otherwise use local
+  const animatingCandle = externalAnimatingCandle || getIntermediateCandle();
 
-  const currentBars = getBarsForTimeframe();
+  // =============================================================================
+  // Format Data Helpers
+  // =============================================================================
 
-  // Convert candle data to lightweight-charts format
-  const formatCandles = useCallback((candles: ChartCandle[], endIndex: number): CandlestickData[] => {
-    return candles.slice(0, endIndex + 1).map(candle => ({
-      time: (candle.t / 1000) as Time,
-      open: candle.o,
-      high: candle.h,
-      low: candle.l,
-      close: candle.c,
+  const formatCandlesForChart = useCallback((candles: Candle[]): CandlestickData[] => {
+    return candles.map((candle) => ({
+      time: (candle.time / 1000) as Time,
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
     }));
   }, []);
 
-  // Format volume data
-  const formatVolume = useCallback((candles: ChartCandle[], endIndex: number) => {
-    return candles.slice(0, endIndex + 1).map(candle => ({
-      time: (candle.t / 1000) as Time,
-      value: candle.v,
-      color: candle.c >= candle.o ? CHART_COLORS.volumeUp : CHART_COLORS.volumeDown,
+  const formatVolumeForChart = useCallback((candles: Candle[]) => {
+    return candles.map((candle) => ({
+      time: (candle.time / 1000) as Time,
+      value: candle.volume,
+      color: candle.close >= candle.open ? CHART_COLORS.volumeUp : CHART_COLORS.volumeDown,
     }));
   }, []);
 
-  // Initialize chart
+  // =============================================================================
+  // Initialize Chart
+  // =============================================================================
+
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
@@ -380,10 +344,7 @@ export function PracticeChart({
       },
       rightPriceScale: {
         borderColor: CHART_COLORS.border,
-        scaleMargins: {
-          top: 0.1,
-          bottom: 0.2,
-        },
+        scaleMargins: { top: 0.1, bottom: 0.2 },
         mode: 0,
         autoScale: true,
       },
@@ -419,31 +380,17 @@ export function PracticeChart({
 
     // Add volume series
     const volumeSeries = chart.addHistogramSeries({
-      priceFormat: {
-        type: 'volume',
-      },
+      priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
     });
 
     chart.priceScale('volume').applyOptions({
-      scaleMargins: {
-        top: 0.85,
-        bottom: 0,
-      },
+      scaleMargins: { top: 0.85, bottom: 0 },
     });
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
-
-    // Set initial data
-    const initialCandles = formatCandles(currentBars, currentCandleIndex);
-    const initialVolume = formatVolume(currentBars, currentCandleIndex);
-    candleSeries.setData(initialCandles);
-    volumeSeries.setData(initialVolume);
-
-    // Fit content
-    chart.timeScale().fitContent();
 
     // Handle resize
     const handleResize = () => {
@@ -470,33 +417,62 @@ export function PracticeChart({
     };
   }, []);
 
-  // Update chart data when candle index or timeframe changes
+  // =============================================================================
+  // Update Chart Data - Controlled by Parent
+  // =============================================================================
+
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !chartRef.current) return;
+    if (visibleCandles.length === 0) return;
 
-    const candles = formatCandles(currentBars, currentCandleIndex);
-    const volume = formatVolume(currentBars, currentCandleIndex);
+    // Build candle data, potentially with animated last candle
+    let candleData: CandlestickData[];
+    let volumeData: ReturnType<typeof formatVolumeForChart>;
 
-    candleSeriesRef.current.setData(candles);
-    volumeSeriesRef.current.setData(volume);
-
-    // Check if we've reached the decision point
-    if (decisionPoint && !decisionReached) {
-      const currentCandle = currentBars[currentCandleIndex];
-      if (currentCandle && currentCandle.t >= decisionPoint.time) {
-        setDecisionReached(true);
-        setIsPlaying(false);
-        onDecisionPointReached?.();
-      }
+    if (animatingCandle && isAnimating) {
+      // Show completed candles + animating candle
+      const completedCandles = visibleCandles.slice(0, -1);
+      candleData = [
+        ...formatCandlesForChart(completedCandles),
+        {
+          time: (animatingCandle.t / 1000) as Time,
+          open: animatingCandle.o,
+          high: animatingCandle.currentHigh,
+          low: animatingCandle.currentLow,
+          close: animatingCandle.currentClose,
+        },
+      ];
+      volumeData = [
+        ...formatVolumeForChart(completedCandles),
+        {
+          time: (animatingCandle.t / 1000) as Time,
+          value: animatingCandle.v * animatingCandle.progress,
+          color: animatingCandle.currentClose >= animatingCandle.o
+            ? CHART_COLORS.volumeUp
+            : CHART_COLORS.volumeDown,
+        },
+      ];
+    } else {
+      candleData = formatCandlesForChart(visibleCandles);
+      volumeData = formatVolumeForChart(visibleCandles);
     }
-  }, [currentCandleIndex, currentBars, formatCandles, formatVolume, decisionPoint, decisionReached, onDecisionPointReached]);
 
-  // Add/update indicators
+    candleSeriesRef.current.setData(candleData);
+
+    if (indicators.showVolume) {
+      volumeSeriesRef.current.setData(volumeData);
+    }
+  }, [visibleCandles, animatingCandle, isAnimating, indicators.showVolume, formatCandlesForChart, formatVolumeForChart]);
+
+  // =============================================================================
+  // Update Indicators
+  // =============================================================================
+
   useEffect(() => {
     if (!chartRef.current) return;
 
     // Remove existing indicator series
-    indicatorSeriesRef.current.forEach(series => {
+    indicatorSeriesRef.current.forEach((series) => {
       try {
         chartRef.current?.removeSeries(series);
       } catch {
@@ -505,18 +481,24 @@ export function PracticeChart({
     });
     indicatorSeriesRef.current = [];
 
-    const visibleBars = currentBars.slice(0, currentCandleIndex + 1);
-    if (visibleBars.length === 0) return;
+    if (visibleCandles.length < 21) return;
 
-    const bars = visibleBars as Bar[];
-    const closes = bars.map(b => b.c);
-    const timestamps = bars.map(b => b.t);
+    const bars: Bar[] = visibleCandles.map((c) => ({
+      t: c.time,
+      o: c.open,
+      h: c.high,
+      l: c.low,
+      c: c.close,
+      v: c.volume,
+    }));
+    const closes = bars.map((b) => b.c);
+    const timestamps = bars.map((b) => b.t);
 
     // VWAP and bands
     if (indicators.showVWAP || indicators.showVWAPBands) {
       const vwapBands = calculateVWAPBands(bars);
 
-      // VWAP line
+      // VWAP line - PURPLE
       if (indicators.showVWAP) {
         const vwapSeries = chartRef.current.addLineSeries({
           color: CHART_COLORS.vwap,
@@ -534,9 +516,9 @@ export function PracticeChart({
         indicatorSeriesRef.current.push(vwapSeries);
       }
 
-      // VWAP bands
+      // VWAP Standard Deviation Bands
       if (indicators.showVWAPBands) {
-        // Upper band 1
+        // Upper band 1 (+1 SD)
         const upper1Series = chartRef.current.addLineSeries({
           color: CHART_COLORS.vwap,
           lineWidth: 1,
@@ -552,7 +534,7 @@ export function PracticeChart({
         );
         indicatorSeriesRef.current.push(upper1Series);
 
-        // Lower band 1
+        // Lower band 1 (-1 SD)
         const lower1Series = chartRef.current.addLineSeries({
           color: CHART_COLORS.vwap,
           lineWidth: 1,
@@ -568,7 +550,7 @@ export function PracticeChart({
         );
         indicatorSeriesRef.current.push(lower1Series);
 
-        // Upper band 2
+        // Upper band 2 (+2 SD)
         const upper2Series = chartRef.current.addLineSeries({
           color: CHART_COLORS.vwap,
           lineWidth: 1,
@@ -584,7 +566,7 @@ export function PracticeChart({
         );
         indicatorSeriesRef.current.push(upper2Series);
 
-        // Lower band 2
+        // Lower band 2 (-2 SD)
         const lower2Series = chartRef.current.addLineSeries({
           color: CHART_COLORS.vwap,
           lineWidth: 1,
@@ -602,50 +584,54 @@ export function PracticeChart({
       }
     }
 
-    // EMA 9
+    // EMA 9 - GREEN (KCU Standard)
     if (indicators.showEMA9) {
-      const ema9 = calculateEMA(closes, 9);
+      const ema9Values = calculateEMA(closes, 9);
       const ema9Series = chartRef.current.addLineSeries({
-        color: CHART_COLORS.ema9,
+        color: CHART_COLORS.ema9, // GREEN
         lineWidth: 1,
         priceLineVisible: false,
         lastValueVisible: false,
         title: 'EMA9',
       });
       ema9Series.setData(
-        ema9.map((v, i) => ({
-          time: (timestamps[i] / 1000) as Time,
-          value: v,
-        })).filter(d => d.value > 0)
+        ema9Values
+          .map((v, i) => ({
+            time: (timestamps[i] / 1000) as Time,
+            value: v,
+          }))
+          .filter((d) => d.value > 0)
       );
       indicatorSeriesRef.current.push(ema9Series);
     }
 
-    // EMA 21
+    // EMA 21 - RED (KCU Standard)
     if (indicators.showEMA21) {
-      const ema21 = calculateEMA(closes, 21);
+      const ema21Values = calculateEMA(closes, 21);
       const ema21Series = chartRef.current.addLineSeries({
-        color: CHART_COLORS.ema21,
+        color: CHART_COLORS.ema21, // RED
         lineWidth: 1,
         priceLineVisible: false,
         lastValueVisible: false,
         title: 'EMA21',
       });
       ema21Series.setData(
-        ema21.map((v, i) => ({
-          time: (timestamps[i] / 1000) as Time,
-          value: v,
-        })).filter(d => d.value > 0)
+        ema21Values
+          .map((v, i) => ({
+            time: (timestamps[i] / 1000) as Time,
+            value: v,
+          }))
+          .filter((d) => d.value > 0)
       );
       indicatorSeriesRef.current.push(ema21Series);
     }
 
-    // EMA Ribbon
+    // Ripster Clouds - EMA 8/21 Fill Area
     if (indicators.showEMARibbon) {
       const ribbon = calculateEMARibbon(closes);
 
-      // Create area series for ribbon
-      const ribbonSeries = chartRef.current.addAreaSeries({
+      // Create area series for the bullish ribbon (green when EMA8 > EMA21)
+      const bullishRibbonSeries = chartRef.current.addAreaSeries({
         topColor: CHART_COLORS.ribbonBullish,
         bottomColor: 'transparent',
         lineColor: 'transparent',
@@ -653,24 +639,49 @@ export function PracticeChart({
         lastValueVisible: false,
       });
 
-      const areaData: AreaData[] = ribbon.states.map((state, i) => ({
-        time: (timestamps[i] / 1000) as Time,
-        value: state.topEMA,
-      }));
+      // Create area series for bearish ribbon (red when EMA8 < EMA21)
+      const bearishRibbonSeries = chartRef.current.addAreaSeries({
+        topColor: CHART_COLORS.ribbonBearish,
+        bottomColor: 'transparent',
+        lineColor: 'transparent',
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
 
-      if (areaData.length > 0) {
-        ribbonSeries.setData(areaData);
-        indicatorSeriesRef.current.push(ribbonSeries);
+      // Build bullish and bearish area data
+      const bullishData: AreaData[] = [];
+      const bearishData: AreaData[] = [];
+
+      ribbon.states.forEach((state, i) => {
+        const time = (timestamps[i] / 1000) as Time;
+        if (state.isBullish) {
+          bullishData.push({ time, value: state.topEMA });
+        } else {
+          bearishData.push({ time, value: state.topEMA });
+        }
+      });
+
+      if (bullishData.length > 0) {
+        bullishRibbonSeries.setData(bullishData);
+        indicatorSeriesRef.current.push(bullishRibbonSeries);
+      }
+
+      if (bearishData.length > 0) {
+        bearishRibbonSeries.setData(bearishData);
+        indicatorSeriesRef.current.push(bearishRibbonSeries);
       }
     }
-  }, [currentCandleIndex, currentBars, indicators]);
+  }, [visibleCandles, indicators]);
 
-  // Add key level lines
+  // =============================================================================
+  // Update Key Levels (including Gamma and Trade Levels)
+  // =============================================================================
+
   useEffect(() => {
     if (!chartRef.current) return;
 
     // Remove existing level lines
-    levelLinesRef.current.forEach(line => {
+    levelLinesRef.current.forEach((line) => {
       try {
         chartRef.current?.removeSeries(line);
       } catch {
@@ -680,21 +691,36 @@ export function PracticeChart({
     levelLinesRef.current = [];
 
     if (!showLevels) return;
+    if (visibleCandles.length === 0) return;
 
-    const visibleBars = currentBars.slice(0, currentCandleIndex + 1);
-    if (visibleBars.length === 0) return;
+    const startTime = visibleCandles[0].time / 1000;
+    const endTime = visibleCandles[visibleCandles.length - 1].time / 1000;
 
-    const startTime = visibleBars[0].t / 1000;
-    const endTime = visibleBars[visibleBars.length - 1].t / 1000;
+    // Combine all levels
+    const allLevels: Array<KeyLevel & { isGamma?: boolean; isTrade?: boolean }> = [
+      ...levels,
+      ...gammaLevels.map((g) => ({
+        type: g.type,
+        price: g.price,
+        label: g.type.replace('_', ' ').toUpperCase(),
+        strength: g.strength,
+        isGamma: true,
+      })),
+      ...tradeLevels.map((t) => ({
+        ...t,
+        isTrade: true,
+      })),
+    ];
 
-    // Add key levels
-    keyLevels.forEach(level => {
+    // Add each level as a line series
+    allLevels.forEach((level) => {
       const color = LEVEL_COLORS[level.type] || LEVEL_COLORS.default;
+      const strength = level.strength || 50;
 
       const lineSeries = chartRef.current!.addLineSeries({
         color,
-        lineWidth: level.strength >= 80 ? 2 : 1,
-        lineStyle: level.strength >= 70 ? LineStyle.Solid : LineStyle.Dashed,
+        lineWidth: strength >= 80 ? 2 : level.isTrade ? 2 : 1,
+        lineStyle: level.isTrade ? LineStyle.Solid : strength >= 70 ? LineStyle.Solid : LineStyle.Dashed,
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,
@@ -709,8 +735,9 @@ export function PracticeChart({
       levelLinesRef.current.push(lineSeries);
     });
 
-    // Add decision point marker if exists and showing outcome
-    if (decisionPoint && showOutcome) {
+    // Add decision point marker if in replay mode and reached
+    if (isReplayMode && decisionReached && decisionPointIndex !== undefined && visibleCandles[decisionPointIndex]) {
+      const decisionCandle = visibleCandles[Math.min(decisionPointIndex, visibleCandles.length - 1)];
       const markerSeries = chartRef.current.addLineSeries({
         color: CHART_COLORS.decisionPoint,
         lineWidth: 2,
@@ -720,100 +747,19 @@ export function PracticeChart({
         crosshairMarkerVisible: false,
       });
 
+      const decisionTime = decisionCandle.time / 1000;
       markerSeries.setData([
-        { time: (decisionPoint.time / 1000) as Time, value: decisionPoint.price * 0.99 },
-        { time: (decisionPoint.time / 1000) as Time, value: decisionPoint.price * 1.01 },
+        { time: decisionTime as Time, value: decisionCandle.close * 0.99 },
+        { time: decisionTime as Time, value: decisionCandle.close * 1.01 },
       ]);
-
       levelLinesRef.current.push(markerSeries);
     }
-  }, [keyLevels, showLevels, currentBars, currentCandleIndex, decisionPoint, showOutcome]);
+  }, [levels, gammaLevels, tradeLevels, showLevels, visibleCandles, isReplayMode, decisionReached, decisionPointIndex]);
 
-  // Replay controls
-  const handlePlay = useCallback(() => {
-    if (currentCandleIndex >= currentBars.length - 1) {
-      setCurrentCandleIndex(Math.min(initialCandleCount - 1, currentBars.length - 1));
-      setDecisionReached(false);
-    }
-    setIsPlaying(true);
-  }, [currentCandleIndex, currentBars.length, initialCandleCount]);
+  // =============================================================================
+  // Zoom Controls
+  // =============================================================================
 
-  const handlePause = useCallback(() => {
-    setIsPlaying(false);
-    cancelAnimation(); // Cancel any ongoing candle animation
-  }, [cancelAnimation]);
-
-  const handleStepForward = useCallback(() => {
-    // Don't allow stepping while animation is in progress
-    if (isCandleAnimating) return;
-
-    if (currentCandleIndex < currentBars.length - 1) {
-      const nextIndex = currentCandleIndex + 1;
-      const nextCandle = currentBars[nextIndex] as OHLCCandle;
-
-      // Start the candle painting animation
-      animateCandle(nextCandle);
-
-      // Update the index (the candle will animate into place)
-      setCurrentCandleIndex(nextIndex);
-    }
-  }, [currentCandleIndex, currentBars, isCandleAnimating, animateCandle]);
-
-  const handleReset = useCallback(() => {
-    setIsPlaying(false);
-    cancelAnimation(); // Cancel any ongoing candle animation
-    setCurrentCandleIndex(Math.min(initialCandleCount - 1, currentBars.length - 1));
-    setDecisionReached(false);
-  }, [currentBars.length, initialCandleCount, cancelAnimation]);
-
-  const handleShowAll = useCallback(() => {
-    setIsPlaying(false);
-    cancelAnimation(); // Cancel any ongoing candle animation
-    setCurrentCandleIndex(currentBars.length - 1);
-  }, [currentBars.length, cancelAnimation]);
-
-  // Auto-play effect with candle painting
-  useEffect(() => {
-    if (isPlaying && !isCandleAnimating) {
-      // Calculate interval based on playback speed
-      // At 1x speed, candle animation (500ms) + pause (300ms) = 800ms per candle
-      const animationDuration = 500 / playbackSpeed;
-      const pauseBetweenCandles = 300 / playbackSpeed;
-      const totalInterval = animationDuration + pauseBetweenCandles;
-
-      playIntervalRef.current = setInterval(() => {
-        setCurrentCandleIndex(prev => {
-          if (prev >= currentBars.length - 1) {
-            setIsPlaying(false);
-            return prev;
-          }
-
-          const nextIndex = prev + 1;
-          const nextCandle = currentBars[nextIndex] as OHLCCandle;
-
-          // Trigger candle painting animation
-          if (nextCandle) {
-            animateCandle(nextCandle);
-          }
-
-          return nextIndex;
-        });
-      }, totalInterval);
-    } else if (!isPlaying) {
-      if (playIntervalRef.current) {
-        clearInterval(playIntervalRef.current);
-        playIntervalRef.current = null;
-      }
-    }
-
-    return () => {
-      if (playIntervalRef.current) {
-        clearInterval(playIntervalRef.current);
-      }
-    };
-  }, [isPlaying, currentBars, playbackSpeed, isCandleAnimating, animateCandle]);
-
-  // Zoom controls
   const handleZoomIn = useCallback(() => {
     if (chartRef.current) {
       const timeScale = chartRef.current.timeScale();
@@ -838,26 +784,17 @@ export function PracticeChart({
     }
   }, []);
 
-  // Handle timeframe change
-  const handleTimeframeChange = useCallback((tf: Timeframe) => {
-    setSelectedTimeframe(tf);
-    // Reset to appropriate candle index for new timeframe
-    const newBars = tf === initialTimeframe
-      ? chartData.candles
-      : aggregateBars(chartData.candles.map(c => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v })) as Bar[], tf);
+  // =============================================================================
+  // Toggle Indicator
+  // =============================================================================
 
-    if (replayMode) {
-      setCurrentCandleIndex(Math.min(initialCandleCount - 1, newBars.length - 1));
-      setDecisionReached(false);
-    } else {
-      setCurrentCandleIndex(newBars.length - 1);
-    }
-  }, [chartData.candles, initialTimeframe, replayMode, initialCandleCount]);
-
-  // Toggle indicator
   const toggleIndicator = useCallback((key: keyof IndicatorSettings) => {
-    setIndicators(prev => ({ ...prev, [key]: !prev[key] }));
+    setIndicators((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
+
+  // =============================================================================
+  // Render
+  // =============================================================================
 
   return (
     <div className={cn('relative bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg overflow-hidden', className)}>
@@ -867,33 +804,17 @@ export function PracticeChart({
           <span className="px-3 py-1 bg-[var(--bg-secondary)] text-[var(--text-primary)] text-sm font-bold rounded">
             {symbol}
           </span>
-
-          {/* Timeframe Selector */}
-          <div className="flex items-center bg-[var(--bg-secondary)] rounded overflow-hidden">
-            {TIMEFRAMES.map(tf => (
-              <button
-                key={tf}
-                onClick={() => handleTimeframeChange(tf)}
-                className={cn(
-                  'px-2 py-1 text-xs font-medium transition-colors',
-                  selectedTimeframe === tf
-                    ? 'bg-[var(--accent-primary)] text-white'
-                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
-                )}
-              >
-                {tf}
-              </button>
-            ))}
-          </div>
-
-          {decisionReached && !showOutcome && (
+          <span className="px-2 py-1 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] text-xs rounded">
+            {timeframe}
+          </span>
+          {isReplayMode && decisionReached && !showOutcome && (
             <span className="px-3 py-1 bg-[var(--accent-primary)] text-[var(--bg-primary)] text-xs font-bold rounded animate-pulse">
               DECISION POINT
             </span>
           )}
         </div>
 
-        {/* Indicator toggles */}
+        {/* Indicator Quick Toggles */}
         <div className="flex items-center gap-1">
           <button
             onClick={() => toggleIndicator('showVWAP')}
@@ -903,7 +824,7 @@ export function PracticeChart({
                 ? 'bg-purple-500/20 text-purple-400'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]'
             )}
-            title="VWAP"
+            title="VWAP (Purple)"
           >
             <Activity className="w-4 h-4" />
           </button>
@@ -915,19 +836,19 @@ export function PracticeChart({
                 ? 'bg-green-500/20 text-green-400'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]'
             )}
-            title="EMA Ribbon"
+            title="Ripster Clouds (EMA 8/21)"
           >
             <TrendingUp className="w-4 h-4" />
           </button>
           <button
-            onClick={() => toggleIndicator('showVolumeProfile')}
+            onClick={() => toggleIndicator('showVolume')}
             className={cn(
               'p-1.5 rounded transition-colors',
-              indicators.showVolumeProfile
+              indicators.showVolume
                 ? 'bg-blue-500/20 text-blue-400'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]'
             )}
-            title="Volume Profile"
+            title="Volume"
           >
             <BarChart3 className="w-4 h-4" />
           </button>
@@ -948,17 +869,17 @@ export function PracticeChart({
 
       {/* Settings Dropdown */}
       {showSettings && (
-        <div className="absolute top-12 right-3 z-20 bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-lg p-3 min-w-[200px] shadow-xl">
+        <div className="absolute top-12 right-3 z-20 bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-lg p-3 min-w-[220px] shadow-xl">
           <div className="text-xs font-medium text-[var(--text-tertiary)] uppercase mb-2">Indicators</div>
           <div className="space-y-2">
             {[
-              { key: 'showVWAP', label: 'VWAP' },
-              { key: 'showVWAPBands', label: 'VWAP Bands (±1σ, ±2σ)' },
-              { key: 'showEMA9', label: 'EMA 9' },
-              { key: 'showEMA21', label: 'EMA 21' },
-              { key: 'showEMARibbon', label: 'EMA Ribbon' },
-              { key: 'showVolumeProfile', label: 'Volume Profile' },
-            ].map(({ key, label }) => (
+              { key: 'showVWAP', label: 'VWAP (Purple)', color: 'text-purple-400' },
+              { key: 'showVWAPBands', label: 'VWAP Bands (±1σ, ±2σ)', color: 'text-purple-300' },
+              { key: 'showEMA9', label: 'EMA 9 (Green)', color: 'text-green-400' },
+              { key: 'showEMA21', label: 'EMA 21 (Red)', color: 'text-red-400' },
+              { key: 'showEMARibbon', label: 'Ripster Clouds', color: 'text-green-400' },
+              { key: 'showVolume', label: 'Volume', color: 'text-blue-400' },
+            ].map(({ key, label, color }) => (
               <label key={key} className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -966,45 +887,41 @@ export function PracticeChart({
                   onChange={() => toggleIndicator(key as keyof IndicatorSettings)}
                   className="w-4 h-4 rounded border-[var(--border-primary)] bg-[var(--bg-tertiary)] checked:bg-[var(--accent-primary)]"
                 />
-                <span className="text-sm text-[var(--text-secondary)]">{label}</span>
+                <span className={cn('text-sm', color)}>{label}</span>
               </label>
             ))}
           </div>
 
-          {replayMode && (
-            <>
-              <div className="border-t border-[var(--border-primary)] my-3" />
-              <div className="text-xs font-medium text-[var(--text-tertiary)] uppercase mb-2">Playback Speed</div>
+          {/* Color Legend */}
+          <div className="border-t border-[var(--border-primary)] mt-3 pt-3">
+            <div className="text-xs font-medium text-[var(--text-tertiary)] uppercase mb-2">KCU Color Legend</div>
+            <div className="space-y-1 text-xs">
               <div className="flex items-center gap-2">
-                {[0.5, 1, 2, 4].map(speed => (
-                  <button
-                    key={speed}
-                    onClick={() => setPlaybackSpeed(speed)}
-                    className={cn(
-                      'px-2 py-1 text-xs rounded transition-colors',
-                      playbackSpeed === speed
-                        ? 'bg-[var(--accent-primary)] text-white'
-                        : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-primary)]'
-                    )}
-                  >
-                    {speed}x
-                  </button>
-                ))}
+                <div className="w-3 h-0.5 bg-green-500" />
+                <span className="text-green-400">EMA 9 - Fast</span>
               </div>
-            </>
-          )}
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-0.5 bg-red-500" />
+                <span className="text-red-400">EMA 21 - Slow</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-0.5 bg-purple-500" />
+                <span className="text-purple-400">VWAP</span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
       {/* Chart Container */}
-      <div ref={chartContainerRef} className="w-full h-[450px]" />
+      <div ref={chartContainerRef} className="w-full" style={{ height: `${height}px` }} />
 
       {/* Key Levels Legend */}
-      {showLevels && keyLevels.length > 0 && (
+      {showLevels && levels.length > 0 && (
         <div className="absolute top-14 right-3 z-10 bg-[var(--bg-secondary)]/95 border border-[var(--border-primary)] rounded p-2 max-w-[200px]">
           <div className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider mb-1">Key Levels</div>
           <div className="space-y-1">
-            {keyLevels.slice(0, 6).map((level, idx) => (
+            {levels.slice(0, 6).map((level, idx) => (
               <div key={idx} className="flex items-center justify-between gap-2 text-xs">
                 <div className="flex items-center gap-1">
                   <div
@@ -1020,95 +937,42 @@ export function PracticeChart({
         </div>
       )}
 
-      {/* Controls Bar */}
-      <div className="absolute bottom-3 left-3 right-3 z-10 flex items-center justify-between">
-        {/* Replay Controls */}
-        {replayMode && (
-          <div className="flex items-center gap-1 bg-[var(--bg-secondary)]/95 border border-[var(--border-primary)] rounded-lg p-1">
-            <button
-              onClick={handleReset}
-              className="p-2 hover:bg-[var(--bg-tertiary)] rounded transition-colors"
-              title="Reset"
-            >
-              <RotateCcw className="w-4 h-4 text-[var(--text-secondary)]" />
-            </button>
-            {isPlaying ? (
-              <button
-                onClick={handlePause}
-                className="p-2 hover:bg-[var(--bg-tertiary)] rounded transition-colors"
-                title="Pause"
-              >
-                <Pause className="w-4 h-4 text-[var(--text-secondary)]" />
-              </button>
-            ) : (
-              <button
-                onClick={handlePlay}
-                className="p-2 bg-[var(--accent-primary)]/20 hover:bg-[var(--accent-primary)]/30 rounded transition-colors"
-                title="Play"
-              >
-                <Play className="w-4 h-4 text-[var(--accent-primary)]" />
-              </button>
-            )}
-            <button
-              onClick={handleStepForward}
-              disabled={currentCandleIndex >= currentBars.length - 1}
-              className="p-2 hover:bg-[var(--bg-tertiary)] rounded transition-colors disabled:opacity-50"
-              title="Next Candle"
-            >
-              <SkipForward className="w-4 h-4 text-[var(--text-secondary)]" />
-            </button>
-            {showOutcome && (
-              <button
-                onClick={handleShowAll}
-                className="p-2 hover:bg-[var(--bg-tertiary)] rounded transition-colors"
-                title="Show Outcome"
-              >
-                <Eye className="w-4 h-4 text-[var(--text-secondary)]" />
-              </button>
-            )}
-            <div className="px-3 text-xs text-[var(--text-tertiary)] border-l border-[var(--border-primary)]">
-              {currentCandleIndex + 1} / {currentBars.length}
-            </div>
-            <div className="px-2 text-xs text-[var(--text-tertiary)]">
-              {playbackSpeed}x
-            </div>
-          </div>
-        )}
-
-        {/* View Controls */}
-        <div className="flex items-center gap-1 bg-[var(--bg-secondary)]/95 border border-[var(--border-primary)] rounded-lg p-1 ml-auto">
-          <button
-            onClick={() => setShowLevels(!showLevels)}
-            className={cn(
-              'p-2 rounded transition-colors',
-              showLevels
-                ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-primary)]'
-                : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]'
-            )}
-            title={showLevels ? 'Hide Levels' : 'Show Levels'}
-          >
-            {showLevels ? (
-              <Eye className="w-4 h-4" />
-            ) : (
-              <EyeOff className="w-4 h-4" />
-            )}
-          </button>
-          <button
-            onClick={handleZoomIn}
-            className="p-2 hover:bg-[var(--bg-tertiary)] rounded transition-colors"
-            title="Zoom In"
-          >
-            <ZoomIn className="w-4 h-4 text-[var(--text-secondary)]" />
-          </button>
-          <button
-            onClick={handleZoomOut}
-            className="p-2 hover:bg-[var(--bg-tertiary)] rounded transition-colors"
-            title="Zoom Out"
-          >
-            <ZoomOut className="w-4 h-4 text-[var(--text-secondary)]" />
-          </button>
-        </div>
+      {/* View Controls */}
+      <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1 bg-[var(--bg-secondary)]/95 border border-[var(--border-primary)] rounded-lg p-1">
+        <button
+          onClick={() => setShowLevels(!showLevels)}
+          className={cn(
+            'p-2 rounded transition-colors',
+            showLevels
+              ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-primary)]'
+              : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]'
+          )}
+          title={showLevels ? 'Hide Levels' : 'Show Levels'}
+        >
+          {showLevels ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+        </button>
+        <button
+          onClick={handleZoomIn}
+          className="p-2 hover:bg-[var(--bg-tertiary)] rounded transition-colors"
+          title="Zoom In"
+        >
+          <ZoomIn className="w-4 h-4 text-[var(--text-secondary)]" />
+        </button>
+        <button
+          onClick={handleZoomOut}
+          className="p-2 hover:bg-[var(--bg-tertiary)] rounded transition-colors"
+          title="Zoom Out"
+        >
+          <ZoomOut className="w-4 h-4 text-[var(--text-secondary)]" />
+        </button>
       </div>
+
+      {/* Candle Counter (for replay mode) */}
+      {isReplayMode && (
+        <div className="absolute bottom-3 left-3 z-10 px-3 py-1 bg-[var(--bg-secondary)]/95 border border-[var(--border-primary)] rounded text-xs text-[var(--text-tertiary)] font-mono">
+          {currentIndex !== undefined ? currentIndex + 1 : visibleCandles.length} / {visibleCandles.length}
+        </div>
+      )}
 
       {/* Outcome Overlay */}
       {showOutcome && outcomeData && (
