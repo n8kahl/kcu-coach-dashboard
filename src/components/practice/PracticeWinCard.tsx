@@ -5,9 +5,11 @@
  *
  * Pops up immediately after a practice trade closes
  * showing the KCU Grade with LTP 2.0 breakdown.
+ *
+ * Enhanced with XP display, streak bonuses, and celebratory animations.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { LTP2Score } from '@/lib/ltp-gamma-engine';
@@ -25,7 +27,25 @@ import {
   ChevronRight,
   Copy,
   CheckCircle,
+  Flame,
+  Star,
+  Sparkles,
 } from 'lucide-react';
+
+// XP Rewards by difficulty tier
+const XP_REWARDS = {
+  beginner: { base: 10, bonus: 5 },
+  intermediate: { base: 20, bonus: 10 },
+  advanced: { base: 35, bonus: 15 },
+};
+
+// Streak multipliers
+const STREAK_MULTIPLIERS: Record<number, number> = {
+  3: 1.1,   // 3-streak: 10% bonus
+  5: 1.25,  // 5-streak: 25% bonus
+  10: 1.5,  // 10-streak: 50% bonus
+  20: 2.0,  // 20-streak: 100% bonus
+};
 
 interface PracticeWinCardProps {
   isOpen: boolean;
@@ -53,6 +73,13 @@ interface PracticeWinCardProps {
     patienceScore?: number;
     resistancePenalty?: number;
   };
+
+  // Gaming features (NEW)
+  xpEarned?: number;
+  difficulty?: 'beginner' | 'intermediate' | 'advanced';
+  currentStreak?: number;
+  isNewBestStreak?: boolean;
+  accuracy?: number;
 }
 
 export function PracticeWinCard({
@@ -69,16 +96,94 @@ export function PracticeWinCard({
   grade,
   score,
   breakdown,
+  xpEarned,
+  difficulty = 'intermediate',
+  currentStreak = 0,
+  isNewBestStreak = false,
+  accuracy,
 }: PracticeWinCardProps) {
   const [showShareOptions, setShowShareOptions] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [animatedXP, setAnimatedXP] = useState(0);
+  const confettiRef = useRef<HTMLDivElement>(null);
 
-  // Auto-close confetti effect
-  useEffect(() => {
-    if (isOpen && isCorrect && ltp2Score?.grade === 'Sniper') {
-      // Could trigger confetti here
+  // Calculate XP if not provided
+  const calculatedXP = xpEarned ?? (() => {
+    if (!isCorrect) return XP_REWARDS[difficulty].base * 0.3; // 30% XP for incorrect
+    let baseXP = XP_REWARDS[difficulty].base;
+
+    // Accuracy bonus
+    if (accuracy && accuracy >= 80) {
+      baseXP += XP_REWARDS[difficulty].bonus;
     }
-  }, [isOpen, isCorrect, ltp2Score]);
+
+    // Grade bonus for Sniper
+    if (ltp2Score?.grade === 'Sniper' || grade === 'Sniper') {
+      baseXP *= 1.5;
+    }
+
+    // Apply streak multiplier
+    const streakMultiplier = Object.entries(STREAK_MULTIPLIERS)
+      .filter(([threshold]) => currentStreak >= parseInt(threshold))
+      .reduce((max, [, mult]) => Math.max(max, mult), 1);
+
+    return Math.round(baseXP * streakMultiplier);
+  })();
+
+  // Animate XP counter
+  useEffect(() => {
+    if (!isOpen) {
+      setAnimatedXP(0);
+      return;
+    }
+
+    const duration = 1000; // 1 second animation
+    const steps = 30;
+    const increment = calculatedXP / steps;
+    let current = 0;
+    let step = 0;
+
+    const timer = setInterval(() => {
+      step++;
+      current = Math.min(Math.round(increment * step), calculatedXP);
+      setAnimatedXP(current);
+
+      if (step >= steps) {
+        clearInterval(timer);
+      }
+    }, duration / steps);
+
+    return () => clearInterval(timer);
+  }, [isOpen, calculatedXP]);
+
+  // Confetti effect for Sniper or big streaks
+  useEffect(() => {
+    if (isOpen && (ltp2Score?.grade === 'Sniper' || currentStreak >= 10 || isNewBestStreak)) {
+      // Create confetti particles
+      if (confettiRef.current) {
+        const colors = ['#22c55e', '#fbbf24', '#3b82f6', '#ec4899', '#8b5cf6'];
+        for (let i = 0; i < 50; i++) {
+          const particle = document.createElement('div');
+          particle.className = 'confetti-particle';
+          particle.style.cssText = `
+            position: absolute;
+            width: ${Math.random() * 8 + 4}px;
+            height: ${Math.random() * 8 + 4}px;
+            background: ${colors[Math.floor(Math.random() * colors.length)]};
+            left: ${Math.random() * 100}%;
+            top: -10px;
+            opacity: 1;
+            border-radius: ${Math.random() > 0.5 ? '50%' : '0'};
+            animation: confetti-fall ${Math.random() * 2 + 1}s ease-out forwards;
+          `;
+          confettiRef.current.appendChild(particle);
+
+          // Remove after animation
+          setTimeout(() => particle.remove(), 3000);
+        }
+      }
+    }
+  }, [isOpen, ltp2Score?.grade, currentStreak, isNewBestStreak]);
 
   if (!isOpen) return null;
 
@@ -120,7 +225,14 @@ export function PracticeWinCard({
   const theme = getTheme();
 
   const copyToClipboard = async () => {
-    const text = `${displayGrade} setup on $${symbol}! LTP Score: ${displayScore}/100 #KCU #LTPFramework`;
+    let text = `${displayGrade} setup on $${symbol}! LTP Score: ${displayScore}/100`;
+    if (calculatedXP > 0) {
+      text += ` | +${calculatedXP} XP`;
+    }
+    if (currentStreak >= 3) {
+      text += ` | 🔥 ${currentStreak} streak`;
+    }
+    text += ' #KCU #LTPFramework';
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -128,6 +240,27 @@ export function PracticeWinCard({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 animate-in fade-in duration-300">
+      {/* Confetti Container */}
+      <div
+        ref={confettiRef}
+        className="fixed inset-0 pointer-events-none overflow-hidden z-50"
+        style={{ perspective: '1000px' }}
+      />
+
+      {/* Confetti CSS */}
+      <style jsx global>{`
+        @keyframes confetti-fall {
+          0% {
+            transform: translateY(0) rotateZ(0deg) scale(1);
+            opacity: 1;
+          }
+          100% {
+            transform: translateY(100vh) rotateZ(720deg) scale(0);
+            opacity: 0;
+          }
+        }
+      `}</style>
+
       <div className={cn(
         'relative w-full max-w-md mx-4 bg-gradient-to-br rounded-lg overflow-hidden',
         theme.bg,
@@ -253,6 +386,74 @@ export function PracticeWinCard({
             </div>
           </div>
         )}
+
+        {/* XP Earned & Streak Display */}
+        <div className="px-6 pb-4">
+          <div className="flex items-center justify-between gap-4">
+            {/* XP Earned */}
+            <div className={cn(
+              'flex-1 p-3 rounded-lg text-center',
+              'bg-gradient-to-br from-amber-500/20 to-yellow-500/10',
+              'border border-amber-500/30'
+            )}>
+              <div className="flex items-center justify-center gap-1 mb-1">
+                <Star className="w-4 h-4 text-amber-400" />
+                <span className="text-xs text-amber-400 font-medium">XP EARNED</span>
+              </div>
+              <div className="text-2xl font-black text-amber-400">
+                +{animatedXP}
+                {currentStreak >= 3 && (
+                  <span className="text-xs ml-1 text-amber-300/70">
+                    ({Math.round((Object.entries(STREAK_MULTIPLIERS)
+                      .filter(([threshold]) => currentStreak >= parseInt(threshold))
+                      .reduce((max, [, mult]) => Math.max(max, mult), 1) - 1) * 100)}% bonus)
+                  </span>
+                )}
+              </div>
+              <div className="text-[10px] text-amber-400/60 uppercase mt-1">
+                {difficulty} difficulty
+              </div>
+            </div>
+
+            {/* Current Streak */}
+            {currentStreak > 0 && (
+              <div className={cn(
+                'p-3 rounded-lg text-center min-w-[100px]',
+                currentStreak >= 10
+                  ? 'bg-gradient-to-br from-orange-500/30 to-red-500/20 border border-orange-500/50'
+                  : currentStreak >= 5
+                    ? 'bg-gradient-to-br from-yellow-500/20 to-amber-500/10 border border-yellow-500/30'
+                    : 'bg-white/5 border border-white/10'
+              )}>
+                <div className="flex items-center justify-center gap-1 mb-1">
+                  <Flame className={cn(
+                    'w-4 h-4',
+                    currentStreak >= 10 ? 'text-orange-400 animate-pulse' :
+                    currentStreak >= 5 ? 'text-yellow-400' : 'text-[var(--text-tertiary)]'
+                  )} />
+                  <span className={cn(
+                    'text-xs font-medium',
+                    currentStreak >= 10 ? 'text-orange-400' :
+                    currentStreak >= 5 ? 'text-yellow-400' : 'text-[var(--text-tertiary)]'
+                  )}>STREAK</span>
+                </div>
+                <div className={cn(
+                  'text-2xl font-black',
+                  currentStreak >= 10 ? 'text-orange-400' :
+                  currentStreak >= 5 ? 'text-yellow-400' : 'text-[var(--text-primary)]'
+                )}>
+                  {currentStreak}
+                </div>
+                {isNewBestStreak && (
+                  <div className="flex items-center justify-center gap-1 mt-1">
+                    <Sparkles className="w-3 h-3 text-purple-400" />
+                    <span className="text-[10px] text-purple-400 font-bold">NEW BEST!</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Recommendation */}
         {ltp2Score?.recommendation && (
