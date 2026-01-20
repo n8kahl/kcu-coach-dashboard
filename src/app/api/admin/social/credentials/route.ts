@@ -10,11 +10,17 @@ import { getAuthenticatedUser } from '@/lib/auth';
 import { encryptToken } from '@/lib/social/encryption';
 import { z } from 'zod';
 
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Lazy-initialize Supabase client to avoid build-time errors
+function getSupabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    throw new Error('Missing Supabase configuration');
+  }
+
+  return createClient(url, key);
+}
 
 const CONFIG_KEY = 'social_app_credentials';
 
@@ -51,6 +57,7 @@ export async function GET() {
     }
 
     // Fetch from database
+    const supabase = getSupabaseAdmin();
     const { data, error } = await supabase
       .from('social_builder_config')
       .select('config_value, updated_at')
@@ -131,6 +138,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Fetch existing credentials
+    const supabase = getSupabaseAdmin();
     const { data: existing } = await supabase
       .from('social_builder_config')
       .select('config_value')
@@ -214,6 +222,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Fetch existing credentials
+    const supabase = getSupabaseAdmin();
     const { data: existing } = await supabase
       .from('social_builder_config')
       .select('config_value')
