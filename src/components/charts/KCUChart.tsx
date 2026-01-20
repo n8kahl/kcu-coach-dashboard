@@ -891,8 +891,10 @@ export function KCUChart({
         lineStyle: level.lineStyle === 'dotted' ? LineStyle.Dotted :
                    level.lineStyle === 'dashed' ? LineStyle.Dashed :
                    LineStyle.Solid,
-        priceLineVisible: true,
-        lastValueVisible: true,
+        // Disable price labels to prevent "Value is null" errors from coordinate conversion
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
         title: level.label,
       });
 
@@ -1010,11 +1012,11 @@ export function KCUChart({
         color,
         lineWidth: lineWidth as 1 | 2 | 3 | 4,
         lineStyle,
-        priceLineVisible: true,
-        lastValueVisible: true,
+        // Disable price labels to prevent "Value is null" errors from coordinate conversion
+        priceLineVisible: false,
+        lastValueVisible: false,
         title,
-        crosshairMarkerVisible: true,
-        crosshairMarkerRadius: 6,
+        crosshairMarkerVisible: false,
       });
 
       // Create horizontal line across the full visible range (times pre-validated)
