@@ -62,15 +62,21 @@ interface MassiveMessage {
   status?: string;
   message?: string;
   sym?: string;
-  p?: number;
+  // Trade fields
+  p?: number;       // price
+  t?: number;       // SIP timestamp (trades only)
+  // For trades: size (shares), for aggregates: start timestamp (Unix ms)
   s?: number;
-  t?: number;
-  v?: number;
-  vw?: number;
-  o?: number;
-  h?: number;
-  l?: number;
-  c?: number;
+  // Aggregate fields
+  v?: number;       // volume
+  vw?: number;      // VWAP for this bar
+  o?: number;       // open
+  h?: number;       // high
+  l?: number;       // low
+  c?: number;       // close
+  e?: number;       // end timestamp (aggregates only)
+  a?: number;       // today's VWAP (aggregates only)
+  av?: number;      // accumulated volume (aggregates only)
 }
 
 // Worker state
@@ -319,6 +325,7 @@ function processMessage(msg: MassiveMessage): void {
   }
 
   // Handle aggregate/bar data (A or AM)
+  // Note: For aggregates, 's' is start timestamp and 'e' is end timestamp (not size)
   if ((msg.ev === 'A' || msg.ev === 'AM') && msg.sym) {
     state.messageCount++;
     state.lastMessageTime = Date.now();
@@ -333,7 +340,8 @@ function processMessage(msg: MassiveMessage): void {
         close: msg.c,
         volume: msg.v,
         vwap: msg.vw,
-        timestamp: msg.t,
+        // Use end timestamp (e) for bar close time, fallback to start (s)
+        timestamp: msg.e || msg.s,
       },
     };
 
