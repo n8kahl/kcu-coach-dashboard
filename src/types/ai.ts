@@ -67,6 +67,16 @@ export interface PageSpecificData {
   completedVideos?: string[];
   difficultyLevel?: 'beginner' | 'intermediate' | 'advanced';
 
+  // Progress Dashboard (Learning Intelligence)
+  completionPercent?: number;
+  currentStreak?: number;
+  weakAreas?: string[];
+  recommendedModule?: string;
+  totalLessonsCompleted?: number;
+  totalWatchTimeHours?: number;
+  modulesInProgress?: number;
+  modulesCompleted?: number;
+
   // Companion
   watchlistSymbols?: string[];
   focusedSymbol?: string;

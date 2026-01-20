@@ -1,272 +1,433 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+/**
+ * Learning Intelligence Dashboard
+ *
+ * A high-impact progress tracking page that transforms the learning experience
+ * from a static list into an intelligent, AI-aware curriculum dashboard.
+ *
+ * Features:
+ * - Real-time progress tracking via useLearningProgress hook
+ * - Premium UI components (ProgressOverview, ActivityHeatmap, ModuleProgressList)
+ * - Deep AI context integration for intelligent coaching
+ * - Responsive layout with mobile-first design
+ * - Skeleton loading states for premium UX
+ */
+
+// Force dynamic rendering to prevent prerender errors
+export const dynamic = 'force-dynamic';
+
+import { useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/header';
-import { PageShell, PageSection } from '@/components/layout/page-shell';
-import { LearningProgress, QuizHistory } from '@/components/dashboard/learning-progress';
+import { PageShell } from '@/components/layout/page-shell';
 import { Button } from '@/components/ui/button';
-import { SkeletonStats, SkeletonCard } from '@/components/ui/feedback';
-import { Play, BookOpen, AlertCircle } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
-import type { ModuleProgress } from '@/types';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { LoadingState } from '@/components/ui/feedback';
+import { ProgressBar } from '@/components/ui/progress';
+import { motion } from 'framer-motion';
+import {
+  Play,
+  BookOpen,
+  AlertCircle,
+  RefreshCw,
+  Trophy,
+  Flame,
+  Clock,
+  Target,
+  TrendingUp,
+  GraduationCap,
+} from 'lucide-react';
 
-// Define the module structure for the LTP Framework curriculum
-const CURRICULUM_MODULES = [
-  {
-    module: 'fundamentals',
-    topics: ['account_types', 'broker_setup', 'chart_basics'],
-  },
-  {
-    module: 'ltp_framework',
-    topics: ['levels', 'trends', 'patience_candles'],
-  },
-  {
-    module: 'entry_exit',
-    topics: ['entry_rules', 'stop_losses', 'targets'],
-  },
-  {
-    module: 'psychology',
-    topics: ['mindset', 'discipline', 'handling_losses'],
-  },
-  {
-    module: 'advanced',
-    topics: ['options_greeks', 'spreads', 'scalping'],
-  },
-];
+// Premium learn components
+import {
+  ProgressOverview,
+  ActivityHeatmap,
+  ModuleProgressList,
+} from '@/components/learn';
 
-interface ProgressData {
-  lessonProgress: Array<{
-    lesson_id: string;
-    completed: boolean;
-    progress_percent: number;
-    watch_time: number;
-  }>;
-  moduleProgress: Array<{
-    module_id: string;
-    progress_percent: number;
-    completed: boolean;
-  }>;
-  recentQuizzes: Array<{
-    topic_id: string;
-    score: number;
-    total_questions: number;
-    completed_at: string;
-  }>;
+// Data hooks
+import { useLearningProgress } from '@/hooks/use-learning-progress';
+
+// AI context integration
+import { usePageContext } from '@/components/ai/hooks/usePageContext';
+
+// Types
+import type { CourseProgress, LearningStreak, DailyActivity } from '@/types/learning';
+import type { ModuleProgress } from '@/lib/learning-progress';
+
+// ============================================================================
+// SKELETON COMPONENTS
+// ============================================================================
+
+function ProgressOverviewSkeleton() {
+  return (
+    <Card variant="glow" className="animate-pulse">
+      <CardContent>
+        <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
+          <div className="flex-1 w-full">
+            <div className="h-8 w-64 bg-[var(--bg-tertiary)] rounded mb-2" />
+            <div className="h-4 w-48 bg-[var(--bg-tertiary)] rounded mb-6" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="p-3 rounded-lg bg-[var(--bg-tertiary)]">
+                  <div className="h-5 w-5 bg-[var(--bg-secondary)] rounded mx-auto mb-2" />
+                  <div className="h-6 w-12 bg-[var(--bg-secondary)] rounded mx-auto mb-1" />
+                  <div className="h-3 w-16 bg-[var(--bg-secondary)] rounded mx-auto" />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="w-36 h-36 rounded-full bg-[var(--bg-tertiary)]" />
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
-// Transform API data to component format
-function transformProgressData(data: ProgressData | null): {
-  modules: ModuleProgress[];
-  quizHistory: Array<{ topic: string; score: number; total: number; date: string }>;
-} {
-  if (!data) {
-    // Return default empty progress for new users
-    return {
-      modules: CURRICULUM_MODULES.map((curriculum) => ({
-        module: curriculum.module,
-        overallProgress: 0,
-        topics: curriculum.topics.map((topic) => ({
-          topic,
-          status: 'not_started' as const,
-        })),
-      })),
-      quizHistory: [],
-    };
-  }
-
-  // Build a map of lesson progress by topic
-  const lessonProgressMap = new Map(
-    data.lessonProgress.map((lp) => [lp.lesson_id, lp])
+function ActivityHeatmapSkeleton() {
+  return (
+    <Card className="animate-pulse">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="h-6 w-24 bg-[var(--bg-tertiary)] rounded" />
+          <div className="flex gap-4">
+            <div className="h-4 w-20 bg-[var(--bg-tertiary)] rounded" />
+            <div className="h-4 w-16 bg-[var(--bg-tertiary)] rounded" />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="flex gap-4">
+          <div className="w-8 space-y-1">
+            {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+              <div key={i} className="h-3 w-8 bg-[var(--bg-tertiary)] rounded" />
+            ))}
+          </div>
+          <div className="flex-1">
+            <div className="flex gap-1">
+              {Array.from({ length: 12 }).map((_, weekIndex) => (
+                <div key={weekIndex} className="flex flex-col gap-1">
+                  {Array.from({ length: 7 }).map((_, dayIndex) => (
+                    <div key={dayIndex} className="w-3 h-3 bg-[var(--bg-tertiary)] rounded-sm" />
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-4 mt-6 pt-4 border-t border-[var(--border-primary)]">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="text-center">
+              <div className="h-8 w-12 bg-[var(--bg-tertiary)] rounded mx-auto mb-1" />
+              <div className="h-3 w-16 bg-[var(--bg-tertiary)] rounded mx-auto" />
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
+}
 
-  // Build a map of module progress
-  const moduleProgressMap = new Map(
-    data.moduleProgress.map((mp) => [mp.module_id, mp])
+function ModuleGridSkeleton() {
+  return (
+    <div className="animate-pulse">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <div className="h-6 w-48 bg-[var(--bg-tertiary)] rounded mb-2" />
+          <div className="h-4 w-32 bg-[var(--bg-tertiary)] rounded" />
+        </div>
+        <div className="text-right">
+          <div className="h-8 w-16 bg-[var(--bg-tertiary)] rounded mb-1" />
+          <div className="h-3 w-12 bg-[var(--bg-tertiary)] rounded" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
+            <div className="flex items-start gap-3 mb-3">
+              <div className="w-12 h-12 rounded-lg bg-[var(--bg-tertiary)]" />
+              <div className="flex-1">
+                <div className="h-5 w-32 bg-[var(--bg-tertiary)] rounded mb-2" />
+                <div className="h-3 w-24 bg-[var(--bg-tertiary)] rounded" />
+              </div>
+            </div>
+            <div className="mb-4">
+              <div className="flex justify-between mb-1.5">
+                <div className="h-3 w-16 bg-[var(--bg-tertiary)] rounded" />
+                <div className="h-3 w-8 bg-[var(--bg-tertiary)] rounded" />
+              </div>
+              <div className="h-2 w-full bg-[var(--bg-tertiary)] rounded" />
+            </div>
+            <div className="h-8 w-full bg-[var(--bg-tertiary)] rounded" />
+          </div>
+        ))}
+      </div>
+    </div>
   );
+}
 
-  // Transform modules
-  const modules: ModuleProgress[] = CURRICULUM_MODULES.map((curriculum) => {
-    const moduleData = moduleProgressMap.get(curriculum.module);
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
 
-    // Calculate topic progress
-    const topics = curriculum.topics.map((topicId) => {
-      const topicProgress = lessonProgressMap.get(topicId);
+/**
+ * Build CourseProgress object from stats for ProgressOverview
+ */
+function buildCourseProgress(
+  stats: {
+    totalLessonsCompleted: number;
+    totalWatchTimeSeconds: number;
+    overallProgress: number;
+    totalCoursesCompleted: number;
+    totalCoursesEnrolled: number;
+    totalQuizzesPassed: number;
+  } | undefined,
+  modules: ModuleProgress[] | undefined
+): CourseProgress {
+  const totalModules = modules?.length || 0;
+  const completedModules = modules?.filter(m => m.progress >= 100).length || 0;
+  const totalLessons = modules?.reduce((sum, m) => sum + m.totalLessons, 0) || 0;
+  const completedLessons = modules?.reduce((sum, m) => sum + m.lessonsCompleted, 0) || 0;
 
-      let status: 'not_started' | 'in_progress' | 'completed' | 'mastered' = 'not_started';
-      let score: number | undefined;
+  return {
+    totalLessons,
+    completedLessons,
+    totalModules,
+    completedModules,
+    totalWatchTimeSeconds: stats?.totalWatchTimeSeconds || 0,
+    totalQuizAttempts: stats?.totalQuizzesPassed || 0,
+    bestQuizScores: modules?.filter(m => m.quizScore !== undefined).map(m => ({
+      moduleId: m.moduleId,
+      bestScore: m.quizScore || 0,
+    })) || [],
+    completionPercent: stats?.overallProgress || 0,
+  };
+}
 
-      if (topicProgress) {
-        const progressPercent = topicProgress.progress_percent;
-        score = progressPercent;
+/**
+ * Build LearningStreak object from stats
+ */
+function buildStreak(stats: { currentStreak: number; longestStreak: number; lastActivityAt?: string } | undefined): LearningStreak {
+  return {
+    currentStreak: stats?.currentStreak || 0,
+    longestStreak: stats?.longestStreak || 0,
+    lastActivityDate: stats?.lastActivityAt || null,
+    streakStartDate: null,
+  };
+}
 
-        if (progressPercent >= 95) {
-          status = 'mastered';
-        } else if (progressPercent >= 70) {
-          status = 'completed';
-        } else if (progressPercent > 0) {
-          status = 'in_progress';
-        }
-      }
+/**
+ * Convert recent activity to DailyActivity format
+ */
+function buildDailyActivities(recentActivity: Array<{ timestamp: string; type: string; xpEarned?: number }> | undefined): DailyActivity[] {
+  if (!recentActivity || recentActivity.length === 0) return [];
 
-      return { topic: topicId, status, score };
-    });
+  // Group activities by date
+  const byDate = new Map<string, { lessonsCompleted: number; watchTime: number; quizzesPassed: number }>();
 
-    // Calculate overall module progress
-    const overallProgress = moduleData?.progress_percent ??
-      Math.round(
-        topics.reduce((sum, t) => sum + (t.score || 0), 0) / topics.length
-      );
+  recentActivity.forEach(activity => {
+    const date = activity.timestamp.split('T')[0];
+    const existing = byDate.get(date) || { lessonsCompleted: 0, watchTime: 0, quizzesPassed: 0 };
 
-    return {
-      module: curriculum.module,
-      overallProgress,
-      topics,
-    };
-  });
-
-  // Transform quiz history
-  const quizHistory = data.recentQuizzes.map((quiz) => {
-    const completedDate = new Date(quiz.completed_at);
-    const now = new Date();
-    const diffDays = Math.floor((now.getTime() - completedDate.getTime()) / (1000 * 60 * 60 * 24));
-
-    let dateLabel: string;
-    if (diffDays === 0) {
-      dateLabel = 'Today';
-    } else if (diffDays === 1) {
-      dateLabel = 'Yesterday';
-    } else if (diffDays < 7) {
-      dateLabel = `${diffDays} days ago`;
-    } else {
-      dateLabel = completedDate.toLocaleDateString();
+    if (activity.type === 'lesson_completed') {
+      existing.lessonsCompleted++;
+      existing.watchTime += 300; // Estimate 5 min per lesson
+    } else if (activity.type === 'quiz_passed') {
+      existing.quizzesPassed++;
     }
 
-    return {
-      topic: quiz.topic_id,
-      score: quiz.score,
-      total: quiz.total_questions,
-      date: dateLabel,
-    };
+    byDate.set(date, existing);
   });
 
-  return { modules, quizHistory };
+  return Array.from(byDate.entries()).map(([date, data]) => ({
+    activityDate: date,
+    lessonsStarted: data.lessonsCompleted,
+    lessonsCompleted: data.lessonsCompleted,
+    watchTimeSeconds: data.watchTime,
+    quizzesTaken: data.quizzesPassed,
+    quizzesPassed: data.quizzesPassed,
+    engagementScore: (data.lessonsCompleted * 25) + (data.quizzesPassed * 50),
+  }));
 }
 
-// Find the next lesson to continue
-function findNextLesson(modules: ModuleProgress[]): { module: string; topic: string } | null {
-  for (const module of modules) {
-    for (const topic of module.topics) {
-      if (topic.status === 'not_started' || topic.status === 'in_progress') {
-        return { module: module.module, topic: topic.topic };
-      }
-    }
-  }
-  return null;
+/**
+ * Find the recommended next lesson based on progress
+ */
+function findRecommendedModule(modules: ModuleProgress[] | undefined): ModuleProgress | null {
+  if (!modules || modules.length === 0) return null;
+
+  // First, find modules in progress (not completed, has some progress)
+  const inProgress = modules.find(m => m.progress > 0 && m.progress < 100);
+  if (inProgress) return inProgress;
+
+  // Next, find the first not-started module
+  const notStarted = modules.find(m => m.progress === 0);
+  if (notStarted) return notStarted;
+
+  // All complete - return the last one for review
+  return modules[modules.length - 1];
 }
+
+/**
+ * Identify weak areas based on quiz scores
+ */
+function identifyWeakAreas(modules: ModuleProgress[] | undefined): string[] {
+  if (!modules) return [];
+
+  return modules
+    .filter(m => m.quizScore !== undefined && m.quizScore < 70)
+    .map(m => m.moduleName);
+}
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
 
 export default function ProgressPage() {
   const router = useRouter();
-  const [progressData, setProgressData] = useState<ProgressData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function fetchProgress() {
-      try {
-        setLoading(true);
-        const response = await fetch('/api/learning/progress');
+  // Fetch all progress data using the unified hook
+  const { data, isLoading, error, refresh } = useLearningProgress({
+    include: ['stats', 'modules', 'activity'],
+    autoRefresh: true,
+    refreshInterval: 120000, // Refresh every 2 minutes
+  });
 
-        if (!response.ok) {
-          if (response.status === 401) {
-            // User not logged in - redirect to login
-            router.push('/login');
-            return;
-          }
-          throw new Error('Failed to fetch progress');
-        }
-
-        const data = await response.json();
-        setProgressData(data);
-        setError(null);
-      } catch (err) {
-        console.error('Error fetching progress:', err);
-        setError('Unable to load your learning progress. Please try again.');
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchProgress();
-  }, [router]);
-
-  const { modules, quizHistory } = transformProgressData(progressData);
-  const overallProgress = Math.round(
-    modules.reduce((sum, m) => sum + m.overallProgress, 0) / modules.length
+  // Build derived data for components
+  const courseProgress = useMemo(
+    () => buildCourseProgress(data?.stats, data?.modules),
+    [data?.stats, data?.modules]
   );
 
+  const streak = useMemo(
+    () => buildStreak(data?.stats),
+    [data?.stats]
+  );
+
+  const dailyActivities = useMemo(
+    () => buildDailyActivities(data?.recentActivity),
+    [data?.recentActivity]
+  );
+
+  const recommendedModule = useMemo(
+    () => findRecommendedModule(data?.modules),
+    [data?.modules]
+  );
+
+  const weakAreas = useMemo(
+    () => identifyWeakAreas(data?.modules),
+    [data?.modules]
+  );
+
+  // ============================================================================
+  // STEP 3: AI CONTEXT SYNCHRONIZATION
+  // ============================================================================
+
+  // Use page context for automatic route tracking
+  const { page } = usePageContext({
+    pageData: {
+      completionPercent: data?.stats?.overallProgress,
+      currentStreak: data?.stats?.currentStreak,
+      weakAreas,
+      recommendedModule: recommendedModule?.moduleName,
+      totalLessonsCompleted: data?.stats?.totalLessonsCompleted,
+      totalWatchTimeHours: data?.stats?.totalWatchTimeSeconds
+        ? Math.round(data.stats.totalWatchTimeSeconds / 3600 * 10) / 10
+        : 0,
+      modulesInProgress: data?.modules?.filter(m => m.progress > 0 && m.progress < 100).length || 0,
+      modulesCompleted: data?.modules?.filter(m => m.progress >= 100).length || 0,
+    },
+    deps: [data],
+  });
+
+  // ============================================================================
+  // HANDLERS
+  // ============================================================================
+
+  const handleContinueLearning = () => {
+    if (recommendedModule) {
+      router.push(`/learn/kcu-trading-mastery/${recommendedModule.moduleSlug}`);
+    } else {
+      router.push('/learn');
+    }
+  };
+
   const handleStudyMaterials = () => {
-    // Navigate to the learning materials/curriculum page
     router.push('/learn');
   };
 
-  const handleContinueLearning = () => {
-    const nextLesson = findNextLesson(modules);
-    if (nextLesson) {
-      // Navigate to the specific lesson
-      router.push(`/learn/${nextLesson.module}/${nextLesson.topic}`);
-    } else {
-      // All complete - go to advanced topics or review
-      router.push('/learn/advanced');
-    }
+  const handleRefresh = async () => {
+    await refresh();
   };
 
-  if (loading) {
+  // ============================================================================
+  // LOADING STATE
+  // ============================================================================
+
+  if (isLoading && !data) {
     return (
       <>
         <Header
-          title="Learning Progress"
-          subtitle="Master the LTP Framework step by step"
+          title="Learning Intelligence"
+          subtitle="Track your mastery of the LTP Framework"
           breadcrumbs={[{ label: 'Dashboard' }, { label: 'Progress' }]}
         />
         <PageShell>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
-              <SkeletonCard className="h-[400px]" />
+          <div className="space-y-6">
+            {/* Hero Section Skeleton */}
+            <ProgressOverviewSkeleton />
+
+            {/* Activity Section Skeleton */}
+            <div className="overflow-x-auto">
+              <ActivityHeatmapSkeleton />
             </div>
-            <div>
-              <SkeletonCard className="h-[300px]" />
-            </div>
+
+            {/* Module Grid Skeleton */}
+            <ModuleGridSkeleton />
           </div>
         </PageShell>
       </>
     );
   }
 
-  if (error) {
+  // ============================================================================
+  // ERROR STATE
+  // ============================================================================
+
+  if (error && !data) {
     return (
       <>
         <Header
-          title="Learning Progress"
-          subtitle="Master the LTP Framework step by step"
+          title="Learning Intelligence"
+          subtitle="Track your mastery of the LTP Framework"
           breadcrumbs={[{ label: 'Dashboard' }, { label: 'Progress' }]}
         />
         <PageShell>
           <Card variant="bordered">
             <CardContent className="text-center py-12">
-              <AlertCircle className="w-12 h-12 mx-auto mb-4 text-[var(--error)]" />
-              <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">
-                Unable to Load Progress
-              </h3>
-              <p className="text-sm text-[var(--text-tertiary)] mb-4">
-                {error}
-              </p>
-              <Button
-                variant="primary"
-                onClick={() => window.location.reload()}
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
               >
-                Try Again
-              </Button>
+                <AlertCircle className="w-16 h-16 mx-auto mb-4 text-[var(--error)]" />
+                <h3 className="text-xl font-semibold text-[var(--text-primary)] mb-2">
+                  Unable to Load Progress
+                </h3>
+                <p className="text-sm text-[var(--text-tertiary)] mb-6 max-w-md mx-auto">
+                  {error}
+                </p>
+                <div className="flex items-center justify-center gap-3">
+                  <Button variant="secondary" onClick={() => router.push('/learn')}>
+                    <BookOpen className="w-4 h-4 mr-2" />
+                    Browse Lessons
+                  </Button>
+                  <Button variant="primary" onClick={handleRefresh}>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Try Again
+                  </Button>
+                </div>
+              </motion.div>
             </CardContent>
           </Card>
         </PageShell>
@@ -274,21 +435,35 @@ export default function ProgressPage() {
     );
   }
 
+  // ============================================================================
+  // MAIN RENDER
+  // ============================================================================
+
   return (
     <>
       <Header
-        title="Learning Progress"
-        subtitle="Master the LTP Framework step by step"
+        title="Learning Intelligence"
+        subtitle="Track your mastery of the LTP Framework"
         breadcrumbs={[{ label: 'Dashboard' }, { label: 'Progress' }]}
         actions={
           <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isLoading}
+              className="hidden sm:flex"
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            </Button>
             <Button
               variant="secondary"
               size="sm"
               icon={<BookOpen className="w-4 h-4" />}
               onClick={handleStudyMaterials}
             >
-              Study Materials
+              <span className="hidden sm:inline">Study Materials</span>
+              <span className="sm:hidden">Materials</span>
             </Button>
             <Button
               variant="primary"
@@ -296,23 +471,147 @@ export default function ProgressPage() {
               icon={<Play className="w-4 h-4" />}
               onClick={handleContinueLearning}
             >
-              Continue Learning
+              <span className="hidden sm:inline">Continue Learning</span>
+              <span className="sm:hidden">Continue</span>
             </Button>
           </div>
         }
       />
 
       <PageShell>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Progress */}
-          <div className="lg:col-span-2">
-            <LearningProgress modules={modules} overallProgress={overallProgress} />
-          </div>
+        <div className="space-y-8">
+          {/* ============================================================
+           * HERO SECTION: Progress Overview
+           * Shows completion %, watch time, lessons, streak
+           * ============================================================ */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+          >
+            <ProgressOverview
+              progress={courseProgress}
+              streak={streak}
+            />
+          </motion.div>
 
-          {/* Quiz History */}
-          <div>
-            <QuizHistory quizzes={quizHistory} />
-          </div>
+          {/* ============================================================
+           * CONSISTENCY SECTION: Activity Heatmap
+           * Shows learning activity over the past 12 weeks
+           * ============================================================ */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+            className="overflow-x-auto"
+          >
+            <ActivityHeatmap
+              activities={dailyActivities}
+              weeks={12}
+            />
+          </motion.div>
+
+          {/* ============================================================
+           * QUICK INSIGHTS SECTION
+           * Shows key metrics and recommendations
+           * ============================================================ */}
+          {(weakAreas.length > 0 || recommendedModule) && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.15 }}
+            >
+              <Card variant="bordered">
+                <CardContent className="py-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Recommended Next */}
+                    {recommendedModule && (
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/20">
+                        <div className="w-10 h-10 rounded-lg bg-[var(--accent-primary)]/20 flex items-center justify-center">
+                          <Target className="w-5 h-5 text-[var(--accent-primary)]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide">
+                            Recommended Next
+                          </p>
+                          <p className="font-semibold text-[var(--text-primary)] truncate">
+                            {recommendedModule.moduleName}
+                          </p>
+                          <p className="text-xs text-[var(--text-secondary)]">
+                            {recommendedModule.progress > 0
+                              ? `${Math.round(recommendedModule.progress)}% complete`
+                              : 'Ready to start'}
+                          </p>
+                        </div>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={handleContinueLearning}
+                        >
+                          <Play className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Weak Areas */}
+                    {weakAreas.length > 0 && (
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--warning)]/10 border border-[var(--warning)]/20">
+                        <div className="w-10 h-10 rounded-lg bg-[var(--warning)]/20 flex items-center justify-center">
+                          <TrendingUp className="w-5 h-5 text-[var(--warning)]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide">
+                            Areas to Improve
+                          </p>
+                          <p className="font-semibold text-[var(--text-primary)] truncate">
+                            {weakAreas.slice(0, 2).join(', ')}
+                            {weakAreas.length > 2 && ` +${weakAreas.length - 2} more`}
+                          </p>
+                          <p className="text-xs text-[var(--text-secondary)]">
+                            Quiz scores below 70%
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
+          {/* ============================================================
+           * CURRICULUM SECTION: Module Progress Grid
+           * Shows all modules with progress, status, and action buttons
+           * ============================================================ */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.2 }}
+          >
+            {data?.modules && data.modules.length > 0 ? (
+              <ModuleProgressList
+                modules={data.modules}
+                courseSlug="kcu-trading-mastery"
+                title="Curriculum Progress"
+              />
+            ) : (
+              <Card variant="bordered">
+                <CardContent className="text-center py-12">
+                  <GraduationCap className="w-16 h-16 mx-auto mb-4 text-[var(--text-muted)]" />
+                  <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">
+                    No Modules Found
+                  </h3>
+                  <p className="text-sm text-[var(--text-tertiary)] mb-4">
+                    Start your learning journey by exploring the curriculum.
+                  </p>
+                  <Button variant="primary" onClick={handleStudyMaterials}>
+                    <BookOpen className="w-4 h-4 mr-2" />
+                    Browse Curriculum
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+          </motion.div>
         </div>
       </PageShell>
     </>
