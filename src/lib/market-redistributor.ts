@@ -397,9 +397,12 @@ export class MarketRedistributor {
 
       await this.ensureSubscriber();
 
-      if (this.subscriber && channelsToResubscribe.length > 0) {
+      // After ensureSubscriber, get a fresh reference to subscriber
+      // This is needed because TypeScript control flow can't track async side effects
+      const sub = this.subscriber as Redis | null;
+      if (sub && channelsToResubscribe.length > 0) {
         try {
-          await this.subscriber.subscribe(...channelsToResubscribe);
+          await sub.subscribe(...channelsToResubscribe);
           for (const ch of channelsToResubscribe) {
             this.subscribedChannels.add(ch);
           }
