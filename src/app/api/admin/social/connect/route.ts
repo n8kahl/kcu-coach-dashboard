@@ -5,7 +5,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
-import { getInstagramAuthUrl } from '@/lib/social/oauth';
+import {
+  getInstagramAuthUrl,
+  getTikTokAuthUrl,
+  getYouTubeAuthUrl,
+} from '@/lib/social/oauth';
 
 // ============================================
 // GET - Get OAuth URL for a platform
@@ -30,11 +34,12 @@ export async function GET(request: NextRequest) {
     }
 
     let authUrl: string;
+    const redirectPath = '/admin/social-builder';
 
     switch (platform.toLowerCase()) {
       case 'instagram':
         try {
-          authUrl = getInstagramAuthUrl('/admin/social-builder');
+          authUrl = await getInstagramAuthUrl(redirectPath);
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Instagram not configured';
           return NextResponse.json(
@@ -45,16 +50,28 @@ export async function GET(request: NextRequest) {
         break;
 
       case 'tiktok':
-        return NextResponse.json(
-          { error: 'TikTok connection coming soon', configured: false },
-          { status: 400 }
-        );
+        try {
+          authUrl = await getTikTokAuthUrl(redirectPath);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'TikTok not configured';
+          return NextResponse.json(
+            { error: message, configured: false },
+            { status: 400 }
+          );
+        }
+        break;
 
       case 'youtube':
-        return NextResponse.json(
-          { error: 'YouTube connection coming soon', configured: false },
-          { status: 400 }
-        );
+        try {
+          authUrl = await getYouTubeAuthUrl(redirectPath);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'YouTube not configured';
+          return NextResponse.json(
+            { error: message, configured: false },
+            { status: 400 }
+          );
+        }
+        break;
 
       default:
         return NextResponse.json(

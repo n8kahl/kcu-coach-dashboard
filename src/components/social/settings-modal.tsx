@@ -13,10 +13,19 @@ import {
   Save,
   RotateCcw,
   Loader2,
+  Key,
+  Eye,
+  EyeOff,
+  Check,
+  AlertCircle,
+  Instagram,
+  Youtube,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Portal } from '@/components/ui/portal';
+import { TikTokIcon } from './platform-badge';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -83,7 +92,22 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const [settings, setSettings] = useState<SocialSettings>(initialSettings || defaultSettings);
   const [isSaving, setIsSaving] = useState(false);
-  const [activeSection, setActiveSection] = useState<'schedule' | 'ai' | 'compliance' | 'hashtags'>('ai');
+  const [activeSection, setActiveSection] = useState<'credentials' | 'schedule' | 'ai' | 'compliance' | 'hashtags'>('credentials');
+
+  // Credentials state
+  const [credentials, setCredentials] = useState<{
+    instagram: { client_id: string; client_secret: string; configured: boolean };
+    tiktok: { client_id: string; client_secret: string; configured: boolean };
+    youtube: { client_id: string; client_secret: string; configured: boolean };
+  }>({
+    instagram: { client_id: '', client_secret: '', configured: false },
+    tiktok: { client_id: '', client_secret: '', configured: false },
+    youtube: { client_id: '', client_secret: '', configured: false },
+  });
+  const [credentialsLoading, setCredentialsLoading] = useState(true);
+  const [savingPlatform, setSavingPlatform] = useState<string | null>(null);
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+  const [credentialErrors, setCredentialErrors] = useState<Record<string, string>>({});
 
   // Update settings when initialSettings changes (e.g., after fetch)
   useEffect(() => {
@@ -91,6 +115,107 @@ export function SettingsModal({
       setSettings(initialSettings);
     }
   }, [initialSettings]);
+
+  // Fetch credentials when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      fetchCredentials();
+    }
+  }, [isOpen]);
+
+  const fetchCredentials = async () => {
+    setCredentialsLoading(true);
+    try {
+      const response = await fetch('/api/admin/social/credentials');
+      if (response.ok) {
+        const data = await response.json();
+        setCredentials({
+          instagram: {
+            client_id: data.instagram?.client_id || '',
+            client_secret: '', // Never returned from server for security
+            configured: data.instagram?.configured || false,
+          },
+          tiktok: {
+            client_id: data.tiktok?.client_id || '',
+            client_secret: '',
+            configured: data.tiktok?.configured || false,
+          },
+          youtube: {
+            client_id: data.youtube?.client_id || '',
+            client_secret: '',
+            configured: data.youtube?.configured || false,
+          },
+        });
+      }
+    } catch (error) {
+      console.error('Failed to fetch credentials:', error);
+    } finally {
+      setCredentialsLoading(false);
+    }
+  };
+
+  const saveCredentials = async (platform: 'instagram' | 'tiktok' | 'youtube') => {
+    const creds = credentials[platform];
+    if (!creds.client_id || !creds.client_secret) {
+      setCredentialErrors({ ...credentialErrors, [platform]: 'Both Client ID and Client Secret are required' });
+      return;
+    }
+
+    setSavingPlatform(platform);
+    setCredentialErrors({ ...credentialErrors, [platform]: '' });
+
+    try {
+      const response = await fetch('/api/admin/social/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          platform,
+          client_id: creds.client_id,
+          client_secret: creds.client_secret,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to save credentials');
+      }
+
+      // Update configured state
+      setCredentials({
+        ...credentials,
+        [platform]: { ...creds, client_secret: '', configured: true },
+      });
+    } catch (error) {
+      setCredentialErrors({
+        ...credentialErrors,
+        [platform]: error instanceof Error ? error.message : 'Failed to save',
+      });
+    } finally {
+      setSavingPlatform(null);
+    }
+  };
+
+  const deleteCredentials = async (platform: 'instagram' | 'tiktok' | 'youtube') => {
+    setSavingPlatform(platform);
+    try {
+      const response = await fetch(`/api/admin/social/credentials?platform=${platform}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete credentials');
+      }
+
+      setCredentials({
+        ...credentials,
+        [platform]: { client_id: '', client_secret: '', configured: false },
+      });
+    } catch (error) {
+      console.error('Failed to delete credentials:', error);
+    } finally {
+      setSavingPlatform(null);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -110,11 +235,18 @@ export function SettingsModal({
   };
 
   const sections = [
+    { id: 'credentials', label: 'API Keys', icon: Key },
     { id: 'ai', label: 'AI Settings', icon: Bot },
     { id: 'schedule', label: 'Schedule', icon: Clock },
     { id: 'hashtags', label: 'Hashtags', icon: Hash },
     { id: 'compliance', label: 'Compliance', icon: Shield },
   ] as const;
+
+  const platformConfigs = [
+    { id: 'instagram' as const, label: 'Instagram', icon: Instagram, color: 'text-pink-500' },
+    { id: 'tiktok' as const, label: 'TikTok', icon: TikTokIcon, color: 'text-white' },
+    { id: 'youtube' as const, label: 'YouTube', icon: Youtube, color: 'text-red-500' },
+  ];
 
   return (
     <Portal>
@@ -190,6 +322,139 @@ export function SettingsModal({
                     </div>
                   ) : (
                     <>
+                  {activeSection === 'credentials' && (
+                    <div className="space-y-4">
+                      <div>
+                        <h3 className="text-sm font-semibold text-[var(--text-primary)] uppercase tracking-wide">
+                          Social Platform API Keys
+                        </h3>
+                        <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                          Configure OAuth credentials for each platform. These are required to connect social accounts.
+                        </p>
+                      </div>
+
+                      {credentialsLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader2 className="w-6 h-6 animate-spin text-[var(--accent-primary)]" />
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {platformConfigs.map((platform) => {
+                            const creds = credentials[platform.id];
+                            const Icon = platform.icon;
+                            const isSaving = savingPlatform === platform.id;
+                            const error = credentialErrors[platform.id];
+
+                            return (
+                              <Card key={platform.id} variant="bordered" padding="md">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex items-center gap-2">
+                                    <Icon className={cn('w-5 h-5', platform.color)} />
+                                    <h4 className="text-sm font-semibold text-[var(--text-primary)]">
+                                      {platform.label}
+                                    </h4>
+                                    {creds.configured && (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-[rgba(34,197,94,0.15)] text-[var(--success)] border border-[var(--success)]">
+                                        <Check className="w-3 h-3" />
+                                        Configured
+                                      </span>
+                                    )}
+                                  </div>
+                                  {creds.configured && (
+                                    <button
+                                      onClick={() => deleteCredentials(platform.id)}
+                                      disabled={isSaving}
+                                      className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--error)] transition-colors"
+                                      title="Remove credentials"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </div>
+
+                                <div className="space-y-3">
+                                  <div>
+                                    <label className="block text-xs text-[var(--text-tertiary)] mb-1">
+                                      Client ID / App ID
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={creds.client_id}
+                                      onChange={(e) =>
+                                        setCredentials({
+                                          ...credentials,
+                                          [platform.id]: { ...creds, client_id: e.target.value },
+                                        })
+                                      }
+                                      placeholder={creds.configured ? '••••••••' : 'Enter Client ID'}
+                                      className="w-full bg-[var(--bg-secondary)] border border-[var(--border-primary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-[var(--text-tertiary)] mb-1">
+                                      Client Secret / App Secret
+                                    </label>
+                                    <div className="relative">
+                                      <input
+                                        type={showSecrets[platform.id] ? 'text' : 'password'}
+                                        value={creds.client_secret}
+                                        onChange={(e) =>
+                                          setCredentials({
+                                            ...credentials,
+                                            [platform.id]: { ...creds, client_secret: e.target.value },
+                                          })
+                                        }
+                                        placeholder={creds.configured ? '••••••••••••••••' : 'Enter Client Secret'}
+                                        className="w-full bg-[var(--bg-secondary)] border border-[var(--border-primary)] px-3 py-1.5 pr-10 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => setShowSecrets({ ...showSecrets, [platform.id]: !showSecrets[platform.id] })}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                                      >
+                                        {showSecrets[platform.id] ? (
+                                          <EyeOff className="w-4 h-4" />
+                                        ) : (
+                                          <Eye className="w-4 h-4" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {error && (
+                                    <div className="flex items-center gap-2 text-xs text-[var(--error)]">
+                                      <AlertCircle className="w-3 h-3" />
+                                      {error}
+                                    </div>
+                                  )}
+
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => saveCredentials(platform.id)}
+                                    loading={isSaving}
+                                    className="w-full"
+                                  >
+                                    {creds.configured ? 'Update Credentials' : 'Save Credentials'}
+                                  </Button>
+                                </div>
+                              </Card>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div className="p-3 bg-[var(--bg-elevated)] border border-[var(--border-primary)] text-xs text-[var(--text-tertiary)]">
+                        <p className="font-medium text-[var(--text-secondary)] mb-1">Where to get credentials:</p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li><strong>Instagram:</strong> Meta for Developers → Create App → Instagram Basic Display</li>
+                          <li><strong>TikTok:</strong> TikTok for Developers → Create App → Login Kit</li>
+                          <li><strong>YouTube:</strong> Google Cloud Console → Create Project → OAuth 2.0 Credentials</li>
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+
                   {activeSection === 'ai' && (
                     <div className="space-y-4">
                       <h3 className="text-sm font-semibold text-[var(--text-primary)] uppercase tracking-wide">

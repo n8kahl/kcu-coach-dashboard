@@ -840,20 +840,10 @@ function SocialBuilderContent() {
                   <Button
                     variant="secondary"
                     fullWidth
-                    onClick={() => {
-                      if (platform.platform === 'instagram') {
-                        connectPlatform(platform.platform);
-                      } else {
-                        showToast({
-                          type: 'info',
-                          title: 'Coming soon',
-                          message: `${platform.platform.charAt(0).toUpperCase() + platform.platform.slice(1)} connection coming soon`,
-                        });
-                      }
-                    }}
+                    onClick={() => connectPlatform(platform.platform)}
                     loading={connectingPlatform === platform.platform}
                   >
-                    {platform.platform === 'instagram' ? 'Connect Account' : 'Coming Soon'}
+                    Connect Account
                   </Button>
                 )}
               </Card>
