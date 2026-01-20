@@ -22,8 +22,14 @@ async function quoteHandler(request: NextRequest) {
       return NextResponse.json({ error: 'Market data not configured' }, { status: 503 });
     }
 
+    const upperSymbol = symbol.toUpperCase();
+
+    // VIX and other indices use a different market type
+    const isIndex = ['VIX', 'DXY', 'TNX'].includes(upperSymbol);
+    const marketType = isIndex ? 'indices' : 'stocks';
+
     const response = await fetch(
-      `https://api.massive.com/v2/snapshot/locale/us/markets/stocks/tickers/${symbol.toUpperCase()}?apiKey=${apiKey}`
+      `https://api.massive.com/v2/snapshot/locale/us/markets/${marketType}/tickers/${upperSymbol}?apiKey=${apiKey}`
     );
 
     if (!response.ok) {
