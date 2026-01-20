@@ -165,75 +165,154 @@ const LEVEL_COLORS: Record<Level['type'], string> = {
 };
 
 // =============================================================================
-// Indicator Calculation Utilities
+// Indicator Calculation Utilities (Hardened - Returns null for invalid data)
 // =============================================================================
 
+/**
+ * Calculate EMA with null for insufficient data periods.
+ * CRITICAL: Returns (number | null)[] - null values MUST be filtered before charting.
+ */
 function calculateEMA(data: number[], period: number): (number | null)[] {
   const ema: (number | null)[] = [];
+
+  // Guard: empty or insufficient data
+  if (data.length === 0 || period <= 0) return ema;
+
   const multiplier = 2 / (period + 1);
 
-  if (data.length === 0) return ema;
-
-  // Fill with null for indices before the EMA starts
-  for (let i = 0; i < period - 1; i++) {
+  // Fill with null for indices before the EMA can be calculated
+  for (let i = 0; i < Math.min(period - 1, data.length); i++) {
     ema.push(null);
+  }
+
+  // Guard: if we don't have enough data to start EMA, return all nulls
+  if (data.length < period) {
+    return ema;
   }
 
   // First EMA is SMA of the first 'period' values
   let sum = 0;
-  for (let i = 0; i < Math.min(period, data.length); i++) {
-    sum += data[i];
+  let validCount = 0;
+  for (let i = 0; i < period; i++) {
+    const val = data[i];
+    // Strict validation - skip invalid values
+    if (typeof val !== 'number' || !Number.isFinite(val)) {
+      continue;
+    }
+    sum += val;
+    validCount++;
   }
-  const firstEma = sum / Math.min(period, data.length);
-  ema.push(firstEma);
+
+  // Guard: division by zero
+  if (validCount === 0) {
+    ema.push(null);
+  } else {
+    const firstEma = sum / validCount;
+    ema.push(Number.isFinite(firstEma) ? firstEma : null);
+  }
 
   // Calculate EMA for remaining values
   for (let i = period; i < data.length; i++) {
     const prevEma = ema[i - 1];
-    if (prevEma === null) {
+    const currentVal = data[i];
+
+    // If previous EMA is null or current value is invalid, propagate null
+    if (
+      prevEma === null ||
+      typeof currentVal !== 'number' ||
+      !Number.isFinite(currentVal)
+    ) {
       ema.push(null);
     } else {
-      ema.push((data[i] - prevEma) * multiplier + prevEma);
+      const newEma = (currentVal - prevEma) * multiplier + prevEma;
+      ema.push(Number.isFinite(newEma) ? newEma : null);
     }
   }
 
   return ema;
 }
 
+/**
+ * Calculate SMA with null for insufficient data periods.
+ * CRITICAL: Returns (number | null)[] - null values MUST be filtered before charting.
+ */
 function calculateSMA(data: number[], period: number): (number | null)[] {
   const sma: (number | null)[] = [];
 
+  // Guard: invalid inputs
+  if (data.length === 0 || period <= 0) return sma;
+
   for (let i = 0; i < data.length; i++) {
+    // Return null for insufficient data - this is filtered out downstream
     if (i < period - 1) {
-      // Return null for insufficient data - this is filtered out downstream
       sma.push(null);
       continue;
     }
 
     let sum = 0;
+    let validCount = 0;
     for (let j = 0; j < period; j++) {
-      sum += data[i - j];
+      const val = data[i - j];
+      // Strict validation
+      if (typeof val === 'number' && Number.isFinite(val)) {
+        sum += val;
+        validCount++;
+      }
     }
-    sma.push(sum / period);
+
+    // Guard: division by zero - if no valid values, push null
+    if (validCount === 0) {
+      sma.push(null);
+    } else {
+      const avg = sum / validCount;
+      sma.push(Number.isFinite(avg) ? avg : null);
+    }
   }
 
   return sma;
 }
 
-function calculateVWAP(candles: Candle[]): number[] {
-  const vwap: number[] = [];
+/**
+ * Calculate VWAP with null for invalid data points.
+ * CRITICAL: Returns (number | null)[] - null values MUST be filtered before charting.
+ */
+function calculateVWAP(candles: Candle[]): (number | null)[] {
+  const vwap: (number | null)[] = [];
   let cumulativeTPV = 0;
   let cumulativeVolume = 0;
 
   for (let i = 0; i < candles.length; i++) {
     const candle = candles[i];
-    const typicalPrice = (candle.high + candle.low + candle.close) / 3;
-    const volume = candle.volume || 1;
+
+    // Validate OHLC values
+    const high = candle.high;
+    const low = candle.low;
+    const close = candle.close;
+
+    if (
+      typeof high !== 'number' || !Number.isFinite(high) ||
+      typeof low !== 'number' || !Number.isFinite(low) ||
+      typeof close !== 'number' || !Number.isFinite(close)
+    ) {
+      vwap.push(null);
+      continue;
+    }
+
+    const typicalPrice = (high + low + close) / 3;
+    const volume = (typeof candle.volume === 'number' && Number.isFinite(candle.volume) && candle.volume > 0)
+      ? candle.volume
+      : 1; // Default to 1 to prevent division issues
 
     cumulativeTPV += typicalPrice * volume;
     cumulativeVolume += volume;
 
-    vwap[i] = cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : typicalPrice;
+    // Guard: division by zero
+    if (cumulativeVolume <= 0) {
+      vwap.push(null);
+    } else {
+      const vwapValue = cumulativeTPV / cumulativeVolume;
+      vwap.push(Number.isFinite(vwapValue) ? vwapValue : null);
+    }
   }
 
   return vwap;
@@ -259,26 +338,59 @@ function detectInsideBars(candles: Candle[]): number[] {
 }
 
 /**
- * Convert timestamp to lightweight-charts Time format
- * Returns null for invalid inputs to prevent "Value is null" errors
+ * Convert timestamp to lightweight-charts Time format.
+ * CRITICAL: Returns null for ANY invalid input to prevent "Value is null" crashes.
+ *
+ * Handles:
+ * - null/undefined inputs
+ * - NaN, Infinity, -Infinity
+ * - Invalid date strings
+ * - Negative timestamps
+ * - Zero timestamps
+ * - Both millisecond and second timestamps
  */
 function toChartTime(time: number | string | null | undefined): Time | null {
+  // Guard: null/undefined
   if (time == null) return null;
 
   let result: number;
 
   if (typeof time === 'string') {
+    // Guard: empty string
+    if (time.trim() === '') return null;
+
     const date = new Date(time);
-    if (isNaN(date.getTime())) return null;
-    result = Math.floor(date.getTime() / 1000);
+    const timestamp = date.getTime();
+
+    // Guard: Invalid Date returns NaN
+    if (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || Number.isNaN(timestamp)) {
+      return null;
+    }
+
+    result = Math.floor(timestamp / 1000);
+  } else if (typeof time === 'number') {
+    // Guard: NaN, Infinity, -Infinity
+    if (!Number.isFinite(time) || Number.isNaN(time)) return null;
+
+    // If already in seconds (< 1e12), use directly; if in ms (>= 1e12), convert
+    result = time >= 1e12 ? Math.floor(time / 1000) : Math.floor(time);
   } else {
-    if (!isFinite(time)) return null;
-    // If already in seconds, use directly; if in ms, convert
-    result = time > 1e12 ? Math.floor(time / 1000) : time;
+    // Unknown type
+    return null;
   }
 
-  // Final validation - must be a finite positive number
-  if (!isFinite(result) || result <= 0) return null;
+  // Final validation - must be a finite positive integer
+  if (!Number.isFinite(result) || Number.isNaN(result) || result <= 0) {
+    return null;
+  }
+
+  // Sanity check: reasonable timestamp range (year 1970 to year 2100)
+  // This catches obviously wrong values
+  const MIN_TIMESTAMP = 0;           // 1970-01-01
+  const MAX_TIMESTAMP = 4102444800;  // 2100-01-01
+  if (result < MIN_TIMESTAMP || result > MAX_TIMESTAMP) {
+    return null;
+  }
 
   return result as Time;
 }
@@ -295,42 +407,129 @@ const DEBUG_CHART = false;
 const DEBUG_LOGGING = false;
 
 /**
- * Safe setData wrapper that logs data before setting and catches errors
+ * Type guard to validate a line/area data point has valid time and value.
+ * CRITICAL: Uses Number.isFinite (not isFinite) to reject null/undefined.
+ */
+function isValidDataPoint(d: unknown): d is { time: Time; value: number } {
+  if (d === null || d === undefined || typeof d !== 'object') return false;
+  const point = d as Record<string, unknown>;
+
+  // Validate time
+  if (
+    point.time === null ||
+    point.time === undefined ||
+    typeof point.time !== 'number' ||
+    !Number.isFinite(point.time) ||
+    point.time <= 0
+  ) {
+    return false;
+  }
+
+  // Validate value (if present)
+  if ('value' in point) {
+    if (
+      point.value === null ||
+      point.value === undefined ||
+      typeof point.value !== 'number' ||
+      !Number.isFinite(point.value)
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Bulletproof setData wrapper that:
+ * 1. Filters out ANY invalid data points before passing to chart
+ * 2. Handles empty arrays safely
+ * 3. Wraps in try/catch to prevent crashes
+ * 4. Logs warnings instead of crashing
+ *
+ * CRITICAL: This is the ONLY function that should call series.setData()
  */
 function safeSetData<T extends { time: Time; value?: number }>(
-  series: ISeriesApi<'Line'> | ISeriesApi<'Area'> | ISeriesApi<'Histogram'> | ISeriesApi<'Candlestick'>,
+  series: ISeriesApi<'Line'> | ISeriesApi<'Area'> | ISeriesApi<'Histogram'> | ISeriesApi<'Candlestick'> | null,
   data: T[],
   seriesName: string
 ): boolean {
-  if (DEBUG_LOGGING) {
-    console.log(`[KCUChart] ${seriesName} setData called with ${data.length} points`);
-    if (data.length > 0) {
-      console.log(`[KCUChart] ${seriesName} first point:`, JSON.stringify(data[0]));
-      console.log(`[KCUChart] ${seriesName} last point:`, JSON.stringify(data[data.length - 1]));
+  // Guard: null series (component may have unmounted)
+  if (series === null) {
+    if (DEBUG_LOGGING) {
+      console.warn(`[KCUChart] ${seriesName} - series is null, skipping setData`);
     }
-    // Check for invalid data
-    const invalidPoints = data.filter((d, i) => {
-      const hasInvalidTime = d.time === null || d.time === undefined || !isFinite(d.time as number);
-      const hasInvalidValue = 'value' in d && (d.value === null || d.value === undefined || !isFinite(d.value));
-      if (hasInvalidTime || hasInvalidValue) {
-        console.error(`[KCUChart] ${seriesName} INVALID point at index ${i}:`, JSON.stringify(d));
-        return true;
-      }
+    return false;
+  }
+
+  // CRITICAL: Filter out invalid data points BEFORE passing to chart
+  const validData = data.filter((d): d is T => {
+    // Check time is valid
+    if (
+      d.time === null ||
+      d.time === undefined ||
+      typeof d.time !== 'number' ||
+      !Number.isFinite(d.time as number) ||
+      (d.time as number) <= 0
+    ) {
       return false;
-    });
-    if (invalidPoints.length > 0) {
-      console.error(`[KCUChart] ${seriesName} has ${invalidPoints.length} invalid points!`);
+    }
+
+    // Check value is valid (if present - candlesticks don't have 'value')
+    if ('value' in d) {
+      if (
+        d.value === null ||
+        d.value === undefined ||
+        typeof d.value !== 'number' ||
+        !Number.isFinite(d.value)
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  if (DEBUG_LOGGING) {
+    const filteredCount = data.length - validData.length;
+    console.log(`[KCUChart] ${seriesName} - ${validData.length} valid points (filtered ${filteredCount} invalid)`);
+    if (validData.length > 0) {
+      console.log(`[KCUChart] ${seriesName} first:`, JSON.stringify(validData[0]));
+      console.log(`[KCUChart] ${seriesName} last:`, JSON.stringify(validData[validData.length - 1]));
     }
   }
 
   try {
-    series.setData(data as Parameters<typeof series.setData>[0]);
+    // CRITICAL: Always call setData, even with empty array (clears the series)
+    series.setData(validData as Parameters<typeof series.setData>[0]);
     return true;
   } catch (error) {
-    console.error(`[KCUChart] ${seriesName} setData FAILED:`, error);
-    console.error(`[KCUChart] ${seriesName} data that caused error:`, JSON.stringify(data.slice(0, 5)));
+    // Log but DON'T CRASH - this is the whole point of this function
+    console.warn(`[KCUChart] ${seriesName} setData failed safely:`, error);
+    if (DEBUG_LOGGING) {
+      console.warn(`[KCUChart] ${seriesName} data sample:`, JSON.stringify(validData.slice(0, 3)));
+    }
+    // Try to clear the series to recover
+    try {
+      series.setData([]);
+    } catch {
+      // Ignore - series may be in unrecoverable state
+    }
     return false;
   }
+}
+
+/**
+ * Validate a candle has all required OHLC fields as finite numbers.
+ */
+function isValidCandle(c: Candle): boolean {
+  return (
+    typeof c.open === 'number' && Number.isFinite(c.open) &&
+    typeof c.high === 'number' && Number.isFinite(c.high) &&
+    typeof c.low === 'number' && Number.isFinite(c.low) &&
+    typeof c.close === 'number' && Number.isFinite(c.close) &&
+    c.time != null
+  );
 }
 
 export function KCUChart({
@@ -658,7 +857,7 @@ export function KCUChart({
   }, [dimensions.width, dimensions.height, showVolume, showIndicators]);
 
   // =========================================================================
-  // Data Updates
+  // Data Updates (Hardened)
   // =========================================================================
 
   useEffect(() => {
@@ -670,196 +869,161 @@ export function KCUChart({
       ? data.slice(0, replayIndex + 1)
       : data;
 
-    // Filter out candles with invalid OHLC values to prevent chart errors
-    const visibleData = rawData.filter((c) =>
-      c.open != null && !isNaN(c.open) &&
-      c.high != null && !isNaN(c.high) &&
-      c.low != null && !isNaN(c.low) &&
-      c.close != null && !isNaN(c.close) &&
-      c.time != null
-    );
+    // CRITICAL: Filter out candles with invalid OHLC values using strict validation
+    const visibleData = rawData.filter(isValidCandle);
 
-    if (visibleData.length === 0) return;
+    // Handle empty data gracefully
+    if (visibleData.length === 0) {
+      // Clear all series to avoid stale data
+      try {
+        candleSeriesRef.current?.setData([]);
+        volumeSeriesRef.current?.setData([]);
+        ema8SeriesRef.current?.setData([]);
+        ema21SeriesRef.current?.setData([]);
+        sma200SeriesRef.current?.setData([]);
+        vwapSeriesRef.current?.setData([]);
+        cloudSeriesRef.current?.setData([]);
+      } catch {
+        // Ignore errors during cleanup
+      }
+      return;
+    }
 
-    // Convert to chart format, filtering out any candles with invalid times
-    const candleData: CandlestickData[] = visibleData
-      .map((c) => {
-        const time = toChartTime(c.time);
-        if (time === null) return null;
-        return {
-          time,
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-        };
-      })
-      .filter((c): c is CandlestickData => c !== null);
+    // Convert to chart format with strict time validation
+    const candleData: CandlestickData[] = [];
+    for (const c of visibleData) {
+      const time = toChartTime(c.time);
+      if (time === null) continue;
 
-    // Update candle series
-    if (DEBUG_LOGGING) {
-      console.log(`[KCUChart] Candlestick setData called with ${candleData.length} candles`);
-      if (candleData.length > 0) {
-        console.log(`[KCUChart] Candlestick first:`, JSON.stringify(candleData[0]));
-        console.log(`[KCUChart] Candlestick last:`, JSON.stringify(candleData[candleData.length - 1]));
+      // Double-check OHLC values are finite numbers
+      if (
+        !Number.isFinite(c.open) ||
+        !Number.isFinite(c.high) ||
+        !Number.isFinite(c.low) ||
+        !Number.isFinite(c.close)
+      ) {
+        continue;
+      }
+
+      candleData.push({
+        time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      });
+    }
+
+    // Update candle series with try-catch
+    if (candleData.length > 0 && candleSeriesRef.current) {
+      try {
+        candleSeriesRef.current.setData(candleData);
+      } catch (error) {
+        console.warn('[KCUChart] Candlestick setData failed safely:', error);
       }
     }
-    try {
-      candleSeriesRef.current.setData(candleData);
-    } catch (error) {
-      console.error('[KCUChart] Candlestick setData FAILED:', error);
-    }
 
-    // Update volume series
-    if (volumeSeriesRef.current && showVolume) {
+    // Update volume series using safeSetData
+    if (showVolume) {
       const volumeData = visibleData
         .map((c) => {
           const time = toChartTime(c.time);
           if (time === null) return null;
+          const volume = typeof c.volume === 'number' && Number.isFinite(c.volume) ? c.volume : 0;
           return {
             time,
-            value: c.volume || 0,
+            value: volume,
             color: c.close >= c.open ? CHART_COLORS.volumeUp : CHART_COLORS.volumeDown,
           };
         })
-        .filter((v): v is NonNullable<typeof v> => v !== null);
+        .filter((v): v is NonNullable<typeof v> => v !== null && Number.isFinite(v.value));
       safeSetData(volumeSeriesRef.current, volumeData, 'Volume');
     }
 
-    // Update indicators
+    // Update indicators using safeSetData for ALL series
     if (showIndicators && visibleData.length > 0) {
       const closePrices = visibleData.map((c) => c.close);
 
-      // Helper to strictly validate line data points
-      const isValidLineData = (d: { time: Time; value: number | null | undefined } | null): d is LineData => {
-        return d !== null &&
-          d.time !== null &&
-          d.value !== null &&
-          d.value !== undefined &&
-          typeof d.value === 'number' &&
-          Number.isFinite(d.value);
-      };
-
-      // EMA 8
-      if (ema8SeriesRef.current) {
-        const ema8Values = calculateEMA(closePrices, 8);
-        const ema8Data: LineData[] = visibleData
-          .map((c, i) => {
-            const time = toChartTime(c.time);
-            if (time === null) return null;
-            const value = ema8Values[i];
-            return { time, value };
-          })
-          .filter(isValidLineData);
-        // Guard: only setData if we have valid points, otherwise clear
-        if (ema8Data.length > 0) {
-          safeSetData(ema8SeriesRef.current, ema8Data, 'EMA8');
-        }
-      }
+      // EMA 8 - uses safeSetData which handles filtering internally
+      const ema8Values = calculateEMA(closePrices, 8);
+      const ema8Data = visibleData.map((c, i) => {
+        const time = toChartTime(c.time);
+        const value = ema8Values[i];
+        if (time === null || value === null) return null;
+        return { time, value };
+      }).filter((d): d is LineData => d !== null && d.value !== null && Number.isFinite(d.value));
+      safeSetData(ema8SeriesRef.current, ema8Data, 'EMA8');
 
       // EMA 21
-      if (ema21SeriesRef.current) {
-        const ema21Values = calculateEMA(closePrices, 21);
-        const ema21Data: LineData[] = visibleData
-          .map((c, i) => {
-            const time = toChartTime(c.time);
-            if (time === null) return null;
-            const value = ema21Values[i];
-            return { time, value };
-          })
-          .filter(isValidLineData);
-        // Guard: only setData if we have valid points
-        if (ema21Data.length > 0) {
-          safeSetData(ema21SeriesRef.current, ema21Data, 'EMA21');
-        }
-      }
+      const ema21Values = calculateEMA(closePrices, 21);
+      const ema21Data = visibleData.map((c, i) => {
+        const time = toChartTime(c.time);
+        const value = ema21Values[i];
+        if (time === null || value === null) return null;
+        return { time, value };
+      }).filter((d): d is LineData => d !== null && d.value !== null && Number.isFinite(d.value));
+      safeSetData(ema21SeriesRef.current, ema21Data, 'EMA21');
 
       // SMA 200
-      if (sma200SeriesRef.current) {
-        const sma200Values = calculateSMA(closePrices, 200);
-        const sma200Data: LineData[] = visibleData
-          .map((c, i) => {
-            const time = toChartTime(c.time);
-            if (time === null) return null;
-            const value = sma200Values[i];
-            return { time, value };
-          })
-          .filter(isValidLineData);
-        // Guard: only setData if we have valid points (SMA200 needs 200+ candles)
-        if (sma200Data.length > 0) {
-          safeSetData(sma200SeriesRef.current, sma200Data, 'SMA200');
-        }
-      }
+      const sma200Values = calculateSMA(closePrices, 200);
+      const sma200Data = visibleData.map((c, i) => {
+        const time = toChartTime(c.time);
+        const value = sma200Values[i];
+        if (time === null || value === null) return null;
+        return { time, value };
+      }).filter((d): d is LineData => d !== null && d.value !== null && Number.isFinite(d.value));
+      safeSetData(sma200SeriesRef.current, sma200Data, 'SMA200');
 
       // VWAP
-      if (vwapSeriesRef.current) {
-        const vwapValues = calculateVWAP(visibleData);
-        const vwapData: LineData[] = visibleData
-          .map((c, i) => {
-            const time = toChartTime(c.time);
-            if (time === null) return null;
-            const value = vwapValues[i];
-            return { time, value };
-          })
-          .filter(isValidLineData);
-        // Guard: only setData if we have valid points
-        if (vwapData.length > 0) {
-          safeSetData(vwapSeriesRef.current, vwapData, 'VWAP');
-        }
-      }
+      const vwapValues = calculateVWAP(visibleData);
+      const vwapData = visibleData.map((c, i) => {
+        const time = toChartTime(c.time);
+        const value = vwapValues[i];
+        if (time === null || value === null) return null;
+        return { time, value };
+      }).filter((d): d is LineData => d !== null && d.value !== null && Number.isFinite(d.value));
+      safeSetData(vwapSeriesRef.current, vwapData, 'VWAP');
 
       // Ripster Cloud (fill between EMA8 and EMA21)
-      if (cloudSeriesRef.current) {
-        const ema8Values = calculateEMA(closePrices, 8);
-        const ema21Values = calculateEMA(closePrices, 21);
+      // Note: ema8Values and ema21Values already calculated above
+      const cloudData: AreaData[] = visibleData.map((c, i) => {
+        const time = toChartTime(c.time);
+        if (time === null) return null;
+        const ema8 = ema8Values[i];
+        const ema21 = ema21Values[i];
+        // Strict validation
+        if (
+          ema8 === null || ema21 === null ||
+          !Number.isFinite(ema8) || !Number.isFinite(ema21)
+        ) {
+          return null;
+        }
+        const maxValue = Math.max(ema8, ema21);
+        if (!Number.isFinite(maxValue)) return null;
+        return { time, value: maxValue };
+      }).filter((d): d is AreaData => d !== null);
 
-        const cloudData: AreaData[] = visibleData
-          .map((c, i) => {
-            const time = toChartTime(c.time);
-            if (time === null) return null;
-            const ema8 = ema8Values[i];
-            const ema21 = ema21Values[i];
-            // Strict validation: check for null/undefined and use Number.isFinite
-            if (
-              ema8 === null ||
-              ema8 === undefined ||
-              ema21 === null ||
-              ema21 === undefined ||
-              typeof ema8 !== 'number' ||
-              typeof ema21 !== 'number' ||
-              !Number.isFinite(ema8) ||
-              !Number.isFinite(ema21)
-            ) {
-              return null;
-            }
-            const maxValue = Math.max(ema8, ema21);
-            if (!Number.isFinite(maxValue)) return null;
-            return {
-              time,
-              value: maxValue,
-            };
-          })
-          .filter((d): d is AreaData => d !== null);
+      // Update cloud color based on trend
+      if (cloudData.length > 0 && cloudSeriesRef.current) {
+        const lastEma8 = ema8Values[ema8Values.length - 1];
+        const lastEma21 = ema21Values[ema21Values.length - 1];
+        const isBullish =
+          typeof lastEma8 === 'number' &&
+          typeof lastEma21 === 'number' &&
+          Number.isFinite(lastEma8) &&
+          Number.isFinite(lastEma21) &&
+          lastEma8 > lastEma21;
 
-        // Guard: only setData if we have valid points
-        if (cloudData.length > 0) {
-          // Update cloud color based on trend (check last valid values)
-          const lastEma8 = ema8Values[ema8Values.length - 1];
-          const lastEma21 = ema21Values[ema21Values.length - 1];
-          const isBullish =
-            typeof lastEma8 === 'number' &&
-            typeof lastEma21 === 'number' &&
-            Number.isFinite(lastEma8) &&
-            Number.isFinite(lastEma21) &&
-            lastEma8 > lastEma21;
-
+        try {
           cloudSeriesRef.current.applyOptions({
             topColor: isBullish ? CHART_COLORS.cloudBullish : CHART_COLORS.cloudBearish,
             lineColor: isBullish ? CHART_COLORS.ema8 : CHART_COLORS.ema21,
           });
-          safeSetData(cloudSeriesRef.current, cloudData, 'RipsterCloud');
+        } catch {
+          // Ignore options error
         }
       }
+      safeSetData(cloudSeriesRef.current, cloudData, 'RipsterCloud');
     }
 
     // Patience Candle Markers (Inside Bars)
