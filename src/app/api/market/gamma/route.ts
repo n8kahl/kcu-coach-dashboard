@@ -40,7 +40,6 @@ interface GammaExposure {
     supportLevels: number[];
     resistanceLevels: number[];
   };
-  dataSource: 'real' | 'synthetic';
 }
 
 /**
@@ -233,169 +232,6 @@ function calculateGammaFromOptionsChain(
       supportLevels,
       resistanceLevels,
     },
-    dataSource: 'real',
-  };
-}
-
-/**
- * Fallback: Calculate gamma with synthetic data when options chain unavailable
- */
-function calculateSyntheticGamma(
-  symbol: string,
-  currentPrice: number,
-  volatility: number = 0.25
-): GammaExposure {
-  const strikeSpacing = currentPrice > 100 ? 5 : currentPrice > 50 ? 2.5 : 1;
-  const numStrikes = 20;
-  const strikes: number[] = [];
-
-  const baseStrike = Math.round(currentPrice / strikeSpacing) * strikeSpacing;
-  for (let i = -numStrikes / 2; i <= numStrikes / 2; i++) {
-    strikes.push(baseStrike + i * strikeSpacing);
-  }
-
-  const gammaLevels: GammaLevel[] = strikes.map((strike) => {
-    const distanceFromPrice = Math.abs(strike - currentPrice) / currentPrice;
-    const moneyness = strike / currentPrice;
-
-    const isRoundNumber = strike % 10 === 0;
-    const atmMultiplier = Math.exp(-Math.pow(distanceFromPrice, 2) * 50);
-
-    const baseCallOI = 5000 + Math.random() * 10000;
-    const basePutOI = 5000 + Math.random() * 10000;
-
-    const callOI = Math.round(
-      baseCallOI * atmMultiplier * (moneyness > 1 ? 1.5 : 0.8) * (isRoundNumber ? 2 : 1)
-    );
-    const putOI = Math.round(
-      basePutOI * atmMultiplier * (moneyness < 1 ? 1.5 : 0.8) * (isRoundNumber ? 2 : 1)
-    );
-
-    const timeToExpiry = 7 / 365;
-    const d1 = (Math.log(currentPrice / strike) + (0.02 + volatility * volatility / 2) * timeToExpiry) /
-               (volatility * Math.sqrt(timeToExpiry));
-    const gamma = Math.exp(-d1 * d1 / 2) / (currentPrice * volatility * Math.sqrt(2 * Math.PI * timeToExpiry));
-
-    const callGamma = gamma * callOI * 100;
-    const putGamma = gamma * putOI * 100;
-    const netGamma = callGamma - putGamma;
-
-    return {
-      strike,
-      callOI,
-      putOI,
-      callGamma: Math.round(callGamma),
-      putGamma: Math.round(putGamma),
-      netGamma: Math.round(netGamma),
-      significance: Math.abs(netGamma) > 1000000 ? 'high' as const :
-                    Math.abs(netGamma) > 500000 ? 'medium' as const : 'low' as const,
-    };
-  });
-
-  // Find max pain
-  let maxPainStrike = strikes[Math.floor(strikes.length / 2)];
-  let minPain = Infinity;
-
-  for (const strike of strikes) {
-    let pain = 0;
-    for (const level of gammaLevels) {
-      if (level.strike < strike) {
-        pain += level.callOI * (strike - level.strike);
-      } else if (level.strike > strike) {
-        pain += level.putOI * (level.strike - strike);
-      }
-    }
-    if (pain < minPain) {
-      minPain = pain;
-      maxPainStrike = strike;
-    }
-  }
-
-  const callWall = gammaLevels.reduce((max, level) =>
-    level.callOI > (gammaLevels.find(l => l.strike === max)?.callOI || 0) ? level.strike : max,
-    strikes[Math.floor(strikes.length / 2)]
-  );
-
-  const putWall = gammaLevels.reduce((max, level) =>
-    level.putOI > (gammaLevels.find(l => l.strike === max)?.putOI || 0) ? level.strike : max,
-    strikes[Math.floor(strikes.length / 2)]
-  );
-
-  let gammaFlip = currentPrice;
-  for (let i = 1; i < gammaLevels.length; i++) {
-    if (gammaLevels[i - 1].netGamma * gammaLevels[i].netGamma < 0) {
-      gammaFlip = (gammaLevels[i - 1].strike + gammaLevels[i].strike) / 2;
-      break;
-    }
-  }
-
-  const nearestLevel = gammaLevels.reduce((nearest, level) =>
-    Math.abs(level.strike - currentPrice) < Math.abs(nearest.strike - currentPrice) ? level : nearest
-  );
-
-  const regime: 'positive' | 'negative' | 'neutral' =
-    nearestLevel.netGamma > 100000 ? 'positive' :
-    nearestLevel.netGamma < -100000 ? 'negative' : 'neutral';
-
-  const totalNetGamma = gammaLevels.reduce((sum, l) => sum + l.netGamma, 0);
-  const dealerPositioning: 'long_gamma' | 'short_gamma' | 'neutral' =
-    totalNetGamma > 1000000 ? 'long_gamma' :
-    totalNetGamma < -1000000 ? 'short_gamma' : 'neutral';
-
-  const dailyMove = currentPrice * volatility * Math.sqrt(1 / 252);
-  const weeklyMove = currentPrice * volatility * Math.sqrt(5 / 252);
-
-  const resistanceLevels = gammaLevels
-    .filter(l => l.strike > currentPrice && l.significance !== 'low')
-    .sort((a, b) => Math.abs(b.netGamma) - Math.abs(a.netGamma))
-    .slice(0, 3)
-    .map(l => l.strike)
-    .sort((a, b) => a - b);
-
-  const supportLevels = gammaLevels
-    .filter(l => l.strike < currentPrice && l.significance !== 'low')
-    .sort((a, b) => Math.abs(b.netGamma) - Math.abs(a.netGamma))
-    .slice(0, 3)
-    .map(l => l.strike)
-    .sort((a, b) => b - a);
-
-  let summary = '';
-  let tradingImplication = '';
-
-  if (regime === 'positive') {
-    summary = `${symbol} is in a positive gamma environment (estimated). Dealers are long gamma.`;
-    tradingImplication = 'Mean reversion favored. Consider selling premium.';
-  } else if (regime === 'negative') {
-    summary = `${symbol} is in a negative gamma environment (estimated). Dealers are short gamma.`;
-    tradingImplication = 'Trend-following favored. Watch for gamma squeezes.';
-  } else {
-    summary = `${symbol} is in a neutral gamma zone (estimated).`;
-    tradingImplication = 'Watch for regime shift.';
-  }
-
-  return {
-    symbol,
-    timestamp: new Date().toISOString(),
-    currentPrice,
-    maxPain: maxPainStrike,
-    gammaFlip,
-    callWall,
-    putWall,
-    zeroGammaLevel: gammaFlip,
-    regime,
-    dealerPositioning,
-    expectedMove: {
-      daily: Math.round(dailyMove * 100) / 100,
-      weekly: Math.round(weeklyMove * 100) / 100,
-    },
-    keyLevels: gammaLevels.filter(l => l.significance !== 'low'),
-    analysis: {
-      summary,
-      tradingImplication,
-      supportLevels,
-      resistanceLevels,
-    },
-    dataSource: 'synthetic',
   };
 }
 
@@ -423,25 +259,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Try to get real options chain data
+    // Get real options chain data
     const optionsChain = await marketDataService.getOptionsChain(upperSymbol);
 
-    let gammaExposure: GammaExposure;
-
-    if (optionsChain && optionsChain.calls.length > 0 && optionsChain.puts.length > 0) {
-      // Use real options data
-      gammaExposure = calculateGammaFromOptionsChain(
-        upperSymbol,
-        quote.price,
-        optionsChain.calls,
-        optionsChain.puts
+    if (!optionsChain || optionsChain.calls.length === 0 || optionsChain.puts.length === 0) {
+      return NextResponse.json(
+        { error: `Options chain data unavailable for ${upperSymbol}` },
+        { status: 404 }
       );
-    } else {
-      // Fallback to synthetic data
-      console.log(`[Gamma API] No options chain for ${upperSymbol}, using synthetic data`);
-      const volatility = 0.20 + Math.random() * 0.15;
-      gammaExposure = calculateSyntheticGamma(upperSymbol, quote.price, volatility);
     }
+
+    const gammaExposure = calculateGammaFromOptionsChain(
+      upperSymbol,
+      quote.price,
+      optionsChain.calls,
+      optionsChain.puts
+    );
 
     return NextResponse.json(gammaExposure);
 
@@ -486,8 +319,7 @@ export async function POST(request: NextRequest) {
               optionsChain.puts
             );
           } else {
-            const volatility = 0.20 + Math.random() * 0.15;
-            results[upperSymbol] = calculateSyntheticGamma(upperSymbol, quote.price, volatility);
+            results[upperSymbol] = { error: 'Options chain data unavailable' };
           }
         } else {
           results[upperSymbol] = { error: 'Unable to fetch price' };
