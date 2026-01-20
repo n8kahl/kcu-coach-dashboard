@@ -397,12 +397,12 @@ export class MarketRedistributor {
 
       await this.ensureSubscriber();
 
-      // Note: TypeScript can't track that ensureSubscriber sets this.subscriber
-      // so we use a type assertion here. The runtime check handles the null case.
-      const subscriber = this.subscriber as Redis | null;
-      if (subscriber && channelsToResubscribe.length > 0) {
+      // After ensureSubscriber, get a fresh reference to subscriber
+      // This is needed because TypeScript control flow can't track async side effects
+      const sub = this.subscriber as Redis | null;
+      if (sub && channelsToResubscribe.length > 0) {
         try {
-          await subscriber.subscribe(...channelsToResubscribe);
+          await sub.subscribe(...channelsToResubscribe);
           for (const ch of channelsToResubscribe) {
             this.subscribedChannels.add(ch);
           }

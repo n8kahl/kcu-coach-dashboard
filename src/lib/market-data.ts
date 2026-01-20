@@ -166,6 +166,9 @@ export interface MarketStatus {
 export interface IndexQuote {
   symbol: string;
   value: number;
+  open?: number;
+  high?: number;
+  low?: number;
   change: number;
   changePercent: number;
   timestamp: string;
@@ -936,71 +939,134 @@ class MarketDataService {
 
   /**
    * Get index quote (VIX, SPX, NDX, DJI, etc.)
+   * Uses Massive.com Indices API: /v3/snapshot/indices and /v2/aggs/ticker/{ticker}/prev
    */
   async getIndexQuote(index: string): Promise<IndexQuote | null> {
     const symbol = index.toUpperCase();
 
-    // Map common index names to tickers
+    // Map common index names to Massive.com index tickers
     const indexMap: Record<string, string> = {
       'VIX': 'I:VIX',
       'SPX': 'I:SPX',
       'NDX': 'I:NDX',
       'DJI': 'I:DJI',
       'RUT': 'I:RUT',
+      'DJIA': 'I:DJI',
+      'SP500': 'I:SPX',
+      'NASDAQ': 'I:NDX',
+      'RUSSELL': 'I:RUT',
     };
 
-    const ticker = indexMap[symbol] || `I:${symbol}`;
+    const ticker = indexMap[symbol] || (symbol.startsWith('I:') ? symbol : `I:${symbol}`);
+
+    // First check Redis hot cache (populated by indices-worker if running)
+    const hotCached = await this.getHotCachedIndex(ticker);
+    if (hotCached) {
+      return hotCached;
+    }
 
     return this.getCached<IndexQuote>(
       `index:${symbol}`,
       CACHE_TTL.index,
       async () => {
-        interface IndexResponse {
-          results?: {
+        // Try the indices snapshot endpoint first (real-time)
+        interface IndicesSnapshotResponse {
+          results?: Array<{
+            ticker: string;
+            name?: string;
+            value?: number;
+            last_updated?: number;
+            session?: {
+              open?: number;
+              high?: number;
+              low?: number;
+              close?: number;
+              change?: number;
+              change_percent?: number;
+            };
+          }>;
+        }
+
+        const snapshotData = await this.fetch<IndicesSnapshotResponse>(
+          `/v3/snapshot/indices`,
+          { 'ticker.gte': ticker, 'ticker.lte': ticker, limit: 1 }
+        );
+
+        if (snapshotData?.results?.[0]) {
+          const r = snapshotData.results[0];
+          return {
+            symbol,
+            value: r.value || r.session?.close || 0,
+            open: r.session?.open || 0,
+            high: r.session?.high || 0,
+            low: r.session?.low || 0,
+            change: r.session?.change || 0,
+            changePercent: r.session?.change_percent || 0,
+            timestamp: r.last_updated
+              ? new Date(r.last_updated / 1000000).toISOString()
+              : new Date().toISOString(),
+          };
+        }
+
+        // Fallback to previous day bar endpoint
+        interface PrevDayResponse {
+          results?: Array<{
             T?: string;
             v?: number;
             o?: number;
             c?: number;
             h?: number;
             l?: number;
+            t?: number;
+          }>;
+        }
+
+        const prevData = await this.fetch<PrevDayResponse>(
+          `/v2/aggs/ticker/${ticker}/prev`
+        );
+
+        if (prevData?.results?.[0]) {
+          const r = prevData.results[0];
+          return {
+            symbol,
+            value: r.c || 0,
+            open: r.o || 0,
+            high: r.h || 0,
+            low: r.l || 0,
+            change: (r.c || 0) - (r.o || 0),
+            changePercent: r.o ? (((r.c || 0) - r.o) / r.o) * 100 : 0,
+            timestamp: r.t ? new Date(r.t).toISOString() : new Date().toISOString(),
           };
         }
 
-        // Use previous day bar for index values
-        const yesterday = this.getDateString(-1);
-        const data = await this.fetch<IndexResponse>(
-          `/v1/open-close/${ticker}/${yesterday}`
-        );
-
-        if (!data?.results) {
-          // Try snapshot endpoint as fallback
-          const snapshotData = await this.fetch<{ ticker?: { day?: { c: number; o: number } } }>(
-            `/v2/snapshot/locale/us/markets/stocks/tickers/${ticker}`
-          );
-
-          if (snapshotData?.ticker?.day) {
-            const d = snapshotData.ticker.day;
-            return {
-              symbol,
-              value: d.c || 0,
-              change: (d.c || 0) - (d.o || 0),
-              changePercent: d.o ? (((d.c || 0) - d.o) / d.o) * 100 : 0,
-              timestamp: new Date().toISOString(),
-            };
-          }
-          return null;
-        }
-
-        const r = data.results;
-        return {
-          symbol,
-          value: r.c || 0,
-          change: (r.c || 0) - (r.o || 0),
-          changePercent: r.o ? (((r.c || 0) - r.o) / r.o) * 100 : 0,
-          timestamp: new Date().toISOString(),
-        };
+        return null;
       }
     );
+  }
+
+  /**
+   * Get hot cached index value from Redis (populated by indices-worker)
+   */
+  private async getHotCachedIndex(ticker: string): Promise<IndexQuote | null> {
+    const redis = await getRedis();
+    if (!redis) return null;
+
+    const client = redis.getRedisClient();
+    if (!client) return null;
+
+    try {
+      const cacheKey = `index:${ticker.toUpperCase()}`;
+      const data = await client.get(cacheKey);
+      if (!data) return null;
+
+      const cached = JSON.parse(data);
+      const age = Date.now() - cached.timestamp;
+      if (age > HOT_CACHE_FRESHNESS_MS) return null;
+
+      return cached as IndexQuote;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -1265,6 +1331,136 @@ class MarketDataService {
         };
       }
     );
+  }
+
+  /**
+   * Get single options contract snapshot with Greeks
+   * Uses Massive.com endpoint: /v3/snapshot/options/{underlyingAsset}
+   *
+   * @param contractTicker - Full options contract ticker (e.g., O:SPY251219C00600000)
+   * @returns Option contract with Greeks (delta, gamma, theta, vega, IV)
+   */
+  async getOptionsContract(contractTicker: string): Promise<OptionContract | null> {
+    const ticker = contractTicker.toUpperCase();
+
+    return this.getCached<OptionContract>(
+      `option:${ticker}`,
+      CACHE_TTL.options,
+      async () => {
+        // Parse the contract ticker to get underlying and details
+        // Format: O:AAPL251219C00150000
+        const match = ticker.match(/^O?:?([A-Z]+)(\d{6})([CP])(\d+)$/);
+        if (!match) {
+          console.warn(`[MarketData] Invalid options contract ticker: ${ticker}`);
+          return null;
+        }
+
+        const underlying = match[1];
+        const dateStr = match[2];
+        const contractType = match[3] === 'C' ? 'call' : 'put';
+        const strikeRaw = parseInt(match[4], 10);
+        const strike = strikeRaw / 1000; // Convert to actual price
+
+        // Parse expiration date (YYMMDD format)
+        const year = 2000 + parseInt(dateStr.substring(0, 2), 10);
+        const month = dateStr.substring(2, 4);
+        const day = dateStr.substring(4, 6);
+        const expiration = `${year}-${month}-${day}`;
+
+        interface OptionSnapshotResponse {
+          results?: Array<{
+            ticker: string;
+            underlying_ticker: string;
+            contract_type: 'call' | 'put';
+            strike_price: number;
+            expiration_date: string;
+            last_quote?: { bid: number; ask: number };
+            last_trade?: { price: number };
+            day?: { volume: number };
+            open_interest?: number;
+            implied_volatility?: number;
+            greeks?: {
+              delta: number;
+              gamma: number;
+              theta: number;
+              vega: number;
+            };
+            break_even_price?: number;
+          }>;
+        }
+
+        // Query options snapshot with specific filters
+        const data = await this.fetch<OptionSnapshotResponse>(
+          `/v3/snapshot/options/${underlying}`,
+          {
+            strike_price: strike,
+            expiration_date: expiration,
+            contract_type: contractType,
+            limit: 1,
+          }
+        );
+
+        if (!data?.results?.[0]) return null;
+
+        const opt = data.results[0];
+        return {
+          ticker: opt.ticker,
+          underlying: opt.underlying_ticker,
+          type: opt.contract_type,
+          strike: opt.strike_price,
+          expiration: opt.expiration_date,
+          bid: opt.last_quote?.bid || 0,
+          ask: opt.last_quote?.ask || 0,
+          last: opt.last_trade?.price || 0,
+          volume: opt.day?.volume || 0,
+          openInterest: opt.open_interest || 0,
+          impliedVolatility: opt.implied_volatility || 0,
+          delta: opt.greeks?.delta || 0,
+          gamma: opt.greeks?.gamma || 0,
+          theta: opt.greeks?.theta || 0,
+          vega: opt.greeks?.vega || 0,
+        };
+      }
+    );
+  }
+
+  /**
+   * Get options contracts near the money for a ticker
+   * Useful for finding liquid options for trading
+   */
+  async getOptionsNearMoney(
+    ticker: string,
+    expirationDate?: string,
+    strikeRange: number = 5
+  ): Promise<OptionContract[]> {
+    const symbol = ticker.toUpperCase();
+    const expDate = expirationDate || this.getNextFridayDate();
+
+    // Get current price to determine ATM strike
+    const quote = await this.getQuote(symbol);
+    if (!quote) return [];
+
+    const currentPrice = quote.price;
+    const chain = await this.getOptionsChain(symbol, expDate);
+    if (!chain) return [];
+
+    // Filter to strikes within range of current price
+    const nearMoney: OptionContract[] = [];
+    const minStrike = currentPrice * (1 - strikeRange / 100);
+    const maxStrike = currentPrice * (1 + strikeRange / 100);
+
+    for (const contract of [...chain.calls, ...chain.puts]) {
+      if (contract.strike >= minStrike && contract.strike <= maxStrike) {
+        nearMoney.push(contract);
+      }
+    }
+
+    // Sort by distance from current price
+    nearMoney.sort((a, b) =>
+      Math.abs(a.strike - currentPrice) - Math.abs(b.strike - currentPrice)
+    );
+
+    return nearMoney;
   }
 
   /**

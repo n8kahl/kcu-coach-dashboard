@@ -30,6 +30,55 @@ export const marketDataTools: Tool[] = [
     },
   },
   {
+    name: 'get_index_quote',
+    description:
+      'Get real-time index values including VIX, SPX (S&P 500), NDX (Nasdaq 100), DJI (Dow Jones), and RUT (Russell 2000). Use this for market sentiment, volatility analysis, and index levels.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        index: {
+          type: 'string',
+          description: 'Index symbol: VIX, SPX, NDX, DJI, RUT (or full names like SP500, NASDAQ, DJIA)',
+        },
+      },
+      required: ['index'],
+    },
+  },
+  {
+    name: 'get_options_chain',
+    description:
+      'Get the full options chain for a stock including all calls and puts with Greeks (delta, gamma, theta, vega), implied volatility, bid/ask, volume, and open interest. Use for options analysis and strategy planning.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        symbol: {
+          type: 'string',
+          description: 'Underlying stock ticker symbol (e.g., SPY, AAPL)',
+        },
+        expiration_date: {
+          type: 'string',
+          description: 'Expiration date in YYYY-MM-DD format (defaults to next Friday if not specified)',
+        },
+      },
+      required: ['symbol'],
+    },
+  },
+  {
+    name: 'get_options_contract',
+    description:
+      'Get detailed data for a single options contract including Greeks (delta, gamma, theta, vega), implied volatility, bid/ask spread, volume, and open interest. Use for specific contract analysis.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        contract_ticker: {
+          type: 'string',
+          description: 'Full options contract ticker (e.g., O:SPY251219C00600000 for SPY Dec 19 2025 $600 Call)',
+        },
+      },
+      required: ['contract_ticker'],
+    },
+  },
+  {
     name: 'get_historical_price',
     description:
       'Get historical OHLCV data for a specific date or date range. Use for questions like "What did X close at on Y date?" or "Show me price action last week". Dates should be in YYYY-MM-DD format.',
@@ -154,6 +203,9 @@ interface ToolInput {
   timeframe?: string;
   indicator?: string;
   period?: number;
+  index?: string;
+  contract_ticker?: string;
+  expiration_date?: string;
 }
 
 /**
@@ -175,6 +227,15 @@ export async function executeMarketDataTool(
     switch (toolName) {
       case 'get_quote':
         return await executeGetQuote(input.symbol!);
+
+      case 'get_index_quote':
+        return await executeGetIndexQuote(input.index!);
+
+      case 'get_options_chain':
+        return await executeGetOptionsChain(input);
+
+      case 'get_options_contract':
+        return await executeGetOptionsContract(input.contract_ticker!);
 
       case 'get_historical_price':
         return await executeGetHistoricalPrice(input);
@@ -237,6 +298,142 @@ async function executeGetQuote(symbol: string): Promise<string> {
     vwap: quote.vwap,
     prevClose: quote.prevClose,
     timestamp: quote.timestamp,
+  });
+}
+
+async function executeGetIndexQuote(index: string): Promise<string> {
+  const indexQuote = await marketDataService.getIndexQuote(index.toUpperCase());
+
+  if (!indexQuote) {
+    return JSON.stringify({
+      error: 'No data available',
+      message: `Could not find index data for ${index.toUpperCase()}. Valid indices: VIX, SPX, NDX, DJI, RUT`,
+    });
+  }
+
+  // Add volatility interpretation for VIX
+  let interpretation = '';
+  if (index.toUpperCase() === 'VIX' || index.toUpperCase() === 'I:VIX') {
+    const value = indexQuote.value;
+    if (value < 15) {
+      interpretation = 'Low volatility - markets are complacent';
+    } else if (value < 20) {
+      interpretation = 'Normal volatility - typical market conditions';
+    } else if (value < 30) {
+      interpretation = 'Elevated volatility - increased market fear';
+    } else {
+      interpretation = 'High volatility - significant market stress';
+    }
+  }
+
+  return JSON.stringify({
+    symbol: indexQuote.symbol,
+    value: indexQuote.value,
+    open: indexQuote.open,
+    high: indexQuote.high,
+    low: indexQuote.low,
+    change: indexQuote.change,
+    changePercent: indexQuote.changePercent,
+    timestamp: indexQuote.timestamp,
+    ...(interpretation && { interpretation }),
+  });
+}
+
+async function executeGetOptionsChain(input: ToolInput): Promise<string> {
+  const symbol = input.symbol!.toUpperCase();
+  const expirationDate = input.expiration_date;
+
+  const chain = await marketDataService.getOptionsChain(symbol, expirationDate);
+
+  if (!chain) {
+    return JSON.stringify({
+      error: 'No data available',
+      message: `Could not find options chain for ${symbol}${expirationDate ? ` expiring ${expirationDate}` : ''}`,
+    });
+  }
+
+  // Get underlying price for context
+  const quote = await marketDataService.getQuote(symbol);
+  const currentPrice = quote?.price || 0;
+
+  // Find ATM options (closest to current price)
+  const atmCall = chain.calls.reduce((closest, opt) =>
+    Math.abs(opt.strike - currentPrice) < Math.abs(closest.strike - currentPrice) ? opt : closest
+  , chain.calls[0]);
+  const atmPut = chain.puts.reduce((closest, opt) =>
+    Math.abs(opt.strike - currentPrice) < Math.abs(closest.strike - currentPrice) ? opt : closest
+  , chain.puts[0]);
+
+  // Summarize the chain
+  const summary = {
+    underlying: chain.underlying,
+    underlyingPrice: currentPrice,
+    expirationDate: chain.expirationDate,
+    totalCalls: chain.calls.length,
+    totalPuts: chain.puts.length,
+    atmStrike: atmCall?.strike,
+    atmCallIV: atmCall?.impliedVolatility,
+    atmPutIV: atmPut?.impliedVolatility,
+    callStrikes: chain.calls.slice(0, 10).map(c => ({
+      strike: c.strike,
+      bid: c.bid,
+      ask: c.ask,
+      delta: c.delta,
+      iv: c.impliedVolatility,
+      volume: c.volume,
+      openInterest: c.openInterest,
+    })),
+    putStrikes: chain.puts.slice(0, 10).map(p => ({
+      strike: p.strike,
+      bid: p.bid,
+      ask: p.ask,
+      delta: p.delta,
+      iv: p.impliedVolatility,
+      volume: p.volume,
+      openInterest: p.openInterest,
+    })),
+  };
+
+  return JSON.stringify(summary);
+}
+
+async function executeGetOptionsContract(contractTicker: string): Promise<string> {
+  const contract = await marketDataService.getOptionsContract(contractTicker.toUpperCase());
+
+  if (!contract) {
+    return JSON.stringify({
+      error: 'No data available',
+      message: `Could not find options contract ${contractTicker.toUpperCase()}. Format: O:AAPL251219C00150000`,
+    });
+  }
+
+  // Calculate mid price and spread
+  const midPrice = (contract.bid + contract.ask) / 2;
+  const spread = contract.ask - contract.bid;
+  const spreadPercent = midPrice > 0 ? (spread / midPrice) * 100 : 0;
+
+  return JSON.stringify({
+    ticker: contract.ticker,
+    underlying: contract.underlying,
+    type: contract.type,
+    strike: contract.strike,
+    expiration: contract.expiration,
+    bid: contract.bid,
+    ask: contract.ask,
+    midPrice,
+    spread,
+    spreadPercent,
+    last: contract.last,
+    volume: contract.volume,
+    openInterest: contract.openInterest,
+    greeks: {
+      delta: contract.delta,
+      gamma: contract.gamma,
+      theta: contract.theta,
+      vega: contract.vega,
+    },
+    impliedVolatility: contract.impliedVolatility,
+    ivPercent: contract.impliedVolatility * 100,
   });
 }
 
