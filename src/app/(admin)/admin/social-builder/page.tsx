@@ -16,6 +16,9 @@ import {
   Zap,
   Clock,
   GraduationCap,
+  Wand2,
+  Radio,
+  Trophy,
 } from 'lucide-react';
 
 // UI Components
@@ -40,6 +43,9 @@ import {
   InfluencerList,
   TrendingTopics,
   LearningMilestones,
+  BrainDumpInput,
+  MarketPulse,
+  HallOfFame,
 } from '@/components/social';
 
 import type { ContentSuggestion, SocialPlatform, TrendingTopic, InfluencerProfileInput, ContentCategory } from '@/types/social';
@@ -452,6 +458,18 @@ function SocialBuilderContent() {
             <GraduationCap className="w-4 h-4 mr-2" />
             Learning
           </TabsTrigger>
+          <TabsTrigger value="brain-dump" variant="pills">
+            <Wand2 className="w-4 h-4 mr-2" />
+            Brain Dump
+          </TabsTrigger>
+          <TabsTrigger value="market-pulse" variant="pills">
+            <Radio className="w-4 h-4 mr-2" />
+            Market Pulse
+          </TabsTrigger>
+          <TabsTrigger value="hall-of-fame" variant="pills">
+            <Trophy className="w-4 h-4 mr-2" />
+            Hall of Fame
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -773,6 +791,30 @@ function SocialBuilderContent() {
           <LearningMilestones
             showToast={showToast}
             onRefresh={fetchDashboardData}
+          />
+        </TabsContent>
+
+        {/* Brain Dump Tab */}
+        <TabsContent value="brain-dump">
+          <BrainDumpInput
+            showToast={showToast}
+            onGenerate={(output) => {
+              console.log('Brain dump generated:', output);
+              // Optionally refresh suggestions after generating
+              fetchDashboardData();
+            }}
+          />
+        </TabsContent>
+
+        {/* Market Pulse Tab */}
+        <TabsContent value="market-pulse">
+          <MarketPulse showToast={showToast} />
+        </TabsContent>
+
+        {/* Hall of Fame Tab */}
+        <TabsContent value="hall-of-fame">
+          <HallOfFame
+            showToast={(message, type) => showToast({ type, title: message })}
           />
         </TabsContent>
       </Tabs>
