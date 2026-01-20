@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getAuthenticatedUser } from '@/lib/auth';
-import { encryptToken, decryptToken } from '@/lib/social/encryption';
+import { encryptToken } from '@/lib/social/encryption';
 import { z } from 'zod';
 
 // Initialize Supabase client
@@ -35,8 +35,8 @@ const CredentialsSchema = z.object({
   youtube: PlatformCredentialsSchema.optional(),
 });
 
-export type SocialCredentials = z.infer<typeof CredentialsSchema>;
-export type PlatformCredentials = z.infer<typeof PlatformCredentialsSchema>;
+type SocialCredentials = z.infer<typeof CredentialsSchema>;
+type PlatformCredentials = z.infer<typeof PlatformCredentialsSchema>;
 
 // ============================================
 // GET - Fetch credentials (masked)
@@ -265,33 +265,4 @@ export async function DELETE(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-// ============================================
-// Helper: Get decrypted credentials for a platform
-// ============================================
-
-export async function getDecryptedCredentials(
-  platform: 'instagram' | 'tiktok' | 'youtube'
-): Promise<PlatformCredentials | null> {
-  const { data } = await supabase
-    .from('social_builder_config')
-    .select('config_value')
-    .eq('config_key', CONFIG_KEY)
-    .single();
-
-  if (!data?.config_value) return null;
-
-  const credentials = data.config_value as SocialCredentials;
-  const platformCreds = credentials[platform];
-
-  if (!platformCreds?.client_id || !platformCreds?.client_secret) {
-    return null;
-  }
-
-  // Decrypt the client secret
-  return {
-    ...platformCreds,
-    client_secret: decryptToken(platformCreds.client_secret),
-  };
 }
