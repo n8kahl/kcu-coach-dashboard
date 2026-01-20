@@ -289,19 +289,26 @@ function SocialBuilderContent() {
     }
   };
 
-  const handleSuggestionAction = async (id: string, action: 'approve' | 'reject') => {
+  const handleSuggestionAction = async (
+    id: string,
+    action: 'approve' | 'reject',
+    edits?: Record<string, unknown>
+  ) => {
     try {
       const response = await fetch('/api/admin/social/suggestions', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action }),
+        body: JSON.stringify({ id, action, ...edits }),
       });
 
       const data = await response.json();
       if (data.success) {
+        const hasEdits = edits && Object.keys(edits).length > 0;
         showToast({
           type: 'success',
-          title: action === 'approve' ? 'Content approved' : 'Content rejected',
+          title: action === 'approve'
+            ? hasEdits ? 'Content approved with edits' : 'Content approved'
+            : 'Content rejected',
         });
         setSuggestions((prev) => prev.filter((s) => s.id !== id));
         setStats((prev) =>
@@ -896,7 +903,7 @@ function SocialBuilderContent() {
         isOpen={!!previewSuggestion}
         onClose={() => setPreviewSuggestion(null)}
         suggestion={previewSuggestion}
-        onApprove={(id) => handleSuggestionAction(id, 'approve')}
+        onApprove={(id, edits) => handleSuggestionAction(id, 'approve', edits)}
         onReject={(id) => handleSuggestionAction(id, 'reject')}
       />
 
