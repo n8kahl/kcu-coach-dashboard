@@ -645,7 +645,7 @@ export const KCUChart = memo(function KCUChart({
             size: 1,
           };
         })
-        .filter((m): m is SeriesMarker<Time> => m !== null);
+        .filter((m) => m !== null) as SeriesMarker<Time>[];
       try {
         candleSeriesRef.current.setMarkers(markers);
       } catch { /* ignore */ }
