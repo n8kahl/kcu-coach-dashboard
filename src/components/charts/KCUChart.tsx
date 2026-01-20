@@ -609,7 +609,7 @@ export function KCUChart({
             if (time === null) return null;
             return { time, value: ema8Values[i] };
           })
-          .filter((d): d is LineData => d !== null && d.value != null && !isNaN(d.value));
+          .filter((d): d is LineData => d !== null && d.value != null && isFinite(d.value));
         ema8SeriesRef.current.setData(ema8Data);
       }
 
@@ -622,7 +622,7 @@ export function KCUChart({
             if (time === null) return null;
             return { time, value: ema21Values[i] };
           })
-          .filter((d): d is LineData => d !== null && d.value != null && !isNaN(d.value));
+          .filter((d): d is LineData => d !== null && d.value != null && isFinite(d.value));
         ema21SeriesRef.current.setData(ema21Data);
       }
 
@@ -635,7 +635,7 @@ export function KCUChart({
             if (time === null) return null;
             return { time, value: sma200Values[i] };
           })
-          .filter((d): d is LineData => d !== null && d.value != null && !isNaN(d.value));
+          .filter((d): d is LineData => d !== null && d.value != null && isFinite(d.value));
         sma200SeriesRef.current.setData(sma200Data);
       }
 
@@ -648,7 +648,7 @@ export function KCUChart({
             if (time === null) return null;
             return { time, value: vwapValues[i] };
           })
-          .filter((d): d is LineData => d !== null && d.value != null && !isNaN(d.value));
+          .filter((d): d is LineData => d !== null && d.value != null && isFinite(d.value));
         vwapSeriesRef.current.setData(vwapData);
       }
 
@@ -663,12 +663,15 @@ export function KCUChart({
             if (time === null) return null;
             const ema8 = ema8Values[i];
             const ema21 = ema21Values[i];
-            if (ema8 == null || ema21 == null || isNaN(ema8) || isNaN(ema21)) {
+            // Use isFinite() to catch NaN, Infinity, and -Infinity
+            if (!isFinite(ema8) || !isFinite(ema21)) {
               return null;
             }
+            const maxValue = Math.max(ema8, ema21);
+            if (!isFinite(maxValue)) return null;
             return {
               time,
-              value: Math.max(ema8, ema21),
+              value: maxValue,
               // Note: Area series doesn't support per-point colors directly
               // We use the higher EMA as the top line
             };
@@ -726,21 +729,21 @@ export function KCUChart({
     });
     levelSeriesRef.current.clear();
 
-    // Add new level lines (filter out invalid entries first)
-    const validLevels = levels.filter(l => l.price != null && !isNaN(l.price) && l.price > 0);
+    // Add new level lines (filter out invalid entries first) - use isFinite for stricter validation
+    const validLevels = levels.filter(l => isFinite(l.price) && l.price > 0);
 
     // Calculate current price range to filter out far-away levels
     let nearbyLevels = validLevels;
     if (data.length > 0) {
       const prices = data
         .flatMap(c => [c.high, c.low])
-        .filter((p): p is number => p != null && !isNaN(p));
+        .filter((p): p is number => p != null && isFinite(p));
       if (prices.length > 0) {
         const minPrice = Math.min(...prices);
         const maxPrice = Math.max(...prices);
         const priceRange = maxPrice - minPrice;
         const midPrice = (maxPrice + minPrice) / 2;
-        if (!isNaN(midPrice)) {
+        if (isFinite(midPrice)) {
           const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
           nearbyLevels = validLevels.filter(l => Math.abs(l.price - midPrice) <= maxDistance);
         }
@@ -795,14 +798,14 @@ export function KCUChart({
     });
     gammaSeriesRef.current.clear();
 
-    // Filter out gamma levels with invalid prices
-    const validGammaLevels = gammaLevels.filter(g => g.price != null && !isNaN(g.price) && g.price > 0);
+    // Filter out gamma levels with invalid prices - use isFinite for stricter validation
+    const validGammaLevels = gammaLevels.filter(g => isFinite(g.price) && g.price > 0);
     if (validGammaLevels.length === 0 || data.length === 0) return;
 
-    // Calculate current price range from candle data (filter out null/NaN values)
+    // Calculate current price range from candle data (filter out invalid values)
     const prices = data
       .flatMap(c => [c.high, c.low])
-      .filter((p): p is number => p != null && !isNaN(p));
+      .filter((p): p is number => p != null && isFinite(p));
     if (prices.length === 0) return;
 
     const minPrice = Math.min(...prices);
@@ -810,8 +813,8 @@ export function KCUChart({
     const priceRange = maxPrice - minPrice;
     const midPrice = (maxPrice + minPrice) / 2;
 
-    // Guard against NaN calculations
-    if (isNaN(minPrice) || isNaN(maxPrice) || isNaN(midPrice)) return;
+    // Guard against invalid calculations
+    if (!isFinite(minPrice) || !isFinite(maxPrice) || !isFinite(midPrice)) return;
 
     // Filter gamma levels to only show those within 15% of the current price range
     // This prevents far-away levels from distorting the chart scale
@@ -959,17 +962,17 @@ export function KCUChart({
     });
     fvgSeriesRef.current.clear();
 
-    // Filter out FVG zones with invalid high/low values
+    // Filter out FVG zones with invalid high/low values - use isFinite for stricter validation
     const validFvgZones = fvgZones.filter(z =>
-      z.high != null && !isNaN(z.high) && z.high > 0 &&
-      z.low != null && !isNaN(z.low) && z.low > 0
+      isFinite(z.high) && z.high > 0 &&
+      isFinite(z.low) && z.low > 0
     );
     if (validFvgZones.length === 0 || data.length === 0) return;
 
     // Calculate current price range to filter out far-away FVG zones
     const prices = data
       .flatMap(c => [c.high, c.low])
-      .filter((p): p is number => p != null && !isNaN(p));
+      .filter((p): p is number => p != null && isFinite(p));
     if (prices.length === 0) return;
 
     const minPrice = Math.min(...prices);
@@ -977,8 +980,8 @@ export function KCUChart({
     const priceRange = maxPrice - minPrice;
     const midPrice = (maxPrice + minPrice) / 2;
 
-    // Guard against NaN calculations
-    if (isNaN(midPrice)) return;
+    // Guard against invalid calculations
+    if (!isFinite(midPrice)) return;
 
     const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
 
@@ -1049,16 +1052,25 @@ export function KCUChart({
       const numPoints = 10;
       const timeStep = ((endTime as number) - (startTime as number)) / numPoints;
 
+      // Skip if timeStep is invalid (would create NaN times)
+      if (!isFinite(timeStep)) return;
+
       const topData: LineData[] = [];
       const bottomData: LineData[] = [];
       const areaData: AreaData[] = [];
 
       for (let i = 0; i <= numPoints; i++) {
-        const time = ((startTime as number) + timeStep * i) as Time;
+        const timeValue = (startTime as number) + timeStep * i;
+        // Skip invalid time values
+        if (!isFinite(timeValue)) continue;
+        const time = timeValue as Time;
         topData.push({ time, value: zone.high });
         bottomData.push({ time, value: zone.low });
         areaData.push({ time, value: zone.high });
       }
+
+      // Only set data if we have valid points
+      if (topData.length === 0) return;
 
       topSeries.setData(topData);
       bottomSeries.setData(bottomData);

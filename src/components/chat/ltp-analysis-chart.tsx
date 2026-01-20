@@ -310,19 +310,33 @@ function LTPAnalysisModalComponent({ isOpen, onClose, content }: LTPAnalysisModa
 
       candleSeriesRef.current = candleSeries;
 
-      // Set candle data
-      const candleData: CandlestickData[] = chartData.candles.map((c) => ({
-        time: c.time as Time,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      }));
+      // Set candle data - filter out invalid candles to prevent "Value is null" errors
+      const candleData: CandlestickData[] = chartData.candles
+        .filter((c) =>
+          c.time != null && isFinite(c.time) && c.time > 0 &&
+          c.open != null && isFinite(c.open) &&
+          c.high != null && isFinite(c.high) &&
+          c.low != null && isFinite(c.low) &&
+          c.close != null && isFinite(c.close)
+        )
+        .map((c) => ({
+          time: c.time as Time,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        }));
+
+      if (candleData.length === 0) {
+        console.warn('[LTPAnalysisChart] No valid candle data to display');
+        return;
+      }
 
       candleSeries.setData(candleData);
 
-      // Add key level lines
+      // Add key level lines - validate price before creating
       chartData.keyLevels.forEach((level) => {
+        if (level.price == null || !isFinite(level.price) || level.price <= 0) return;
         candleSeries.createPriceLine({
           price: level.price,
           color: CHART_COLORS.level,
@@ -333,8 +347,8 @@ function LTPAnalysisModalComponent({ isOpen, onClose, content }: LTPAnalysisModa
         });
       });
 
-      // Add indicator lines if available
-      if (chartData.indicators.vwap) {
+      // Add indicator lines if available - validate before creating
+      if (chartData.indicators.vwap != null && isFinite(chartData.indicators.vwap) && chartData.indicators.vwap > 0) {
         candleSeries.createPriceLine({
           price: chartData.indicators.vwap,
           color: CHART_COLORS.vwap,
@@ -345,7 +359,7 @@ function LTPAnalysisModalComponent({ isOpen, onClose, content }: LTPAnalysisModa
         });
       }
 
-      if (chartData.indicators.ema9) {
+      if (chartData.indicators.ema9 != null && isFinite(chartData.indicators.ema9) && chartData.indicators.ema9 > 0) {
         candleSeries.createPriceLine({
           price: chartData.indicators.ema9,
           color: CHART_COLORS.ema9,
@@ -356,7 +370,7 @@ function LTPAnalysisModalComponent({ isOpen, onClose, content }: LTPAnalysisModa
         });
       }
 
-      if (chartData.indicators.ema21) {
+      if (chartData.indicators.ema21 != null && isFinite(chartData.indicators.ema21) && chartData.indicators.ema21 > 0) {
         candleSeries.createPriceLine({
           price: chartData.indicators.ema21,
           color: CHART_COLORS.ema21,
@@ -367,17 +381,21 @@ function LTPAnalysisModalComponent({ isOpen, onClose, content }: LTPAnalysisModa
         });
       }
 
-      // Mark patience candles with markers
+      // Mark patience candles with markers - validate time before creating
       if (chartData.patienceCandles.length > 0) {
-        const markers = chartData.patienceCandles.map((pc) => ({
-          time: pc.time as Time,
-          position: pc.direction === 'bullish' ? 'belowBar' as const : 'aboveBar' as const,
-          color: CHART_COLORS.patienceCandle,
-          shape: pc.direction === 'bullish' ? 'arrowUp' as const : 'arrowDown' as const,
-          text: pc.confirmed ? 'PC' : 'PC?',
-        }));
+        const markers = chartData.patienceCandles
+          .filter((pc) => pc.time != null && isFinite(pc.time) && pc.time > 0)
+          .map((pc) => ({
+            time: pc.time as Time,
+            position: pc.direction === 'bullish' ? 'belowBar' as const : 'aboveBar' as const,
+            color: CHART_COLORS.patienceCandle,
+            shape: pc.direction === 'bullish' ? 'arrowUp' as const : 'arrowDown' as const,
+            text: pc.confirmed ? 'PC' : 'PC?',
+          }));
 
-        candleSeries.setMarkers(markers);
+        if (markers.length > 0) {
+          candleSeries.setMarkers(markers);
+        }
       }
 
       // Fit content
