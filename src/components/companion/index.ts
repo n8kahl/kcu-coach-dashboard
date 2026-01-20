@@ -8,4 +8,4 @@ export { CompanionWatchlist, type CompanionWatchlistProps, type WatchlistSymbol,
 export { CompanionHUD, type CompanionHUDProps } from './CompanionHUD';
 export { CompanionCoachBox, type CompanionCoachBoxProps, type CoachingMode, type AlertType } from './CompanionCoachBox';
 export { CompanionSessionReport } from './session-report';
-export { NotificationBanner } from './notification-banner';
+export { NotificationPermissionBanner } from './notification-banner';
