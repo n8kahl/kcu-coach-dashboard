@@ -1083,6 +1083,8 @@ export function KCUChart({
 
   // =========================================================================
   // Level Lines (Support/Resistance/Custom)
+  // CRITICAL: Don't remove/recreate series on each update - causes race conditions
+  // Instead: Clear series data with setData([]) and reuse, or skip if not needed
   // =========================================================================
 
   useEffect(() => {
@@ -1102,112 +1104,103 @@ export function KCUChart({
       return;
     }
 
-    // Clear existing level lines
-    if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines - clearing', levelSeriesRef.current.size, 'existing series');
-    levelSeriesRef.current.forEach((series, key) => {
-      try {
-        chartRef.current?.removeSeries(series);
-        if (DEBUG_LOGGING) console.log(`[KCUChart] Level Lines - removed series ${key}`);
-      } catch (e) {
-        if (DEBUG_LOGGING) console.warn(`[KCUChart] Level Lines - error removing series ${key}:`, e);
+    // CRITICAL FIX: Use requestAnimationFrame to batch updates and avoid race conditions
+    // with the chart's internal render loop
+    const rafId = requestAnimationFrame(() => {
+      // Double-check we're still mounted after RAF delay
+      if (!mountedRef.current || !chartRef.current) {
+        if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines - unmounted during RAF');
+        return;
       }
-    });
-    levelSeriesRef.current.clear();
 
-    // Add new level lines - use Number.isFinite (not isFinite!) for strict validation
-    const validLevels = levels.filter(l => isValidPrice(l.price));
-    if (DEBUG_LOGGING) {
-      console.log(`[KCUChart] Level Lines - ${validLevels.length}/${levels.length} levels have valid prices`);
-      if (validLevels.length < levels.length) {
-        const invalidLevels = levels.filter(l => !isValidPrice(l.price));
-        console.warn('[KCUChart] Level Lines - INVALID LEVELS:', invalidLevels);
+      // Clear existing level lines INSIDE the RAF callback
+      if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines - clearing', levelSeriesRef.current.size, 'existing series');
+      levelSeriesRef.current.forEach((series, key) => {
+        try {
+          chartRef.current?.removeSeries(series);
+        } catch {
+          // Ignore removal errors
+        }
+      });
+      levelSeriesRef.current.clear();
+
+      // If no data or levels, we're done
+      if (data.length === 0 || levels.length === 0) {
+        if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines - no data or levels, done');
+        return;
       }
-    }
 
-    // Calculate current price range to filter out far-away levels
-    let nearbyLevels = validLevels;
-    if (data.length > 0) {
+      // Add new level lines - use Number.isFinite for strict validation
+      const validLevels = levels.filter(l => isValidPrice(l.price));
+      if (DEBUG_LOGGING) {
+        console.log(`[KCUChart] Level Lines - ${validLevels.length}/${levels.length} valid`);
+      }
+
+      // Calculate price range for filtering
       const prices = data
         .flatMap(c => [c.high, c.low])
         .filter((p): p is number => isValidPrice(p));
-      if (prices.length > 0) {
-        const minPrice = Math.min(...prices);
-        const maxPrice = Math.max(...prices);
-        const priceRange = maxPrice - minPrice;
-        const midPrice = (maxPrice + minPrice) / 2;
-        if (Number.isFinite(midPrice)) {
-          const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
-          nearbyLevels = validLevels.filter(l => Math.abs(l.price - midPrice) <= maxDistance);
+      if (prices.length === 0) return;
+
+      const minPrice = Math.min(...prices);
+      const maxPrice = Math.max(...prices);
+      const midPrice = (maxPrice + minPrice) / 2;
+      if (!Number.isFinite(midPrice)) return;
+
+      const priceRange = maxPrice - minPrice;
+      const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
+      const nearbyLevels = validLevels.filter(l => Math.abs(l.price - midPrice) <= maxDistance);
+
+      // Get time range
+      const startTime = toChartTime(data[0].time);
+      const endTime = toChartTime(data[data.length - 1].time);
+      if (startTime === null || endTime === null) return;
+
+      // Create series for each level
+      nearbyLevels.forEach((level, index) => {
+        if (!mountedRef.current || !chartRef.current) return;
+
+        const point1 = createLinePoint(startTime, level.price);
+        const point2 = startTime === endTime ? null : createLinePoint(endTime, level.price);
+
+        const lineData: LineData[] = [];
+        if (point1) lineData.push(point1);
+        if (point2) lineData.push(point2);
+
+        if (lineData.length === 0) return;
+
+        try {
+          const series = chartRef.current.addLineSeries({
+            color: level.color || LEVEL_COLORS[level.type],
+            lineWidth: 1,
+            lineStyle: level.lineStyle === 'dotted' ? LineStyle.Dotted :
+                       level.lineStyle === 'dashed' ? LineStyle.Dashed :
+                       LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+            title: level.label,
+          });
+
+          safeSetData(series, lineData, `Level-${index}-${level.label}`);
+          levelSeriesRef.current.set(`level-${index}`, series);
+        } catch (e) {
+          console.error(`[KCUChart] Level-${index} error:`, e);
         }
-      }
-    }
-    if (DEBUG_LOGGING) console.log(`[KCUChart] Level Lines - ${nearbyLevels.length} levels within range`);
+      });
 
-    // Pre-calculate valid time range - only create series if we have valid data
-    if (data.length === 0) {
-      if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines - no data, skipping');
-      return;
-    }
-    const startTime = toChartTime(data[0].time);
-    const endTime = toChartTime(data[data.length - 1].time);
-    if (startTime === null || endTime === null) {
-      if (DEBUG_LOGGING) console.warn('[KCUChart] Level Lines - INVALID TIME RANGE', { startTime, endTime, firstTime: data[0].time, lastTime: data[data.length - 1].time });
-      return;
-    }
-    if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines - time range:', { startTime, endTime });
-
-    nearbyLevels.forEach((level, index) => {
-      // Guard against chart being destroyed during iteration
-      if (!mountedRef.current || !chartRef.current) {
-        if (DEBUG_LOGGING) console.warn(`[KCUChart] Level-${index} - chart destroyed mid-iteration!`);
-        return;
-      }
-
-      // Create validated line data points
-      const point1 = createLinePoint(startTime, level.price);
-      const point2 = startTime === endTime ? null : createLinePoint(endTime, level.price);
-
-      // Build line data array, filtering nulls
-      const lineData: LineData[] = [];
-      if (point1) lineData.push(point1);
-      if (point2) lineData.push(point2);
-
-      if (lineData.length === 0) {
-        if (DEBUG_LOGGING) console.warn(`[KCUChart] Level-${index} (${level.label}) - no valid points, skipping`);
-        return;
-      }
-
-      if (DEBUG_LOGGING) {
-        console.log(`[KCUChart] Level-${index} (${level.label}) creating series with:`, JSON.stringify(lineData));
-      }
-
-      try {
-        const series = chartRef.current.addLineSeries({
-          color: level.color || LEVEL_COLORS[level.type],
-          lineWidth: 1,
-          lineStyle: level.lineStyle === 'dotted' ? LineStyle.Dotted :
-                     level.lineStyle === 'dashed' ? LineStyle.Dashed :
-                     LineStyle.Solid,
-          // Disable price labels to prevent "Value is null" errors from coordinate conversion
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-          title: level.label,
-        });
-
-        safeSetData(series, lineData, `Level-${index}-${level.label}`);
-        levelSeriesRef.current.set(`level-${index}`, series);
-        if (DEBUG_LOGGING) console.log(`[KCUChart] Level-${index} (${level.label}) - series created successfully`);
-      } catch (e) {
-        console.error(`[KCUChart] Level-${index} (${level.label}) - ERROR creating series:`, e);
-      }
+      if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines complete -', levelSeriesRef.current.size, 'series');
     });
 
-    if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines effect complete -', levelSeriesRef.current.size, 'series created');
+    // Cleanup: cancel RAF if component unmounts during delay
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
   }, [levels, data, isInitialized]);
 
   // =========================================================================
   // Gamma Levels - Institutional Walls
+  // CRITICAL: Use RAF to avoid race conditions with chart's internal render loop
   // =========================================================================
 
   useEffect(() => {
@@ -1227,164 +1220,130 @@ export function KCUChart({
       return;
     }
 
-    // Clear existing gamma level lines
-    if (DEBUG_LOGGING) console.log('[KCUChart] Gamma Levels - clearing', gammaSeriesRef.current.size, 'existing series');
-    gammaSeriesRef.current.forEach((series, key) => {
-      try {
-        chartRef.current?.removeSeries(series);
-        if (DEBUG_LOGGING) console.log(`[KCUChart] Gamma Levels - removed series ${key}`);
-      } catch (e) {
-        if (DEBUG_LOGGING) console.warn(`[KCUChart] Gamma Levels - error removing series ${key}:`, e);
-      }
-    });
-    gammaSeriesRef.current.clear();
-
-    // Filter out gamma levels with invalid prices - use Number.isFinite (not isFinite!) for strict validation
-    const validGammaLevels = gammaLevels.filter(g => isValidPrice(g.price));
-    if (DEBUG_LOGGING) {
-      console.log(`[KCUChart] Gamma Levels - ${validGammaLevels.length}/${gammaLevels.length} levels have valid prices`);
-      if (validGammaLevels.length < gammaLevels.length) {
-        const invalidGammaLevels = gammaLevels.filter(g => !isValidPrice(g.price));
-        console.warn('[KCUChart] Gamma Levels - INVALID LEVELS:', invalidGammaLevels);
-      }
-    }
-    if (validGammaLevels.length === 0 || data.length === 0) {
-      if (DEBUG_LOGGING) console.log('[KCUChart] Gamma Levels - no valid levels or data, skipping');
-      return;
-    }
-
-    // Calculate current price range from candle data (filter out invalid values)
-    const prices = data
-      .flatMap(c => [c.high, c.low])
-      .filter((p): p is number => isValidPrice(p));
-    if (prices.length === 0) {
-      if (DEBUG_LOGGING) console.log('[KCUChart] Gamma Levels - no valid prices in data, skipping');
-      return;
-    }
-
-    const minPrice = Math.min(...prices);
-    const maxPrice = Math.max(...prices);
-    const priceRange = maxPrice - minPrice;
-    const midPrice = (maxPrice + minPrice) / 2;
-
-    // Guard against invalid calculations
-    if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice) || !Number.isFinite(midPrice)) {
-      if (DEBUG_LOGGING) console.warn('[KCUChart] Gamma Levels - invalid price calculations', { minPrice, maxPrice, midPrice });
-      return;
-    }
-
-    // Filter gamma levels to only show those within 15% of the current price range
-    const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
-    const nearbyGammaLevels = validGammaLevels.filter(g =>
-      Math.abs(g.price - midPrice) <= maxDistance
-    );
-    if (DEBUG_LOGGING) console.log(`[KCUChart] Gamma Levels - ${nearbyGammaLevels.length} levels within range`);
-
-    // Pre-calculate valid time range - only create series if we have valid data
-    const startTime = toChartTime(data[0].time);
-    const endTime = toChartTime(data[data.length - 1].time);
-    if (startTime === null || endTime === null) {
-      if (DEBUG_LOGGING) console.warn('[KCUChart] Gamma Levels - INVALID TIME RANGE', { startTime, endTime });
-      return;
-    }
-    if (DEBUG_LOGGING) console.log('[KCUChart] Gamma Levels - time range:', { startTime, endTime });
-
-    // Add gamma level lines with proper institutional styling
-    nearbyGammaLevels.forEach((gamma, index) => {
-      // Guard against chart being destroyed during iteration
+    // CRITICAL FIX: Use requestAnimationFrame to batch updates
+    const rafId = requestAnimationFrame(() => {
+      // Double-check we're still mounted after RAF delay
       if (!mountedRef.current || !chartRef.current) {
-        if (DEBUG_LOGGING) console.warn(`[KCUChart] Gamma-${gamma.type}-${index} - chart destroyed mid-iteration!`);
+        if (DEBUG_LOGGING) console.log('[KCUChart] Gamma Levels - unmounted during RAF');
         return;
       }
 
-      // Determine color and line style based on type
-      let color: string;
-      let lineWidth: number;
-      let lineStyle: LineStyle;
-      let title: string;
-
-      switch (gamma.type) {
-        case 'call_wall':
-          color = CHART_COLORS.callWall;
-          lineWidth = 3;
-          lineStyle = LineStyle.Solid;
-          title = gamma.label || '📈 CALL WALL';
-          break;
-        case 'put_wall':
-          color = CHART_COLORS.putWall;
-          lineWidth = 3;
-          lineStyle = LineStyle.Solid;
-          title = gamma.label || '📉 PUT WALL';
-          break;
-        case 'zero_gamma':
-          color = CHART_COLORS.zeroGamma;
-          lineWidth = 2;
-          lineStyle = LineStyle.Dashed;
-          title = gamma.label || '⚡ ZERO GAMMA';
-          break;
-        case 'max_pain':
-          color = CHART_COLORS.maxPain;
-          lineWidth = 2;
-          lineStyle = LineStyle.Dotted;
-          title = gamma.label || '💀 MAX PAIN';
-          break;
-        default:
-          color = '#6b7280';
-          lineWidth = 1;
-          lineStyle = LineStyle.Dotted;
-          title = gamma.label || 'LEVEL';
-      }
-
-      // Create validated line data points
-      const point1 = createLinePoint(startTime, gamma.price);
-      const point2 = startTime === endTime ? null : createLinePoint(endTime, gamma.price);
-
-      // Build line data array, filtering nulls
-      const lineData: LineData[] = [];
-      if (point1) lineData.push(point1);
-      if (point2) lineData.push(point2);
-
-      if (lineData.length === 0) {
-        if (DEBUG_LOGGING) console.warn(`[KCUChart] Gamma-${gamma.type}-${index} - no valid points, skipping`);
-        return;
-      }
-
-      if (DEBUG_LOGGING) {
-        console.log(`[KCUChart] Gamma-${gamma.type}-${index} creating series with:`, JSON.stringify(lineData));
-      }
-
-      try {
-        const series = chartRef.current.addLineSeries({
-          color,
-          lineWidth: lineWidth as 1 | 2 | 3 | 4,
-          lineStyle,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          title,
-          crosshairMarkerVisible: false,
-        });
-
-        safeSetData(series, lineData, `Gamma-${gamma.type}-${index}`);
-        gammaSeriesRef.current.set(`gamma-${gamma.type}-${index}`, series);
-        if (DEBUG_LOGGING) console.log(`[KCUChart] Gamma-${gamma.type}-${index} - series created successfully`);
-      } catch (e) {
-        console.error(`[KCUChart] Gamma-${gamma.type}-${index} - ERROR creating series:`, e);
-      }
-    });
-
-    if (DEBUG_LOGGING) console.log('[KCUChart] Gamma Levels effect complete -', gammaSeriesRef.current.size, 'series created');
-
-    // Cleanup function
-    return () => {
-      if (DEBUG_LOGGING) console.log('[KCUChart] Gamma Levels cleanup - removing', gammaSeriesRef.current.size, 'series');
-      gammaSeriesRef.current.forEach((series, key) => {
+      // Clear existing gamma level lines INSIDE RAF
+      gammaSeriesRef.current.forEach((series) => {
         try {
           chartRef.current?.removeSeries(series);
         } catch {
-          // Ignore cleanup errors
+          // Ignore removal errors
         }
       });
       gammaSeriesRef.current.clear();
+
+      // If no data or gamma levels, we're done
+      if (data.length === 0 || gammaLevels.length === 0) {
+        return;
+      }
+
+      // Filter valid gamma levels
+      const validGammaLevels = gammaLevels.filter(g => isValidPrice(g.price));
+      if (validGammaLevels.length === 0) return;
+
+      // Calculate price range for filtering
+      const prices = data
+        .flatMap(c => [c.high, c.low])
+        .filter((p): p is number => isValidPrice(p));
+      if (prices.length === 0) return;
+
+      const minPrice = Math.min(...prices);
+      const maxPrice = Math.max(...prices);
+      const midPrice = (maxPrice + minPrice) / 2;
+      if (!Number.isFinite(midPrice)) return;
+
+      const priceRange = maxPrice - minPrice;
+      const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
+      const nearbyGammaLevels = validGammaLevels.filter(g =>
+        Math.abs(g.price - midPrice) <= maxDistance
+      );
+
+      // Get time range
+      const startTime = toChartTime(data[0].time);
+      const endTime = toChartTime(data[data.length - 1].time);
+      if (startTime === null || endTime === null) return;
+
+      // Create series for each gamma level
+      nearbyGammaLevels.forEach((gamma, index) => {
+        if (!mountedRef.current || !chartRef.current) return;
+
+        // Determine styling based on type
+        let color: string;
+        let lineWidth: number;
+        let lineStyle: LineStyle;
+        let title: string;
+
+        switch (gamma.type) {
+          case 'call_wall':
+            color = CHART_COLORS.callWall;
+            lineWidth = 3;
+            lineStyle = LineStyle.Solid;
+            title = gamma.label || '📈 CALL WALL';
+            break;
+          case 'put_wall':
+            color = CHART_COLORS.putWall;
+            lineWidth = 3;
+            lineStyle = LineStyle.Solid;
+            title = gamma.label || '📉 PUT WALL';
+            break;
+          case 'zero_gamma':
+            color = CHART_COLORS.zeroGamma;
+            lineWidth = 2;
+            lineStyle = LineStyle.Dashed;
+            title = gamma.label || '⚡ ZERO GAMMA';
+            break;
+          case 'max_pain':
+            color = CHART_COLORS.maxPain;
+            lineWidth = 2;
+            lineStyle = LineStyle.Dotted;
+            title = gamma.label || '💀 MAX PAIN';
+            break;
+          default:
+            color = '#6b7280';
+            lineWidth = 1;
+            lineStyle = LineStyle.Dotted;
+            title = gamma.label || 'LEVEL';
+        }
+
+        const point1 = createLinePoint(startTime, gamma.price);
+        const point2 = startTime === endTime ? null : createLinePoint(endTime, gamma.price);
+
+        const lineData: LineData[] = [];
+        if (point1) lineData.push(point1);
+        if (point2) lineData.push(point2);
+
+        if (lineData.length === 0) return;
+
+        try {
+          const series = chartRef.current.addLineSeries({
+            color,
+            lineWidth: lineWidth as 1 | 2 | 3 | 4,
+            lineStyle,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            title,
+            crosshairMarkerVisible: false,
+          });
+
+          safeSetData(series, lineData, `Gamma-${gamma.type}-${index}`);
+          gammaSeriesRef.current.set(`gamma-${gamma.type}-${index}`, series);
+        } catch (e) {
+          console.error(`[KCUChart] Gamma-${gamma.type}-${index} error:`, e);
+        }
+      });
+
+      if (DEBUG_LOGGING) console.log('[KCUChart] Gamma Levels complete -', gammaSeriesRef.current.size, 'series');
+    });
+
+    // Cleanup: cancel RAF if component unmounts during delay
+    return () => {
+      cancelAnimationFrame(rafId);
     };
   }, [gammaLevels, data, isInitialized]);
 
@@ -1468,6 +1427,7 @@ export function KCUChart({
 
   // =========================================================================
   // FVG Zones - Fair Value Gap Boxes
+  // CRITICAL: Use RAF to avoid race conditions with chart's internal render loop
   // =========================================================================
 
   useEffect(() => {
@@ -1487,228 +1447,166 @@ export function KCUChart({
       return;
     }
 
-    // Clear existing FVG series
-    if (DEBUG_LOGGING) console.log('[KCUChart] FVG Zones - clearing', fvgSeriesRef.current.size, 'existing series');
-    fvgSeriesRef.current.forEach((series, key) => {
-      try {
-        chartRef.current?.removeSeries(series);
-        if (DEBUG_LOGGING) console.log(`[KCUChart] FVG Zones - removed series ${key}`);
-      } catch (e) {
-        if (DEBUG_LOGGING) console.warn(`[KCUChart] FVG Zones - error removing series ${key}:`, e);
-      }
-    });
-    fvgSeriesRef.current.clear();
-
-    // Filter out FVG zones with invalid high/low values - use Number.isFinite (not isFinite!)
-    const validFvgZones = fvgZones.filter(z =>
-      isValidPrice(z.high) && isValidPrice(z.low)
-    );
-    if (DEBUG_LOGGING) {
-      console.log(`[KCUChart] FVG Zones - ${validFvgZones.length}/${fvgZones.length} zones have valid prices`);
-      if (validFvgZones.length < fvgZones.length) {
-        const invalidFvgZones = fvgZones.filter(z => !isValidPrice(z.high) || !isValidPrice(z.low));
-        console.warn('[KCUChart] FVG Zones - INVALID ZONES:', invalidFvgZones);
-      }
-    }
-    if (validFvgZones.length === 0 || data.length === 0) {
-      if (DEBUG_LOGGING) console.log('[KCUChart] FVG Zones - no valid zones or data, skipping');
-      return;
-    }
-
-    // Calculate current price range to filter out far-away FVG zones
-    const prices = data
-      .flatMap(c => [c.high, c.low])
-      .filter((p): p is number => isValidPrice(p));
-    if (prices.length === 0) {
-      if (DEBUG_LOGGING) console.log('[KCUChart] FVG Zones - no valid prices in data, skipping');
-      return;
-    }
-
-    const minPrice = Math.min(...prices);
-    const maxPrice = Math.max(...prices);
-    const priceRange = maxPrice - minPrice;
-    const midPrice = (maxPrice + minPrice) / 2;
-
-    // Guard against invalid calculations
-    if (!Number.isFinite(midPrice)) {
-      if (DEBUG_LOGGING) console.warn('[KCUChart] FVG Zones - invalid midPrice calculation');
-      return;
-    }
-
-    const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
-
-    // Filter FVG zones to only show those within range
-    const nearbyFvgZones = validFvgZones.filter(z => {
-      const zoneMid = (z.high + z.low) / 2;
-      return Math.abs(zoneMid - midPrice) <= maxDistance;
-    });
-    if (DEBUG_LOGGING) console.log(`[KCUChart] FVG Zones - ${nearbyFvgZones.length} zones within range`);
-    if (nearbyFvgZones.length === 0) return;
-
-    // Get the last timestamp for extending boxes to the right
-    const lastTime = toChartTime(data[data.length - 1].time);
-    if (lastTime === null) {
-      if (DEBUG_LOGGING) console.warn('[KCUChart] FVG Zones - invalid lastTime');
-      return;
-    }
-    if (DEBUG_LOGGING) console.log('[KCUChart] FVG Zones - lastTime:', lastTime);
-
-    // Render each FVG as a filled area (box)
-    nearbyFvgZones.forEach((zone, index) => {
-      // Guard against chart being destroyed during iteration
+    // CRITICAL FIX: Use requestAnimationFrame to batch updates
+    const rafId = requestAnimationFrame(() => {
+      // Double-check we're still mounted after RAF delay
       if (!mountedRef.current || !chartRef.current) {
-        if (DEBUG_LOGGING) console.warn(`[KCUChart] FVG-${index} - chart destroyed mid-iteration!`);
+        if (DEBUG_LOGGING) console.log('[KCUChart] FVG Zones - unmounted during RAF');
         return;
       }
 
-      const isBullish = zone.direction === 'bullish';
-      const fillColor = isBullish
-        ? 'rgba(34, 197, 94, 0.25)'
-        : 'rgba(239, 68, 68, 0.25)';
-      const lineColor = isBullish
-        ? 'rgba(34, 197, 94, 0.6)'
-        : 'rgba(239, 68, 68, 0.6)';
-
-      const startTime = toChartTime(zone.startTime);
-      const endTime = zone.filled ? toChartTime(zone.endTime) : lastTime;
-
-      // Skip this zone if time values are invalid
-      if (startTime === null || endTime === null) {
-        if (DEBUG_LOGGING) console.warn(`[KCUChart] FVG-${index} - invalid time range`, { startTime, endTime, zoneStartTime: zone.startTime, zoneEndTime: zone.endTime });
-        return;
-      }
-
-      if (DEBUG_LOGGING) {
-        console.log(`[KCUChart] FVG-${index} time range:`, { startTime, endTime, high: zone.high, low: zone.low });
-      }
-
-      // Create data points for each series
-      const startNum = startTime as number;
-      const endNum = endTime as number;
-
-      const topData: LineData[] = [];
-      const bottomData: LineData[] = [];
-      const areaData: AreaData[] = [];
-
-      if (startNum === endNum) {
-        // Single point case
-        const time = Math.floor(startNum) as Time;
-
-        // Validate high/low one more time before adding
-        if (isValidPrice(zone.high)) {
-          topData.push({ time, value: zone.high });
-          areaData.push({ time, value: zone.high });
-        }
-        if (isValidPrice(zone.low)) {
-          bottomData.push({ time, value: zone.low });
-        }
-      } else {
-        // Generate multiple points with unique integer timestamps
-        const numPoints = 10;
-        const timeStep = (endNum - startNum) / numPoints;
-
-        // Skip if timeStep is invalid (would create NaN times)
-        if (!Number.isFinite(timeStep)) {
-          if (DEBUG_LOGGING) console.warn(`[KCUChart] FVG-${index} - invalid timeStep:`, timeStep);
-          return;
-        }
-
-        let lastAddedTime = -1;
-        for (let i = 0; i <= numPoints; i++) {
-          const rawTime = startNum + timeStep * i;
-          if (!Number.isFinite(rawTime)) continue;
-
-          // Round to integer seconds (lightweight-charts requirement)
-          const time = Math.floor(rawTime);
-
-          // Skip duplicate timestamps that may occur due to rounding
-          if (time === lastAddedTime) continue;
-          lastAddedTime = time;
-
-          const chartTime = time as Time;
-
-          // Validate prices before adding - critical!
-          if (isValidPrice(zone.high)) {
-            topData.push({ time: chartTime, value: zone.high });
-            areaData.push({ time: chartTime, value: zone.high });
-          }
-          if (isValidPrice(zone.low)) {
-            bottomData.push({ time: chartTime, value: zone.low });
-          }
-        }
-      }
-
-      // Only create series if we have valid points
-      if (topData.length === 0 && bottomData.length === 0) {
-        if (DEBUG_LOGGING) console.warn(`[KCUChart] FVG-${index} - no valid points, skipping`);
-        return;
-      }
-
-      if (DEBUG_LOGGING) {
-        console.log(`[KCUChart] FVG-${index} creating with ${topData.length} top points, ${bottomData.length} bottom points`);
-        if (topData.length > 0) console.log(`[KCUChart] FVG-${index} topData first:`, JSON.stringify(topData[0]));
-      }
-
-      try {
-        // Top boundary line
-        const topSeries = chartRef.current.addLineSeries({
-          color: lineColor,
-          lineWidth: 1,
-          lineStyle: LineStyle.Solid,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        });
-
-        // Bottom boundary line
-        const bottomSeries = chartRef.current.addLineSeries({
-          color: lineColor,
-          lineWidth: 1,
-          lineStyle: LineStyle.Solid,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        });
-
-        // Area fill between boundaries
-        const areaSeries = chartRef.current.addAreaSeries({
-          topColor: fillColor,
-          bottomColor: fillColor,
-          lineColor: 'transparent',
-          lineWidth: 1,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        });
-
-        safeSetData(topSeries, topData, `FVG-top-${index}`);
-        safeSetData(bottomSeries, bottomData, `FVG-bottom-${index}`);
-        safeSetData(areaSeries, areaData, `FVG-area-${index}`);
-
-        // Store refs for cleanup
-        fvgSeriesRef.current.set(`fvg-top-${index}`, topSeries as unknown as ISeriesApi<'Area'>);
-        fvgSeriesRef.current.set(`fvg-bottom-${index}`, bottomSeries as unknown as ISeriesApi<'Area'>);
-        fvgSeriesRef.current.set(`fvg-area-${index}`, areaSeries);
-
-        if (DEBUG_LOGGING) console.log(`[KCUChart] FVG-${index} - series created successfully`);
-      } catch (e) {
-        console.error(`[KCUChart] FVG-${index} - ERROR creating series:`, e);
-      }
-    });
-
-    if (DEBUG_LOGGING) console.log('[KCUChart] FVG Zones effect complete -', fvgSeriesRef.current.size, 'series created');
-
-    // Cleanup function
-    return () => {
-      if (DEBUG_LOGGING) console.log('[KCUChart] FVG Zones cleanup - removing', fvgSeriesRef.current.size, 'series');
-      fvgSeriesRef.current.forEach((series, key) => {
+      // Clear existing FVG series INSIDE RAF
+      fvgSeriesRef.current.forEach((series) => {
         try {
           chartRef.current?.removeSeries(series);
         } catch {
-          // Ignore cleanup errors
+          // Ignore removal errors
         }
       });
       fvgSeriesRef.current.clear();
+
+      // If no data or zones, we're done
+      if (data.length === 0 || fvgZones.length === 0) {
+        return;
+      }
+
+      // Filter valid FVG zones
+      const validFvgZones = fvgZones.filter(z =>
+        isValidPrice(z.high) && isValidPrice(z.low)
+      );
+      if (validFvgZones.length === 0) return;
+
+      // Calculate price range for filtering
+      const prices = data
+        .flatMap(c => [c.high, c.low])
+        .filter((p): p is number => isValidPrice(p));
+      if (prices.length === 0) return;
+
+      const minPrice = Math.min(...prices);
+      const maxPrice = Math.max(...prices);
+      const midPrice = (maxPrice + minPrice) / 2;
+      if (!Number.isFinite(midPrice)) return;
+
+      const priceRange = maxPrice - minPrice;
+      const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
+
+      const nearbyFvgZones = validFvgZones.filter(z => {
+        const zoneMid = (z.high + z.low) / 2;
+        return Math.abs(zoneMid - midPrice) <= maxDistance;
+      });
+      if (nearbyFvgZones.length === 0) return;
+
+      // Get last timestamp for extending boxes
+      const lastTime = toChartTime(data[data.length - 1].time);
+      if (lastTime === null) return;
+
+      // Render each FVG zone
+      nearbyFvgZones.forEach((zone, index) => {
+        if (!mountedRef.current || !chartRef.current) return;
+
+        const isBullish = zone.direction === 'bullish';
+        const fillColor = isBullish
+          ? 'rgba(34, 197, 94, 0.25)'
+          : 'rgba(239, 68, 68, 0.25)';
+        const lineColor = isBullish
+          ? 'rgba(34, 197, 94, 0.6)'
+          : 'rgba(239, 68, 68, 0.6)';
+
+        const startTime = toChartTime(zone.startTime);
+        const endTime = zone.filled ? toChartTime(zone.endTime) : lastTime;
+
+        if (startTime === null || endTime === null) return;
+
+        const startNum = startTime as number;
+        const endNum = endTime as number;
+
+        const topData: LineData[] = [];
+        const bottomData: LineData[] = [];
+        const areaData: AreaData[] = [];
+
+        if (startNum === endNum) {
+          const time = Math.floor(startNum) as Time;
+          if (isValidPrice(zone.high)) {
+            topData.push({ time, value: zone.high });
+            areaData.push({ time, value: zone.high });
+          }
+          if (isValidPrice(zone.low)) {
+            bottomData.push({ time, value: zone.low });
+          }
+        } else {
+          const numPoints = 10;
+          const timeStep = (endNum - startNum) / numPoints;
+          if (!Number.isFinite(timeStep)) return;
+
+          let lastAddedTime = -1;
+          for (let i = 0; i <= numPoints; i++) {
+            const rawTime = startNum + timeStep * i;
+            if (!Number.isFinite(rawTime)) continue;
+
+            const time = Math.floor(rawTime);
+            if (time === lastAddedTime) continue;
+            lastAddedTime = time;
+
+            const chartTime = time as Time;
+            if (isValidPrice(zone.high)) {
+              topData.push({ time: chartTime, value: zone.high });
+              areaData.push({ time: chartTime, value: zone.high });
+            }
+            if (isValidPrice(zone.low)) {
+              bottomData.push({ time: chartTime, value: zone.low });
+            }
+          }
+        }
+
+        if (topData.length === 0 && bottomData.length === 0) return;
+
+        try {
+          const topSeries = chartRef.current.addLineSeries({
+            color: lineColor,
+            lineWidth: 1,
+            lineStyle: LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+          });
+
+          const bottomSeries = chartRef.current.addLineSeries({
+            color: lineColor,
+            lineWidth: 1,
+            lineStyle: LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+          });
+
+          const areaSeries = chartRef.current.addAreaSeries({
+            topColor: fillColor,
+            bottomColor: fillColor,
+            lineColor: 'transparent',
+            lineWidth: 1,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+          });
+
+          safeSetData(topSeries, topData, `FVG-top-${index}`);
+          safeSetData(bottomSeries, bottomData, `FVG-bottom-${index}`);
+          safeSetData(areaSeries, areaData, `FVG-area-${index}`);
+
+          fvgSeriesRef.current.set(`fvg-top-${index}`, topSeries as unknown as ISeriesApi<'Area'>);
+          fvgSeriesRef.current.set(`fvg-bottom-${index}`, bottomSeries as unknown as ISeriesApi<'Area'>);
+          fvgSeriesRef.current.set(`fvg-area-${index}`, areaSeries);
+        } catch (e) {
+          console.error(`[KCUChart] FVG-${index} error:`, e);
+        }
+      });
+
+      if (DEBUG_LOGGING) console.log('[KCUChart] FVG Zones complete -', fvgSeriesRef.current.size, 'series');
+    });
+
+    // Cleanup: cancel RAF if component unmounts during delay
+    return () => {
+      cancelAnimationFrame(rafId);
     };
   }, [fvgZones, data, isInitialized]);
 
