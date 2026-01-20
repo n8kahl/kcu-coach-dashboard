@@ -279,6 +279,47 @@ function toChartTime(time: number | string | null | undefined): Time | null {
 const MIN_CHART_HEIGHT = 400;
 // Enable visual debugging (set to true to show red border)
 const DEBUG_CHART = false;
+// Enable detailed console logging for debugging "Value is null" errors
+const DEBUG_LOGGING = true;
+
+/**
+ * Safe setData wrapper that logs data before setting and catches errors
+ */
+function safeSetData<T extends { time: Time; value?: number }>(
+  series: ISeriesApi<'Line'> | ISeriesApi<'Area'> | ISeriesApi<'Histogram'> | ISeriesApi<'Candlestick'>,
+  data: T[],
+  seriesName: string
+): boolean {
+  if (DEBUG_LOGGING) {
+    console.log(`[KCUChart] ${seriesName} setData called with ${data.length} points`);
+    if (data.length > 0) {
+      console.log(`[KCUChart] ${seriesName} first point:`, JSON.stringify(data[0]));
+      console.log(`[KCUChart] ${seriesName} last point:`, JSON.stringify(data[data.length - 1]));
+    }
+    // Check for invalid data
+    const invalidPoints = data.filter((d, i) => {
+      const hasInvalidTime = d.time === null || d.time === undefined || !isFinite(d.time as number);
+      const hasInvalidValue = 'value' in d && (d.value === null || d.value === undefined || !isFinite(d.value));
+      if (hasInvalidTime || hasInvalidValue) {
+        console.error(`[KCUChart] ${seriesName} INVALID point at index ${i}:`, JSON.stringify(d));
+        return true;
+      }
+      return false;
+    });
+    if (invalidPoints.length > 0) {
+      console.error(`[KCUChart] ${seriesName} has ${invalidPoints.length} invalid points!`);
+    }
+  }
+
+  try {
+    series.setData(data as Parameters<typeof series.setData>[0]);
+    return true;
+  } catch (error) {
+    console.error(`[KCUChart] ${seriesName} setData FAILED:`, error);
+    console.error(`[KCUChart] ${seriesName} data that caused error:`, JSON.stringify(data.slice(0, 5)));
+    return false;
+  }
+}
 
 export function KCUChart({
   mode,
@@ -296,6 +337,28 @@ export function KCUChart({
   replayIndex,
   className = '',
 }: KCUChartProps) {
+  // Log incoming props for debugging
+  if (DEBUG_LOGGING) {
+    console.log(`[KCUChart] Render - symbol=${symbol}, mode=${mode}, data.length=${data?.length || 0}, levels=${levels.length}, gammaLevels=${gammaLevels.length}, fvgZones=${fvgZones.length}`);
+    if (data && data.length > 0) {
+      const firstCandle = data[0];
+      const lastCandle = data[data.length - 1];
+      console.log(`[KCUChart] Data range - first time: ${firstCandle.time}, last time: ${lastCandle.time}`);
+      // Check for any invalid candles in the data
+      const invalidCandles = data.filter((c, i) => {
+        const hasIssue = c.time == null || c.open == null || c.high == null || c.low == null || c.close == null ||
+          !isFinite(c.time as number) || !isFinite(c.open) || !isFinite(c.high) || !isFinite(c.low) || !isFinite(c.close);
+        if (hasIssue) {
+          console.error(`[KCUChart] INVALID CANDLE at index ${i}:`, JSON.stringify(c));
+        }
+        return hasIssue;
+      });
+      if (invalidCandles.length > 0) {
+        console.error(`[KCUChart] Found ${invalidCandles.length} invalid candles in incoming data!`);
+      }
+    }
+  }
+
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -578,7 +641,18 @@ export function KCUChart({
       .filter((c): c is CandlestickData => c !== null);
 
     // Update candle series
-    candleSeriesRef.current.setData(candleData);
+    if (DEBUG_LOGGING) {
+      console.log(`[KCUChart] Candlestick setData called with ${candleData.length} candles`);
+      if (candleData.length > 0) {
+        console.log(`[KCUChart] Candlestick first:`, JSON.stringify(candleData[0]));
+        console.log(`[KCUChart] Candlestick last:`, JSON.stringify(candleData[candleData.length - 1]));
+      }
+    }
+    try {
+      candleSeriesRef.current.setData(candleData);
+    } catch (error) {
+      console.error('[KCUChart] Candlestick setData FAILED:', error);
+    }
 
     // Update volume series
     if (volumeSeriesRef.current && showVolume) {
@@ -593,7 +667,7 @@ export function KCUChart({
           };
         })
         .filter((v): v is NonNullable<typeof v> => v !== null);
-      volumeSeriesRef.current.setData(volumeData);
+      safeSetData(volumeSeriesRef.current, volumeData, 'Volume');
     }
 
     // Update indicators
@@ -610,7 +684,7 @@ export function KCUChart({
             return { time, value: ema8Values[i] };
           })
           .filter((d): d is LineData => d !== null && d.value != null && isFinite(d.value));
-        ema8SeriesRef.current.setData(ema8Data);
+        safeSetData(ema8SeriesRef.current, ema8Data, 'EMA8');
       }
 
       // EMA 21
@@ -623,7 +697,7 @@ export function KCUChart({
             return { time, value: ema21Values[i] };
           })
           .filter((d): d is LineData => d !== null && d.value != null && isFinite(d.value));
-        ema21SeriesRef.current.setData(ema21Data);
+        safeSetData(ema21SeriesRef.current, ema21Data, 'EMA21');
       }
 
       // SMA 200
@@ -636,7 +710,7 @@ export function KCUChart({
             return { time, value: sma200Values[i] };
           })
           .filter((d): d is LineData => d !== null && d.value != null && isFinite(d.value));
-        sma200SeriesRef.current.setData(sma200Data);
+        safeSetData(sma200SeriesRef.current, sma200Data, 'SMA200');
       }
 
       // VWAP
@@ -649,7 +723,7 @@ export function KCUChart({
             return { time, value: vwapValues[i] };
           })
           .filter((d): d is LineData => d !== null && d.value != null && isFinite(d.value));
-        vwapSeriesRef.current.setData(vwapData);
+        safeSetData(vwapSeriesRef.current, vwapData, 'VWAP');
       }
 
       // Ripster Cloud (fill between EMA8 and EMA21)
@@ -687,7 +761,7 @@ export function KCUChart({
           topColor: isBullish ? CHART_COLORS.cloudBullish : CHART_COLORS.cloudBearish,
           lineColor: isBullish ? CHART_COLORS.ema8 : CHART_COLORS.ema21,
         });
-        cloudSeriesRef.current.setData(cloudData);
+        safeSetData(cloudSeriesRef.current, cloudData, 'RipsterCloud');
       }
     }
 
@@ -776,7 +850,11 @@ export function KCUChart({
             { time: startTime, value: level.price },
             { time: endTime, value: level.price },
           ];
-      series.setData(lineData);
+
+      if (DEBUG_LOGGING) {
+        console.log(`[KCUChart] Level-${index} (${level.label}) creating with data:`, JSON.stringify(lineData));
+      }
+      safeSetData(series, lineData, `Level-${index}-${level.label}`);
 
       levelSeriesRef.current.set(`level-${index}`, series);
     });
@@ -889,7 +967,11 @@ export function KCUChart({
             { time: startTime, value: gamma.price },
             { time: endTime, value: gamma.price },
           ];
-      series.setData(lineData);
+
+      if (DEBUG_LOGGING) {
+        console.log(`[KCUChart] Gamma-${gamma.type}-${index} creating with data:`, JSON.stringify(lineData));
+      }
+      safeSetData(series, lineData, `Gamma-${gamma.type}-${index}`);
 
       gammaSeriesRef.current.set(`gamma-${gamma.type}-${index}`, series);
     });
@@ -1094,13 +1176,21 @@ export function KCUChart({
       }
 
       // Only set data if we have valid points
-      if (topData.length === 0) return;
+      if (topData.length === 0) {
+        if (DEBUG_LOGGING) {
+          console.warn(`[KCUChart] FVG-${index} skipped - no valid points`);
+        }
+        return;
+      }
 
-      topSeries.setData(topData);
-      bottomSeries.setData(bottomData);
+      if (DEBUG_LOGGING) {
+        console.log(`[KCUChart] FVG-${index} creating with ${topData.length} points`);
+        console.log(`[KCUChart] FVG-${index} topData first:`, JSON.stringify(topData[0]));
+      }
 
-      // Set area data
-      areaSeries.setData(areaData);
+      safeSetData(topSeries, topData, `FVG-top-${index}`);
+      safeSetData(bottomSeries, bottomData, `FVG-bottom-${index}`);
+      safeSetData(areaSeries, areaData, `FVG-area-${index}`);
 
       // Store refs for cleanup
       fvgSeriesRef.current.set(`fvg-top-${index}`, topSeries as unknown as ISeriesApi<'Area'>);
