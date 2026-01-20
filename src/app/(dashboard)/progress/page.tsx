@@ -604,13 +604,23 @@ export default function ProgressPage() {
                   <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">
                     No Modules Found
                   </h3>
-                  <p className="text-sm text-[var(--text-tertiary)] mb-4">
-                    Start your learning journey by exploring the curriculum.
+                  <p className="text-sm text-[var(--text-tertiary)] mb-6 max-w-sm mx-auto">
+                    Your curriculum progress data may still be syncing. Try refreshing or explore the course catalog.
                   </p>
-                  <Button variant="primary" onClick={handleStudyMaterials}>
-                    <BookOpen className="w-4 h-4 mr-2" />
-                    Browse Curriculum
-                  </Button>
+                  <div className="flex items-center justify-center gap-3">
+                    <Button
+                      variant="secondary"
+                      onClick={handleRefresh}
+                      disabled={isLoading}
+                    >
+                      <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                      Sync Status
+                    </Button>
+                    <Button variant="primary" onClick={handleStudyMaterials}>
+                      <BookOpen className="w-4 h-4 mr-2" />
+                      Browse Curriculum
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             )}
