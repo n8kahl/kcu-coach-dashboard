@@ -632,7 +632,7 @@ export const KCUChart = memo(function KCUChart({
     // Patience candle markers
     if (showPatienceCandles && candleSeriesRef.current) {
       const indices = detectInsideBars(validData);
-      const markers: SeriesMarker<Time>[] = indices
+      const markers = indices
         .map((i) => {
           const t = toChartTime(validData[i].time);
           if (!t) return null;
