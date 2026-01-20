@@ -533,9 +533,18 @@ export function KCUChart({
     if (!isInitialized || !candleSeriesRef.current) return;
 
     // Determine visible data based on mode and replay index
-    const visibleData = mode === 'replay' && replayIndex !== undefined
+    const rawData = mode === 'replay' && replayIndex !== undefined
       ? data.slice(0, replayIndex + 1)
       : data;
+
+    // Filter out candles with invalid OHLC values to prevent chart errors
+    const visibleData = rawData.filter((c) =>
+      c.open != null && !isNaN(c.open) &&
+      c.high != null && !isNaN(c.high) &&
+      c.low != null && !isNaN(c.low) &&
+      c.close != null && !isNaN(c.close) &&
+      c.time != null
+    );
 
     if (visibleData.length === 0) return;
 
@@ -604,10 +613,12 @@ export function KCUChart({
       // VWAP
       if (vwapSeriesRef.current) {
         const vwapValues = calculateVWAP(visibleData);
-        const vwapData: LineData[] = visibleData.map((c, i) => ({
-          time: toChartTime(c.time),
-          value: vwapValues[i],
-        }));
+        const vwapData: LineData[] = visibleData
+          .map((c, i) => ({
+            time: toChartTime(c.time),
+            value: vwapValues[i],
+          }))
+          .filter((d) => d.value != null && !isNaN(d.value));
         vwapSeriesRef.current.setData(vwapData);
       }
 
@@ -684,13 +695,19 @@ export function KCUChart({
     // Calculate current price range to filter out far-away levels
     let nearbyLevels = validLevels;
     if (data.length > 0) {
-      const prices = data.map(c => [c.high, c.low]).flat();
-      const minPrice = Math.min(...prices);
-      const maxPrice = Math.max(...prices);
-      const priceRange = maxPrice - minPrice;
-      const midPrice = (maxPrice + minPrice) / 2;
-      const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
-      nearbyLevels = validLevels.filter(l => Math.abs(l.price - midPrice) <= maxDistance);
+      const prices = data
+        .flatMap(c => [c.high, c.low])
+        .filter((p): p is number => p != null && !isNaN(p));
+      if (prices.length > 0) {
+        const minPrice = Math.min(...prices);
+        const maxPrice = Math.max(...prices);
+        const priceRange = maxPrice - minPrice;
+        const midPrice = (maxPrice + minPrice) / 2;
+        if (!isNaN(midPrice)) {
+          const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
+          nearbyLevels = validLevels.filter(l => Math.abs(l.price - midPrice) <= maxDistance);
+        }
+      }
     }
 
     nearbyLevels.forEach((level, index) => {
@@ -739,12 +756,19 @@ export function KCUChart({
     const validGammaLevels = gammaLevels.filter(g => g.price != null && !isNaN(g.price) && g.price > 0);
     if (validGammaLevels.length === 0 || data.length === 0) return;
 
-    // Calculate current price range from candle data
-    const prices = data.map(c => [c.high, c.low]).flat();
+    // Calculate current price range from candle data (filter out null/NaN values)
+    const prices = data
+      .flatMap(c => [c.high, c.low])
+      .filter((p): p is number => p != null && !isNaN(p));
+    if (prices.length === 0) return;
+
     const minPrice = Math.min(...prices);
     const maxPrice = Math.max(...prices);
     const priceRange = maxPrice - minPrice;
     const midPrice = (maxPrice + minPrice) / 2;
+
+    // Guard against NaN calculations
+    if (isNaN(minPrice) || isNaN(maxPrice) || isNaN(midPrice)) return;
 
     // Filter gamma levels to only show those within 15% of the current price range
     // This prevents far-away levels from distorting the chart scale
@@ -894,11 +918,19 @@ export function KCUChart({
     if (validFvgZones.length === 0 || data.length === 0) return;
 
     // Calculate current price range to filter out far-away FVG zones
-    const prices = data.map(c => [c.high, c.low]).flat();
+    const prices = data
+      .flatMap(c => [c.high, c.low])
+      .filter((p): p is number => p != null && !isNaN(p));
+    if (prices.length === 0) return;
+
     const minPrice = Math.min(...prices);
     const maxPrice = Math.max(...prices);
     const priceRange = maxPrice - minPrice;
     const midPrice = (maxPrice + minPrice) / 2;
+
+    // Guard against NaN calculations
+    if (isNaN(midPrice)) return;
+
     const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
 
     // Filter FVG zones to only show those within range
