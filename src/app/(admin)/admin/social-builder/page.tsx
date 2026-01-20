@@ -17,6 +17,7 @@ import {
   Clock,
   GraduationCap,
   Wand2,
+  Radio,
 } from 'lucide-react';
 
 // UI Components
@@ -42,6 +43,7 @@ import {
   TrendingTopics,
   LearningMilestones,
   BrainDumpInput,
+  MarketPulse,
 } from '@/components/social';
 
 import type { ContentSuggestion, SocialPlatform, TrendingTopic, InfluencerProfileInput, ContentCategory } from '@/types/social';
@@ -458,6 +460,10 @@ function SocialBuilderContent() {
             <Wand2 className="w-4 h-4 mr-2" />
             Brain Dump
           </TabsTrigger>
+          <TabsTrigger value="market-pulse" variant="pills">
+            <Radio className="w-4 h-4 mr-2" />
+            Market Pulse
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -792,6 +798,11 @@ function SocialBuilderContent() {
               fetchDashboardData();
             }}
           />
+        </TabsContent>
+
+        {/* Market Pulse Tab */}
+        <TabsContent value="market-pulse">
+          <MarketPulse showToast={showToast} />
         </TabsContent>
       </Tabs>
 

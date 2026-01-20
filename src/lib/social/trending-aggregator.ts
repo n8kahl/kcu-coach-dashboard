@@ -3,15 +3,45 @@
 // ============================================
 // Aggregates trending topics from X/Twitter, TikTok,
 // news sources, and economic calendars for content generation
+// Includes "Market Pulse" - Insta-Reaction generator using
+// Somesh's voice profile from @kaycapitals
 
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import type { TrendingTopic, TrendingCategory, ContentAngle } from '@/types/social';
+import { getHybridVoiceProfile, HybridVoiceProfile } from './tone-analyzer';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+const anthropic = new Anthropic();
+
+// ============================================
+// Somesh's Trigger Topics (Priority News Filters)
+// ============================================
+
+const TRIGGER_TOPICS = [
+  'Trump',
+  'Powell',
+  'SPY',
+  '0DTE',
+  'Gamma Levels',
+  'FOMC',
+  'Fed',
+  'Interest Rate',
+  'CPI',
+  'Jobs Report',
+  'VIX',
+  'Market Crash',
+  'Rally',
+  'Gap Up',
+  'Gap Down',
+  'Tariff',
+  'Recession',
+  'Inflation',
+];
 
 // ============================================
 // Configuration
@@ -763,4 +793,525 @@ function generateHashtagsFromText(text: string): string[] {
   hashtags.push('#trading', '#stockmarket');
 
   return Array.from(new Set(hashtags)).slice(0, 8);
+}
+
+// ============================================
+// Market Pulse - Real-Time News Reaction Engine
+// ============================================
+
+export interface NewsItem {
+  id: string;
+  title: string;
+  description?: string;
+  source: string;
+  sourceUrl?: string;
+  publishedAt: string;
+  category: TrendingCategory;
+  triggerTopics: string[];
+  urgency: 'breaking' | 'high' | 'medium' | 'low';
+  sentiment?: 'bullish' | 'bearish' | 'neutral';
+}
+
+export interface ReactionContent {
+  id: string;
+  newsItem: NewsItem;
+  instagramCaption: string;
+  twitterPost: string;
+  hook: string;
+  emojis: string[];
+  hashtags: string[];
+  cta: string;
+  tradingInsight?: string;
+  generatedAt: string;
+}
+
+/**
+ * Fetch real-time market news filtered by Somesh's trigger topics
+ */
+export async function fetchTriggerNews(): Promise<NewsItem[]> {
+  const newsApiKey = process.env.NEWS_API_KEY;
+  const twitterBearerToken = process.env.TWITTER_BEARER_TOKEN || process.env.X_BEARER_TOKEN;
+
+  const newsItems: NewsItem[] = [];
+
+  // Fetch from News API
+  if (newsApiKey) {
+    try {
+      // Build query with trigger topics
+      const triggerQuery = TRIGGER_TOPICS.slice(0, 5).join(' OR ');
+
+      const response = await fetch(
+        `https://newsapi.org/v2/everything?q=${encodeURIComponent(triggerQuery)}&language=en&sortBy=publishedAt&pageSize=20&apiKey=${newsApiKey}`
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const articles = data.articles || [];
+
+        for (const article of articles) {
+          const matchedTopics = TRIGGER_TOPICS.filter(topic =>
+            (article.title?.toLowerCase().includes(topic.toLowerCase()) ||
+             article.description?.toLowerCase().includes(topic.toLowerCase()))
+          );
+
+          if (matchedTopics.length > 0) {
+            const urgency = determineUrgency(article.title, article.publishedAt);
+            const sentiment = determineSentiment(article.title + ' ' + (article.description || ''));
+
+            newsItems.push({
+              id: `news-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              title: article.title,
+              description: article.description,
+              source: article.source?.name || 'News',
+              sourceUrl: article.url,
+              publishedAt: article.publishedAt,
+              category: categorizeNews(article.title + ' ' + (article.description || '')),
+              triggerTopics: matchedTopics,
+              urgency,
+              sentiment,
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[MarketPulse] News API error:', error);
+    }
+  }
+
+  // Fetch from Twitter/X for real-time pulse
+  if (twitterBearerToken) {
+    try {
+      for (const topic of TRIGGER_TOPICS.slice(0, 3)) {
+        const response = await fetch(
+          `https://api.twitter.com/2/tweets/search/recent?query=${encodeURIComponent(topic)}%20(stocks%20OR%20market%20OR%20trading)%20-is:retweet%20lang:en&max_results=10&tweet.fields=created_at,public_metrics`,
+          {
+            headers: { 'Authorization': `Bearer ${twitterBearerToken}` },
+          }
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          const tweets = data.data || [];
+
+          // Find high-engagement tweets that might indicate breaking news
+          const viralTweets = tweets.filter((t: any) =>
+            t.public_metrics?.like_count > 500 || t.public_metrics?.retweet_count > 100
+          );
+
+          for (const tweet of viralTweets.slice(0, 2)) {
+            newsItems.push({
+              id: `twitter-${tweet.id}`,
+              title: tweet.text.substring(0, 100) + (tweet.text.length > 100 ? '...' : ''),
+              description: tweet.text,
+              source: 'Twitter/X',
+              sourceUrl: `https://twitter.com/i/status/${tweet.id}`,
+              publishedAt: tweet.created_at,
+              category: 'news',
+              triggerTopics: [topic],
+              urgency: 'high',
+              sentiment: determineSentiment(tweet.text),
+            });
+          }
+        }
+
+        // Rate limit
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    } catch (error) {
+      console.error('[MarketPulse] Twitter API error:', error);
+    }
+  }
+
+  // If no API keys, generate mock breaking news for demo
+  if (newsItems.length === 0) {
+    newsItems.push(...getMockBreakingNews());
+  }
+
+  // Sort by urgency and recency
+  newsItems.sort((a, b) => {
+    const urgencyOrder = { breaking: 0, high: 1, medium: 2, low: 3 };
+    if (urgencyOrder[a.urgency] !== urgencyOrder[b.urgency]) {
+      return urgencyOrder[a.urgency] - urgencyOrder[b.urgency];
+    }
+    return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+  });
+
+  return newsItems.slice(0, 10);
+}
+
+/**
+ * Generate Instagram-style reaction content using Somesh's voice profile
+ */
+export async function generateReactionContent(newsItem: NewsItem): Promise<ReactionContent> {
+  // Get the hybrid voice profile
+  let voiceProfile = await getHybridVoiceProfile();
+
+  // Use defaults if no profile exists
+  if (!voiceProfile) {
+    voiceProfile = getDefaultVoiceProfile();
+  }
+
+  // Build the reaction prompt
+  const prompt = buildReactionPrompt(newsItem, voiceProfile);
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1500,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const content = response.content[0];
+    if (content.type !== 'text') {
+      throw new Error('Unexpected response type');
+    }
+
+    // Parse the JSON response
+    let cleanedText = content.text.trim();
+    if (cleanedText.startsWith('```json')) cleanedText = cleanedText.slice(7);
+    if (cleanedText.startsWith('```')) cleanedText = cleanedText.slice(3);
+    if (cleanedText.endsWith('```')) cleanedText = cleanedText.slice(0, -3);
+
+    const result = JSON.parse(cleanedText.trim());
+
+    return {
+      id: `reaction-${Date.now()}`,
+      newsItem,
+      instagramCaption: result.instagramCaption || '',
+      twitterPost: result.twitterPost || '',
+      hook: result.hook || '',
+      emojis: result.emojis || [],
+      hashtags: result.hashtags || [],
+      cta: result.cta || '',
+      tradingInsight: result.tradingInsight || '',
+      generatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('[MarketPulse] Reaction generation error:', error);
+    return getDefaultReaction(newsItem, voiceProfile);
+  }
+}
+
+/**
+ * Build the reaction prompt using voice profile data
+ */
+function buildReactionPrompt(newsItem: NewsItem, profile: HybridVoiceProfile): string {
+  const emojiStyle = profile.combinedInsights.platformSpecificAdjustments.instagram.emojiStyle.join(' ');
+  const signaturePhrases = profile.combinedInsights.signaturePhrases.slice(0, 5).join('", "');
+  const hookPatterns = profile.instagramLayer.captionStructures.hookPatterns.slice(0, 3).join('", "');
+  const ctaPatterns = profile.instagramLayer.captionStructures.ctaPatterns.slice(0, 3).join('", "');
+  const hashtagClusters = profile.instagramLayer.hashtagClusters.flatMap(c => c.hashtags).slice(0, 10).join(', ');
+
+  return `You are ghostwriting a social media reaction post for Somesh from KCU Trading (@kaycapitals on Instagram).
+
+NEWS TO REACT TO:
+Title: ${newsItem.title}
+${newsItem.description ? `Description: ${newsItem.description}` : ''}
+Source: ${newsItem.source}
+Trigger Topics: ${newsItem.triggerTopics.join(', ')}
+Urgency: ${newsItem.urgency}
+Sentiment: ${newsItem.sentiment || 'neutral'}
+
+SOMESH'S VOICE PROFILE:
+- Signature phrases: "${signaturePhrases}"
+- Hook patterns: "${hookPatterns}"
+- CTA patterns: "${ctaPatterns}"
+- Emoji style: ${emojiStyle}
+- Key hashtags: ${hashtagClusters}
+- Tone: Educational but casual, uses "fam" and "y'all", confident but humble
+- Philosophy: LTP Framework (Level, Trend, Patience), price action is king
+
+CONTENT REQUIREMENTS:
+1. Start with a VISUAL HOOK using urgency (e.g., "⚠️ MARKET ALERT", "🚨 BREAKING", "DON'T PANIC FAM")
+2. React to the news in Somesh's authentic voice
+3. Provide a TRADING INSIGHT (how this affects SPY, options, day traders)
+4. End with an engaging CTA in his style
+5. Use his signature emoji patterns naturally
+6. Keep Instagram caption under 2200 characters
+7. Twitter post should be under 280 characters
+
+Generate a reaction post that sounds EXACTLY like what Somesh would post 5 minutes after this news breaks.
+
+Return JSON:
+{
+  "hook": "The opening visual hook line",
+  "instagramCaption": "Full Instagram caption with line breaks, emojis, and hashtags",
+  "twitterPost": "Concise Twitter version under 280 chars",
+  "emojis": ["🚨", "📈", "etc"],
+  "hashtags": ["#daytrading", "#SPY", "etc"],
+  "cta": "The call to action used",
+  "tradingInsight": "Brief explanation of market impact"
+}
+
+Return ONLY valid JSON.`;
+}
+
+/**
+ * Default voice profile when database is empty
+ */
+function getDefaultVoiceProfile(): HybridVoiceProfile {
+  return {
+    id: 'default',
+    handle: 'kaycapitals',
+    displayName: 'Somesh (KCU Trading)',
+    instagramLayer: {
+      highFrequencyEmojis: [
+        { emoji: '🎯', count: 10, percentage: 15 },
+        { emoji: '📈', count: 8, percentage: 12 },
+        { emoji: '🔥', count: 7, percentage: 10 },
+        { emoji: '💰', count: 6, percentage: 9 },
+        { emoji: '⚠️', count: 5, percentage: 8 },
+      ],
+      hashtagClusters: [
+        { cluster: 'Trading', hashtags: ['#daytrading', '#stockmarket', '#trading'], frequency: 80 },
+        { cluster: 'Options', hashtags: ['#optionstrading', '#SPY', '#0DTE'], frequency: 70 },
+        { cluster: 'Education', hashtags: ['#tradinglife', '#learntorade', '#tradertips'], frequency: 60 },
+      ],
+      captionStructures: {
+        avgLength: 300,
+        hookPatterns: [
+          '⚠️ MARKET ALERT',
+          '🚨 BREAKING',
+          'LISTEN FAM',
+          "DON'T PANIC",
+          'THE MARKET IS SPEAKING',
+        ],
+        ctaPatterns: [
+          'Drop a 🔥 if you agree',
+          'Save this for later',
+          'Tag a trader who needs this',
+          'Comment your take below',
+        ],
+        lineBreakStyle: 'double',
+      },
+      topPerformingCaptions: [],
+      signaturePhrases: ['Listen fam', 'Trust the process', 'LTP', 'The holy grail', 'Patience pays'],
+      postingStyle: {
+        avgHashtagsPerPost: 8,
+        emojiDensity: 2.5,
+        questionFrequency: 30,
+        mentionFrequency: 5,
+      },
+    },
+    youtubeLayer: {
+      educationalTone: {
+        teachingPhrases: ['Let me break this down', "Here's the key"],
+        explanationPatterns: ['The reason for this is', 'What this means is'],
+        conceptIntroductions: ['So what does this mean for us?'],
+      },
+      deepDivePhrases: ["Let's really dig into this"],
+      vocabularyProfile: {
+        technicalTerms: ['support', 'resistance', 'VWAP', 'price action', 'gamma'],
+        casualExpressions: ['Fam', "Y'all", 'Sweet', 'Beautiful'],
+        tradingJargon: ['LTP', 'patience candle', 'key level', '0DTE'],
+        motivationalPhrases: ['Trust the process', 'Patience pays'],
+      },
+      narrativeStyle: {
+        storyOpenings: ['Here is what just happened'],
+        transitionPhrases: ["Now here's where it gets interesting"],
+        conclusionPatterns: ['And that is the beauty of patience'],
+      },
+      speakingCadence: {
+        avgSentenceLength: 12,
+        repetitionPatterns: [],
+        emphasisPhrases: ['This is CRUCIAL', 'Write this down'],
+      },
+    },
+    combinedInsights: {
+      coreVocabulary: ['LTP', 'patience', 'level', 'trend', 'fam'],
+      signaturePhrases: ['Listen fam', 'Trust the process', 'The holy grail', 'Patience pays'],
+      brandKeywords: ['LTP Framework', 'price action', 'patience candle', 'KCU'],
+      avoidedLanguage: ['get rich quick', 'guaranteed profits', 'easy money'],
+      toneAttributes: {
+        confident: 85,
+        humble: 65,
+        educational: 90,
+        motivational: 80,
+        casual: 75,
+      },
+      platformSpecificAdjustments: {
+        instagram: {
+          emojiStyle: ['🎯', '📈', '💰', '🔥', '⚠️', '🚨'],
+          hashtagStrategy: ['Mix popular + niche hashtags'],
+          captionLength: 'medium',
+        },
+        youtube: {
+          openingStyle: 'Hook with problem/question',
+          closingCTA: 'Like, subscribe, join the fam',
+          segmentTransitions: ["Now let's look at"],
+        },
+        twitter: {
+          threadStyle: true,
+          hashtagLimit: 3,
+          mentionStyle: 'Minimal',
+        },
+      },
+    },
+    lastUpdated: new Date().toISOString(),
+    dataSourcesUsed: { instagramPosts: 0, youtubeTranscripts: 0 },
+  };
+}
+
+/**
+ * Default reaction when AI generation fails
+ */
+function getDefaultReaction(newsItem: NewsItem, profile: HybridVoiceProfile): ReactionContent {
+  const urgencyEmoji = newsItem.urgency === 'breaking' ? '🚨' : newsItem.urgency === 'high' ? '⚠️' : '📊';
+  const sentimentEmoji = newsItem.sentiment === 'bullish' ? '📈' : newsItem.sentiment === 'bearish' ? '📉' : '👀';
+
+  const hook = `${urgencyEmoji} MARKET UPDATE`;
+  const caption = `${hook}
+
+${newsItem.title}
+
+Fam, here's what this means for us traders:
+
+${newsItem.sentiment === 'bullish' ? 'This could set up some nice long opportunities. But remember - wait for confirmation!' :
+  newsItem.sentiment === 'bearish' ? 'Stay cautious here. This might create some volatility. Protect your capital!' :
+  'The market is processing this news. Watch for the reaction at key levels!'}
+
+Level ✅ Trend ✅ Patience ✅
+
+Drop a ${sentimentEmoji} if you're watching this!
+
+#daytrading #stockmarket #${newsItem.triggerTopics[0]?.replace(/\s+/g, '').toLowerCase() || 'trading'}`;
+
+  return {
+    id: `reaction-default-${Date.now()}`,
+    newsItem,
+    instagramCaption: caption,
+    twitterPost: `${urgencyEmoji} ${newsItem.title.substring(0, 200)}... What's your take? #trading #stockmarket`,
+    hook,
+    emojis: [urgencyEmoji, sentimentEmoji, '✅', '🎯'],
+    hashtags: ['#daytrading', '#stockmarket', '#trading'],
+    cta: `Drop a ${sentimentEmoji} if you're watching this!`,
+    tradingInsight: 'Watch for price action at key support/resistance levels.',
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Determine news urgency based on title and recency
+ */
+function determineUrgency(title: string, publishedAt: string): 'breaking' | 'high' | 'medium' | 'low' {
+  const titleLower = title.toLowerCase();
+  const minutesAgo = (Date.now() - new Date(publishedAt).getTime()) / 60000;
+
+  // Breaking keywords
+  if (titleLower.includes('breaking') || titleLower.includes('just in') || titleLower.includes('alert')) {
+    return 'breaking';
+  }
+
+  // High urgency for recent Fed/economic news
+  if (minutesAgo < 30 && (titleLower.includes('fed') || titleLower.includes('powell') || titleLower.includes('rate'))) {
+    return 'breaking';
+  }
+
+  if (minutesAgo < 60) {
+    return 'high';
+  }
+
+  if (minutesAgo < 180) {
+    return 'medium';
+  }
+
+  return 'low';
+}
+
+/**
+ * Determine sentiment from text
+ */
+function determineSentiment(text: string): 'bullish' | 'bearish' | 'neutral' {
+  const lower = text.toLowerCase();
+
+  const bullishWords = ['rally', 'surge', 'jump', 'soar', 'gain', 'rise', 'bull', 'optimistic', 'up', 'high', 'record', 'strong'];
+  const bearishWords = ['crash', 'plunge', 'drop', 'fall', 'sink', 'decline', 'bear', 'fear', 'down', 'low', 'weak', 'sell-off'];
+
+  const bullishScore = bullishWords.filter(w => lower.includes(w)).length;
+  const bearishScore = bearishWords.filter(w => lower.includes(w)).length;
+
+  if (bullishScore > bearishScore + 1) return 'bullish';
+  if (bearishScore > bullishScore + 1) return 'bearish';
+  return 'neutral';
+}
+
+/**
+ * Mock breaking news for demo/development
+ */
+function getMockBreakingNews(): NewsItem[] {
+  const now = new Date();
+
+  return [
+    {
+      id: 'mock-1',
+      title: 'Fed Chair Powell signals potential rate pause in upcoming meeting',
+      description: 'Federal Reserve Chair Jerome Powell hinted that the central bank may hold rates steady as inflation data shows signs of cooling.',
+      source: 'Financial Times',
+      publishedAt: new Date(now.getTime() - 15 * 60000).toISOString(),
+      category: 'economic_data',
+      triggerTopics: ['Powell', 'Fed', 'Interest Rate'],
+      urgency: 'breaking',
+      sentiment: 'bullish',
+    },
+    {
+      id: 'mock-2',
+      title: 'SPY breaks key resistance level amid strong volume',
+      description: 'S&P 500 ETF surpasses $500 mark for the first time with institutional buying pressure.',
+      source: 'Bloomberg',
+      publishedAt: new Date(now.getTime() - 45 * 60000).toISOString(),
+      category: 'market_sentiment',
+      triggerTopics: ['SPY', 'Rally'],
+      urgency: 'high',
+      sentiment: 'bullish',
+    },
+    {
+      id: 'mock-3',
+      title: 'Trump announces new tariff plans targeting tech imports',
+      description: 'Former President Trump outlines potential trade policy changes if elected, affecting semiconductor and tech sectors.',
+      source: 'Reuters',
+      publishedAt: new Date(now.getTime() - 2 * 60 * 60000).toISOString(),
+      category: 'political',
+      triggerTopics: ['Trump', 'Tariff'],
+      urgency: 'medium',
+      sentiment: 'bearish',
+    },
+    {
+      id: 'mock-4',
+      title: 'Gamma squeeze potential building in 0DTE options market',
+      description: 'Unusual options activity suggests potential volatility spike as dealers hedge short-dated contracts.',
+      source: 'ZeroHedge',
+      publishedAt: new Date(now.getTime() - 30 * 60000).toISOString(),
+      category: 'technical',
+      triggerTopics: ['0DTE', 'Gamma Levels', 'SPY'],
+      urgency: 'high',
+      sentiment: 'neutral',
+    },
+  ];
+}
+
+/**
+ * Get all trigger topics for the Market Pulse
+ */
+export function getTriggerTopics(): string[] {
+  return [...TRIGGER_TOPICS];
+}
+
+/**
+ * Batch generate reactions for multiple news items
+ */
+export async function generateBatchReactions(newsItems: NewsItem[]): Promise<ReactionContent[]> {
+  const reactions: ReactionContent[] = [];
+
+  for (const item of newsItems.slice(0, 5)) {
+    try {
+      const reaction = await generateReactionContent(item);
+      reactions.push(reaction);
+      // Rate limit
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (error) {
+      console.error(`[MarketPulse] Failed to generate reaction for ${item.id}:`, error);
+    }
+  }
+
+  return reactions;
 }
