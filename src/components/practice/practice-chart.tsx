@@ -518,10 +518,12 @@ export function PracticeChart({
           title: 'VWAP',
         });
         vwapSeries.setData(
-          vwapBands.vwap.map((v, i) => ({
-            time: (timestamps[i] / 1000) as Time,
-            value: v,
-          }))
+          vwapBands.vwap
+            .map((v, i) => ({
+              time: (timestamps[i] / 1000) as Time,
+              value: v,
+            }))
+            .filter((d) => d.value != null && isFinite(d.value))
         );
         indicatorSeriesRef.current.push(vwapSeries);
       }
@@ -537,10 +539,12 @@ export function PracticeChart({
           lastValueVisible: false,
         });
         upper1Series.setData(
-          vwapBands.upperBand1.map((v, i) => ({
-            time: (timestamps[i] / 1000) as Time,
-            value: v,
-          }))
+          vwapBands.upperBand1
+            .map((v, i) => ({
+              time: (timestamps[i] / 1000) as Time,
+              value: v,
+            }))
+            .filter((d) => d.value != null && isFinite(d.value))
         );
         indicatorSeriesRef.current.push(upper1Series);
 
@@ -553,10 +557,12 @@ export function PracticeChart({
           lastValueVisible: false,
         });
         lower1Series.setData(
-          vwapBands.lowerBand1.map((v, i) => ({
-            time: (timestamps[i] / 1000) as Time,
-            value: v,
-          }))
+          vwapBands.lowerBand1
+            .map((v, i) => ({
+              time: (timestamps[i] / 1000) as Time,
+              value: v,
+            }))
+            .filter((d) => d.value != null && isFinite(d.value))
         );
         indicatorSeriesRef.current.push(lower1Series);
 
@@ -569,10 +575,12 @@ export function PracticeChart({
           lastValueVisible: false,
         });
         upper2Series.setData(
-          vwapBands.upperBand2.map((v, i) => ({
-            time: (timestamps[i] / 1000) as Time,
-            value: v,
-          }))
+          vwapBands.upperBand2
+            .map((v, i) => ({
+              time: (timestamps[i] / 1000) as Time,
+              value: v,
+            }))
+            .filter((d) => d.value != null && isFinite(d.value))
         );
         indicatorSeriesRef.current.push(upper2Series);
 
@@ -585,10 +593,12 @@ export function PracticeChart({
           lastValueVisible: false,
         });
         lower2Series.setData(
-          vwapBands.lowerBand2.map((v, i) => ({
-            time: (timestamps[i] / 1000) as Time,
-            value: v,
-          }))
+          vwapBands.lowerBand2
+            .map((v, i) => ({
+              time: (timestamps[i] / 1000) as Time,
+              value: v,
+            }))
+            .filter((d) => d.value != null && isFinite(d.value))
         );
         indicatorSeriesRef.current.push(lower2Series);
       }

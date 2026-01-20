@@ -768,11 +768,14 @@ export function KCUChart({
         title: level.label,
       });
 
-      // Create a horizontal line across the visible range
-      const lineData: LineData[] = [
-        { time: startTime, value: level.price },
-        { time: endTime, value: level.price },
-      ];
+      // Create a horizontal line across the visible range (times pre-validated)
+      // Handle single-candle edge case where startTime === endTime
+      const lineData: LineData[] = startTime === endTime
+        ? [{ time: startTime, value: level.price }]
+        : [
+            { time: startTime, value: level.price },
+            { time: endTime, value: level.price },
+          ];
       series.setData(lineData);
 
       levelSeriesRef.current.set(`level-${index}`, series);
@@ -879,10 +882,13 @@ export function KCUChart({
       });
 
       // Create horizontal line across the full visible range (times pre-validated)
-      const lineData: LineData[] = [
-        { time: startTime, value: gamma.price },
-        { time: endTime, value: gamma.price },
-      ];
+      // Handle single-candle edge case where startTime === endTime
+      const lineData: LineData[] = startTime === endTime
+        ? [{ time: startTime, value: gamma.price }]
+        : [
+            { time: startTime, value: gamma.price },
+            { time: endTime, value: gamma.price },
+          ];
       series.setData(lineData);
 
       gammaSeriesRef.current.set(`gamma-${gamma.type}-${index}`, series);
