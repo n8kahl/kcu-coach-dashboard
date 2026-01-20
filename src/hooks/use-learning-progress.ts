@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type {
   CourseProgress,
   UserLearningStats,
@@ -41,46 +41,62 @@ interface UseLearningProgressReturn {
 export function useLearningProgress(
   options: UseLearningProgressOptions = {}
 ): UseLearningProgressReturn {
-  const {
-    include = ['stats', 'courses', 'modules', 'activity'],
-    activityLimit = 10,
-    autoRefresh = false,
-    refreshInterval = 60000, // 1 minute
-  } = options;
+  // Convert array to stable string key immediately
+  // This prevents infinite loops from array reference changes
+  const includeKey = (options.include || ['stats', 'courses', 'modules', 'activity']).join(',');
+  const activityLimit = options.activityLimit ?? 10;
+  const autoRefresh = options.autoRefresh ?? false;
+  const refreshInterval = options.refreshInterval ?? 60000;
 
   const [data, setData] = useState<UnifiedProgressData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Track mounted state
+  const isMountedRef = useRef(true);
+  // Track last fetch key to prevent duplicate fetches
+  const lastFetchKeyRef = useRef<string | null>(null);
+
   const fetchProgress = useCallback(async () => {
+    const fetchKey = `${includeKey}-${activityLimit}`;
+
     try {
       setIsLoading(true);
       setError(null);
 
       const params = new URLSearchParams({
-        include: include.join(','),
+        include: includeKey,
         activityLimit: activityLimit.toString(),
       });
 
       const response = await fetch(`/api/learning/progress/unified?${params}`);
+
+      if (!isMountedRef.current) return;
 
       if (!response.ok) {
         throw new Error('Failed to fetch learning progress');
       }
 
       const result = await response.json();
+
+      if (!isMountedRef.current) return;
+
       setData({
         stats: result.stats,
         courses: result.courses,
         modules: result.modules,
         recentActivity: result.recentActivity,
       });
+      lastFetchKeyRef.current = fetchKey;
     } catch (err) {
+      if (!isMountedRef.current) return;
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [include, activityLimit]);
+  }, [includeKey, activityLimit]);
 
   const syncProgress = useCallback(async () => {
     try {
@@ -101,10 +117,15 @@ export function useLearningProgress(
     }
   }, [fetchProgress]);
 
-  // Initial fetch
+  // Initial fetch and refetch when key changes
   useEffect(() => {
-    fetchProgress();
-  }, [fetchProgress]);
+    const fetchKey = `${includeKey}-${activityLimit}`;
+
+    // Only fetch if key changed or never fetched
+    if (lastFetchKeyRef.current !== fetchKey) {
+      fetchProgress();
+    }
+  }, [includeKey, activityLimit, fetchProgress]);
 
   // Auto-refresh interval
   useEffect(() => {
@@ -113,6 +134,14 @@ export function useLearningProgress(
     const intervalId = setInterval(fetchProgress, refreshInterval);
     return () => clearInterval(intervalId);
   }, [autoRefresh, refreshInterval, fetchProgress]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   return {
     data,
@@ -124,16 +153,19 @@ export function useLearningProgress(
 }
 
 // ============================================
-// Convenience Hooks
+// Convenience Hooks - Use stable string constants
 // ============================================
+
+// Stable options objects to prevent re-renders
+const STATS_OPTIONS: UseLearningProgressOptions = { include: ['stats'] };
+const COURSES_OPTIONS: UseLearningProgressOptions = { include: ['courses'] };
+const MODULES_OPTIONS: UseLearningProgressOptions = { include: ['modules'] };
 
 /**
  * Hook for just learning stats
  */
 export function useLearningStats() {
-  const { data, isLoading, error, refresh } = useLearningProgress({
-    include: ['stats'],
-  });
+  const { data, isLoading, error, refresh } = useLearningProgress(STATS_OPTIONS);
 
   return {
     stats: data?.stats || null,
@@ -147,9 +179,7 @@ export function useLearningStats() {
  * Hook for course progress list
  */
 export function useCourseProgress() {
-  const { data, isLoading, error, refresh } = useLearningProgress({
-    include: ['courses'],
-  });
+  const { data, isLoading, error, refresh } = useLearningProgress(COURSES_OPTIONS);
 
   return {
     courses: data?.courses || [],
@@ -163,9 +193,7 @@ export function useCourseProgress() {
  * Hook for module progress with Thinkific linking
  */
 export function useModuleProgress() {
-  const { data, isLoading, error, refresh, syncProgress } = useLearningProgress({
-    include: ['modules'],
-  });
+  const { data, isLoading, error, refresh, syncProgress } = useLearningProgress(MODULES_OPTIONS);
 
   return {
     modules: data?.modules || [],
@@ -180,6 +208,7 @@ export function useModuleProgress() {
  * Hook for recent learning activity
  */
 export function useRecentActivity(limit: number = 10) {
+  // Use useMemo pattern with stable reference
   const { data, isLoading, error, refresh } = useLearningProgress({
     include: ['activity'],
     activityLimit: limit,

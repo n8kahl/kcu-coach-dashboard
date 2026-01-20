@@ -27,7 +27,8 @@ async function quoteHandler(request: NextRequest) {
     );
 
     if (!response.ok) {
-      console.error('Massive API error:', response.status);
+      const errorText = await response.text().catch(() => 'Unable to read error');
+      console.error(`Massive API error for ${symbol}: ${response.status} - ${errorText}`);
       return NextResponse.json({ error: 'Failed to fetch quote' }, { status: 500 });
     }
 

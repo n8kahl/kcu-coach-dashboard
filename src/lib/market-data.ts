@@ -323,12 +323,13 @@ class MarketDataService {
       const response = await fetch(url.toString(), {
         headers: {
           'Accept': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`,
         },
       });
 
       if (!response.ok) {
         const error = await response.text();
-        console.error(`[MarketData] API error: ${response.status} - ${error}`);
+        console.error(`[MarketData] API error for ${endpoint}: ${response.status} - ${error}`);
         return null;
       }
 
@@ -497,7 +498,7 @@ class MarketDataService {
         }
 
         const data = await this.fetch<AggregatesResponse>(
-          `/v2/aggs/ticker/${symbol}/range/${multiplier}/${actualTimespan}/${from}/${to}`,
+          `/v1/aggs/ticker/${symbol}/range/${multiplier}/${actualTimespan}/${from}/${to}`,
           { limit, sort: 'asc' }
         );
 
@@ -567,7 +568,7 @@ class MarketDataService {
 
         // Fetch 1-minute bars during premarket hours
         const data = await this.fetch<AggregatesResponse>(
-          `/v2/aggs/ticker/${symbol}/range/1/minute/${today}/${today}`,
+          `/v1/aggs/ticker/${symbol}/range/1/minute/${today}/${today}`,
           {
             limit: 500,
             sort: 'asc',
@@ -1063,7 +1064,7 @@ class MarketDataService {
         }
 
         const data = await this.fetch<AggregatesResponse>(
-          `/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${fromDate}/${toDate}`,
+          `/v1/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${fromDate}/${toDate}`,
           { limit: 50000, sort: 'asc' }
         );
 

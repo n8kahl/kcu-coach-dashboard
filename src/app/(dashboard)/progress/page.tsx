@@ -52,6 +52,13 @@ import { useLearningProgress } from '@/hooks/use-learning-progress';
 // AI context integration
 import { usePageContext } from '@/components/ai/hooks/usePageContext';
 
+// Stable options object for useLearningProgress - prevents infinite re-renders
+const PROGRESS_PAGE_OPTIONS = {
+  include: ['stats', 'modules', 'activity'] as const,
+  autoRefresh: true,
+  refreshInterval: 120000, // Refresh every 2 minutes
+};
+
 // Types
 import type { CourseProgress, LearningStreak, DailyActivity } from '@/types/learning';
 import type { ModuleProgress } from '@/lib/learning-progress';
@@ -288,11 +295,7 @@ export default function ProgressPage() {
   const router = useRouter();
 
   // Fetch all progress data using the unified hook
-  const { data, isLoading, error, refresh } = useLearningProgress({
-    include: ['stats', 'modules', 'activity'],
-    autoRefresh: true,
-    refreshInterval: 120000, // Refresh every 2 minutes
-  });
+  const { data, isLoading, error, refresh } = useLearningProgress(PROGRESS_PAGE_OPTIONS);
 
   // Build derived data for components
   const courseProgress = useMemo(
