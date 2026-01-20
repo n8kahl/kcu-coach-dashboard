@@ -1048,25 +1048,46 @@ export function KCUChart({
       });
 
       // Create data points for each series
-      // For proper box rendering, we need multiple points
-      const numPoints = 10;
-      const timeStep = ((endTime as number) - (startTime as number)) / numPoints;
-
-      // Skip if timeStep is invalid (would create NaN times)
-      if (!isFinite(timeStep)) return;
+      // For proper box rendering, we need multiple points with unique timestamps
+      const startNum = startTime as number;
+      const endNum = endTime as number;
 
       const topData: LineData[] = [];
       const bottomData: LineData[] = [];
       const areaData: AreaData[] = [];
 
-      for (let i = 0; i <= numPoints; i++) {
-        const timeValue = (startTime as number) + timeStep * i;
-        // Skip invalid time values
-        if (!isFinite(timeValue)) continue;
-        const time = timeValue as Time;
+      if (startNum === endNum) {
+        // Single point case - FVG on most recent candle or single candle
+        // lightweight-charts requires at least one point, but duplicate times crash
+        const time = Math.floor(startNum) as Time;
         topData.push({ time, value: zone.high });
         bottomData.push({ time, value: zone.low });
         areaData.push({ time, value: zone.high });
+      } else {
+        // Generate multiple points with unique integer timestamps
+        const numPoints = 10;
+        const timeStep = (endNum - startNum) / numPoints;
+
+        // Skip if timeStep is invalid (would create NaN times)
+        if (!isFinite(timeStep)) return;
+
+        let lastAddedTime = -1;
+        for (let i = 0; i <= numPoints; i++) {
+          const rawTime = startNum + timeStep * i;
+          if (!isFinite(rawTime)) continue;
+
+          // Round to integer seconds (lightweight-charts requirement)
+          const time = Math.floor(rawTime);
+
+          // Skip duplicate timestamps that may occur due to rounding
+          if (time === lastAddedTime) continue;
+          lastAddedTime = time;
+
+          const chartTime = time as Time;
+          topData.push({ time: chartTime, value: zone.high });
+          bottomData.push({ time: chartTime, value: zone.low });
+          areaData.push({ time: chartTime, value: zone.high });
+        }
       }
 
       // Only set data if we have valid points
