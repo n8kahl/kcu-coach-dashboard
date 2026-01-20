@@ -16,6 +16,7 @@ import {
   Zap,
   Clock,
   GraduationCap,
+  Wand2,
 } from 'lucide-react';
 
 // UI Components
@@ -40,6 +41,7 @@ import {
   InfluencerList,
   TrendingTopics,
   LearningMilestones,
+  BrainDumpInput,
 } from '@/components/social';
 
 import type { ContentSuggestion, SocialPlatform, TrendingTopic, InfluencerProfileInput, ContentCategory } from '@/types/social';
@@ -452,6 +454,10 @@ function SocialBuilderContent() {
             <GraduationCap className="w-4 h-4 mr-2" />
             Learning
           </TabsTrigger>
+          <TabsTrigger value="brain-dump" variant="pills">
+            <Wand2 className="w-4 h-4 mr-2" />
+            Brain Dump
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -773,6 +779,18 @@ function SocialBuilderContent() {
           <LearningMilestones
             showToast={showToast}
             onRefresh={fetchDashboardData}
+          />
+        </TabsContent>
+
+        {/* Brain Dump Tab */}
+        <TabsContent value="brain-dump">
+          <BrainDumpInput
+            showToast={showToast}
+            onGenerate={(output) => {
+              console.log('Brain dump generated:', output);
+              // Optionally refresh suggestions after generating
+              fetchDashboardData();
+            }}
           />
         </TabsContent>
       </Tabs>

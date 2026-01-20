@@ -11,3 +11,4 @@ export { InfluencerList } from './influencer-list';
 export { TrendingTopics } from './trending-topics';
 export { LearningMilestones } from './learning-milestones';
 export { StudyStatsCard, StudyStatsCardModal } from './StudyStatsCard';
+export { BrainDumpInput } from './brain-dump-input';
