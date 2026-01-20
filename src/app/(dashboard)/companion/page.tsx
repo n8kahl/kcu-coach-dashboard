@@ -311,7 +311,7 @@ export default function CompanionTerminal() {
     setChartLoading(true);
     setChartError(null);
     try {
-      const res = await fetch(`/api/market/bars?symbol=${symbol}&timespan=minute&multiplier=5&limit=200`);
+      const res = await fetch(`/api/market/bars?symbol=${symbol}&timespan=minute&multiplier=5&limit=500`);
       if (res.ok) {
         const data = await res.json();
         if (data.bars && data.bars.length > 0) {
@@ -375,8 +375,34 @@ export default function CompanionTerminal() {
       if (ltpRes.ok) {
         const data = await ltpRes.json();
         setLtpAnalysis(data);
+
+        // Build chart levels from LTP analysis response (syncs with AI scoring engine)
+        const levels: Level[] = [];
+
+        // Add key levels with proper styling
+        if (data.levels?.pdh != null && isFinite(data.levels.pdh)) {
+          levels.push({ price: data.levels.pdh, label: 'PDH', type: 'resistance', color: '#ef4444' });
+        }
+        if (data.levels?.pdl != null && isFinite(data.levels.pdl)) {
+          levels.push({ price: data.levels.pdl, label: 'PDL', type: 'support', color: '#22c55e' });
+        }
+        if (data.levels?.vwap != null && isFinite(data.levels.vwap)) {
+          levels.push({ price: data.levels.vwap, label: 'VWAP', type: 'vwap', color: '#f59e0b' });
+        }
+        if (data.levels?.orbHigh != null && isFinite(data.levels.orbHigh)) {
+          levels.push({ price: data.levels.orbHigh, label: 'ORB High', type: 'resistance', color: '#8b5cf6', lineStyle: 'dashed' });
+        }
+        if (data.levels?.orbLow != null && isFinite(data.levels.orbLow)) {
+          levels.push({ price: data.levels.orbLow, label: 'ORB Low', type: 'support', color: '#8b5cf6', lineStyle: 'dashed' });
+        }
+        if (data.levels?.sma200 != null && isFinite(data.levels.sma200)) {
+          levels.push({ price: data.levels.sma200, label: 'SMA 200', type: 'custom', color: '#f97316', lineStyle: 'dotted' });
+        }
+
+        setChartLevels(levels);
       } else {
         console.warn(`[Companion] LTP analysis unavailable for ${symbol}: ${ltpRes.status}`);
+        setChartLevels([]); // Clear levels if LTP data unavailable
       }
       if (gammaRes.ok) {
         const data = await gammaRes.json();
@@ -390,18 +416,6 @@ export default function CompanionTerminal() {
         setFvgData(data);
       } else {
         console.warn(`[Companion] FVG data unavailable for ${symbol}: ${fvgRes.status}`);
-      }
-
-      // Build chart levels from watchlist item
-      const watchlistItem = watchlist.find(w => w.symbol === symbol);
-      if (watchlistItem?.levels) {
-        setChartLevels(watchlistItem.levels.map(l => ({
-          price: l.price,
-          label: l.level_type,
-          type: l.level_type.includes('support') ? 'support' :
-                l.level_type.includes('resistance') ? 'resistance' :
-                l.level_type.includes('vwap') ? 'vwap' : 'custom',
-        })));
       }
 
       // Update coaching messages
