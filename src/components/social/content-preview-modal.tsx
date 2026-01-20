@@ -375,24 +375,24 @@ export function ContentPreviewModal({
     <Portal>
       <AnimatePresence>
         {isOpen && (
-          <>
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
             {/* Backdrop */}
             <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
-          />
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={onClose}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
 
-          {/* Modal */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl max-h-[90vh] overflow-hidden"
-          >
+            {/* Modal */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              className="relative z-10 w-full max-w-2xl max-h-[90vh] overflow-hidden mx-4"
+            >
             <div className="bg-[var(--bg-card)] border border-[var(--border-primary)] flex flex-col max-h-[90vh]">
               {/* Header */}
               <div className="flex items-center justify-between p-4 border-b border-[var(--border-primary)]">
@@ -728,8 +728,8 @@ export function ContentPreviewModal({
                 )}
               </div>
             </div>
-          </motion.div>
-          </>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </Portal>
