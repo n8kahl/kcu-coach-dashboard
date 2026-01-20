@@ -4,12 +4,21 @@
 export const dynamic = 'force-dynamic';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { usePageContext } from '@/components/ai';
+import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import { useAIContext } from '@/components/ai';
 import { cn } from '@/lib/utils';
 import { useCompanionStream, type CompanionEvent } from '@/hooks/useCompanionStream';
+import { useCompanionData } from '@/hooks/useCompanionData';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
-import { CompanionSessionReport } from '@/components/companion/session-report';
+import {
+  CompanionSessionReport,
+  CompanionWatchlist,
+  CompanionHUD,
+  CompanionCoachBox,
+  type WatchlistSymbol,
+  type DetectedSetup,
+} from '@/components/companion';
 import { KCUChart, type Candle, type Level, type GammaLevel, type FVGZone } from '@/components/charts';
 import {
   kcuCoachingRules,
@@ -56,26 +65,8 @@ import {
 } from 'lucide-react';
 
 // ============================================================================
-// TYPES
+// TYPES (Additional types not exported from components)
 // ============================================================================
-
-interface WatchlistSymbol {
-  id: string;
-  symbol: string;
-  added_at: string;
-  levels: KeyLevel[];
-  quote: MarketQuote | null;
-  is_shared: boolean;
-}
-
-interface KeyLevel {
-  id: string;
-  level_type: string;
-  timeframe: string;
-  price: number;
-  strength: number;
-  notes: string;
-}
 
 interface MarketQuote {
   last_price: number;
@@ -84,29 +75,6 @@ interface MarketQuote {
   vwap: number;
   orb_high: number;
   orb_low: number;
-}
-
-interface DetectedSetup {
-  id: string;
-  symbol: string;
-  direction: string;
-  setup_stage: string;
-  confluence_score: number;
-  level_score: number;
-  trend_score: number;
-  patience_score: number;
-  mtf_score: number;
-  primary_level_type: string;
-  primary_level_price: number;
-  patience_candles: number;
-  coach_note: string;
-  suggested_entry: number;
-  suggested_stop: number;
-  target_1: number;
-  target_2: number;
-  target_3: number;
-  risk_reward: number;
-  detected_at: string;
 }
 
 interface MarketStatus {
@@ -165,18 +133,47 @@ interface ChartCandle extends Candle {
 // ============================================================================
 
 export default function CompanionTerminal() {
-  usePageContext();
+  // URL & AI Context Management
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const { updatePageContext, setSelectedSymbol: setAISelectedSymbol } = useAIContext();
 
-  // Core state
-  const [watchlist, setWatchlist] = useState<WatchlistSymbol[]>([]);
-  const [setups, setSetups] = useState<DetectedSetup[]>([]);
-  const [newSymbol, setNewSymbol] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
+  // Get symbol from URL query params
+  const urlSymbol = searchParams.get('symbol')?.toUpperCase() || null;
+
+  // Data layer via custom hook
+  const {
+    watchlist,
+    setups,
+    readySetups,
+    marketStatus,
+    isLoading: loading,
+    isRefreshing: refreshing,
+    refresh: refreshData,
+    refetchWatchlist,
+  } = useCompanionData({
+    pollInterval: 30000,
+    autoPolling: true,
+  });
+
+  // Session state
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionStartTime = useRef<Date | null>(null);
+
+  // Selected symbol is driven by URL
+  const selectedSymbol = urlSymbol;
+
+  // Function to update selected symbol via URL
+  const setSelectedSymbol = useCallback((symbol: string | null) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (symbol) {
+      params.set('symbol', symbol);
+    } else {
+      params.delete('symbol');
+    }
+    router.push(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [searchParams, router, pathname]);
 
   // Mode and coaching state
   const [mode, setMode] = useState<CoachingMode>('scan');
@@ -197,7 +194,7 @@ export default function CompanionTerminal() {
 
   // UI state
   const [coachBoxExpanded, setCoachBoxExpanded] = useState(true);
-  const [watchlistExpanded, setWatchlistExpanded] = useState(true);
+  // NOTE: Watchlist expanded state is now managed internally by CompanionWatchlist component
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [lastAlertType, setLastAlertType] = useState<'patience' | 'entry' | 'warning' | null>(null);
 
@@ -236,39 +233,9 @@ export default function CompanionTerminal() {
 
   const handleStreamEvent = useCallback((event: CompanionEvent) => {
     if (event.type === 'setup_forming' || event.type === 'setup_ready') {
-      setSetups(prev => {
-        const existing = prev.findIndex(s => s.symbol === event.data.symbol);
-        const eventData = event.data as unknown as Record<string, unknown>;
-        const newSetup: DetectedSetup = {
-          id: event.data.id,
-          symbol: event.data.symbol,
-          direction: event.data.direction,
-          setup_stage: event.type === 'setup_ready' ? 'ready' : 'forming',
-          confluence_score: event.data.confluenceScore,
-          level_score: (eventData.levelScore as number) || 0,
-          trend_score: (eventData.trendScore as number) || 0,
-          patience_score: (eventData.patienceScore as number) || 0,
-          mtf_score: (eventData.mtfScore as number) || 0,
-          primary_level_type: (eventData.primaryLevelType as string) || '',
-          primary_level_price: (eventData.primaryLevelPrice as number) || 0,
-          patience_candles: (eventData.patienceCandles as number) || 0,
-          coach_note: event.data.coachNote,
-          suggested_entry: event.data.suggestedEntry || 0,
-          suggested_stop: event.data.suggestedStop || 0,
-          target_1: event.data.target1 || 0,
-          target_2: event.data.target2 || 0,
-          target_3: (eventData.target3 as number) || 0,
-          risk_reward: (eventData.riskReward as number) || 0,
-          detected_at: new Date().toISOString(),
-        };
-
-        if (existing >= 0) {
-          const updated = [...prev];
-          updated[existing] = newSetup;
-          return updated;
-        }
-        return [newSetup, ...prev];
-      });
+      // Trigger a refresh to get the latest setups from the backend
+      // The hook will update the setups state
+      refreshData();
 
       // Flash for setup alerts
       if (event.type === 'setup_ready') {
@@ -276,21 +243,8 @@ export default function CompanionTerminal() {
         setTimeout(() => setLastAlertType(null), 2000);
       }
     } else if (event.type === 'price_update') {
-      // Update watchlist quotes
-      setWatchlist(prev => prev.map(item => {
-        if (item.symbol === event.data.symbol) {
-          return {
-            ...item,
-            quote: {
-              ...item.quote!,
-              last_price: event.data.price,
-              change_percent: event.data.changePercent,
-              volume: event.data.volume,
-            }
-          };
-        }
-        return item;
-      }));
+      // Price updates are handled by the hook's polling
+      // Here we only update the chart for the selected symbol
 
       // If this is the selected symbol, add to chart data
       if (event.data.symbol === selectedSymbol) {
@@ -326,7 +280,7 @@ export default function CompanionTerminal() {
         });
       }
     }
-  }, [selectedSymbol]);
+  }, [selectedSymbol, refreshData]);
 
   const { connected: streamConnected, error: streamError } = useCompanionStream({
     onEvent: handleStreamEvent,
@@ -336,39 +290,7 @@ export default function CompanionTerminal() {
   // DATA FETCHING
   // ============================================================================
 
-  const fetchWatchlist = async () => {
-    try {
-      const res = await fetch('/api/companion/watchlist');
-      const data = await res.json();
-      setWatchlist(data.symbols || []);
-    } catch (error) {
-      console.error('Error fetching watchlist:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchSetups = async () => {
-    try {
-      const res = await fetch('/api/companion/setups?minConfluence=50');
-      const data = await res.json();
-      setSetups(data.setups || []);
-    } catch (error) {
-      console.error('Error fetching setups:', error);
-    }
-  };
-
-  const fetchMarketStatus = async () => {
-    try {
-      const res = await fetch('/api/market/status');
-      if (res.ok) {
-        const data = await res.json();
-        setMarketStatus(data);
-      }
-    } catch {
-      // Silently fail
-    }
-  };
+  // NOTE: fetchWatchlist, fetchSetups, and fetchMarketStatus are now handled by useCompanionData hook
 
   const fetchChartData = async (symbol: string) => {
     setChartLoading(true);
@@ -551,18 +473,7 @@ export default function CompanionTerminal() {
     };
   }, []);
 
-  useEffect(() => {
-    fetchWatchlist();
-    fetchSetups();
-    fetchMarketStatus();
-
-    const interval = setInterval(() => {
-      fetchSetups();
-      fetchMarketStatus();
-    }, streamConnected ? 60000 : 30000);
-
-    return () => clearInterval(interval);
-  }, [streamConnected]);
+  // NOTE: Data fetching and polling is now handled by useCompanionData hook
 
   useEffect(() => {
     if (selectedSymbol) {
@@ -585,6 +496,38 @@ export default function CompanionTerminal() {
       updateCoachingMessages(selectedSymbol);
     }
   }, [selectedSymbol, ltpAnalysis, updateCoachingMessages]);
+
+  // AI Context Sync - Keep AI aware of current analysis
+  useEffect(() => {
+    // Sync selected symbol to global AI context
+    setAISelectedSymbol(selectedSymbol || undefined);
+
+    // Update page context with relevant data
+    const pageData: Record<string, unknown> = {
+      watchlistSymbols: watchlist.map(w => w.symbol),
+      focusedSymbol: selectedSymbol,
+    };
+
+    // Add analysis data when available
+    if (selectedSymbol && (ltpAnalysis || ltp2Score)) {
+      pageData.ltpGrade = ltp2Score?.grade || ltpAnalysis?.grade || null;
+      pageData.trendScore = ltp2Score?.breakdown?.cloudScore || ltpAnalysis?.trend?.trendScore || 0;
+      pageData.currentPrice = currentQuote?.last_price || 0;
+      pageData.gammaRegime = gammaData?.regime || null;
+      pageData.vwap = currentQuote?.vwap || 0;
+    }
+
+    updatePageContext('companion', pageData);
+  }, [
+    selectedSymbol,
+    ltpAnalysis,
+    ltp2Score,
+    gammaData,
+    currentQuote,
+    watchlist,
+    setAISelectedSymbol,
+    updatePageContext,
+  ]);
 
   // LTP 2.0 Score Calculation Effect
   useEffect(() => {
@@ -695,65 +638,61 @@ export default function CompanionTerminal() {
   // ACTIONS
   // ============================================================================
 
-  const addSymbol = async () => {
-    if (!newSymbol.trim()) return;
+  const addSymbol = useCallback(async (symbol: string) => {
+    if (!symbol.trim()) return;
     try {
       const res = await fetch('/api/companion/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: newSymbol.trim() })
+        body: JSON.stringify({ symbol: symbol.trim().toUpperCase() })
       });
       if (res.ok) {
-        setNewSymbol('');
-        fetchWatchlist();
+        refetchWatchlist();
       }
     } catch (error) {
       console.error('Error adding symbol:', error);
     }
-  };
+  }, [refetchWatchlist]);
 
-  const removeSymbol = async (symbol: string) => {
+  const removeSymbol = useCallback(async (symbol: string) => {
     try {
       await fetch(`/api/companion/watchlist?symbol=${symbol}`, { method: 'DELETE' });
       if (selectedSymbol === symbol) {
         setSelectedSymbol(null);
       }
-      fetchWatchlist();
+      refetchWatchlist();
     } catch (error) {
       console.error('Error removing symbol:', error);
     }
-  };
+  }, [selectedSymbol, setSelectedSymbol, refetchWatchlist]);
 
-  const refreshAll = async () => {
-    setRefreshing(true);
+  const refreshAll = useCallback(async () => {
     try {
-      await Promise.all([
-        fetch('/api/companion/refresh', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshAll: true })
-        }),
-        fetchWatchlist(),
-        fetchSetups(),
-        fetchMarketStatus(),
-      ]);
+      // Trigger cache refresh on backend
+      await fetch('/api/companion/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshAll: true })
+      });
+
+      // Refresh data via hook
+      await refreshData();
+
+      // Refresh symbol-specific data if selected
       if (selectedSymbol) {
         await fetchLTPAnalysis(selectedSymbol);
         await fetchChartData(selectedSymbol);
       }
     } catch (error) {
       console.error('Error refreshing:', error);
-    } finally {
-      setRefreshing(false);
     }
-  };
+  }, [refreshData, selectedSymbol]);
 
   // ============================================================================
   // COMPUTED VALUES
   // ============================================================================
 
-  const readySetups = setups.filter(s => s.setup_stage === 'ready');
-  const formingSetups = setups.filter(s => s.setup_stage === 'forming');
+  // NOTE: readySetups and formingSetups are now returned from useCompanionData hook
 
   // Convert gamma data to chart gamma levels
   const chartGammaLevels: GammaLevel[] = useMemo(() => {
@@ -801,12 +740,16 @@ export default function CompanionTerminal() {
   // RENDER - CHART-FIRST TERMINAL
   // ============================================================================
 
+  // Mobile overlay states
+  const [mobileWatchlistOpen, setMobileWatchlistOpen] = useState(false);
+  const [mobileCoachOpen, setMobileCoachOpen] = useState(false);
+
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col overflow-hidden bg-[#0d0d0d]">
+    <div className="h-[calc(100dvh-4rem)] flex flex-col overflow-hidden bg-[#0d0d0d]">
       {/* MINIMAL TOP BAR */}
-      <div className="flex items-center justify-between px-4 py-2 bg-[var(--bg-secondary)] border-b border-[var(--border-primary)]">
-        {/* LEFT: Market Status */}
-        <div className="flex items-center gap-4">
+      <div className="flex items-center justify-between px-2 sm:px-4 py-2 bg-[var(--bg-secondary)] border-b border-[var(--border-primary)]">
+        {/* LEFT: Market Status (hidden on mobile) */}
+        <div className="hidden sm:flex items-center gap-4">
           {marketStatus?.spy && (
             <div className="flex items-center gap-2 text-xs">
               <span className="text-[var(--text-tertiary)]">SPY</span>
@@ -820,7 +763,7 @@ export default function CompanionTerminal() {
             </div>
           )}
           {marketStatus?.qqq && (
-            <div className="flex items-center gap-2 text-xs">
+            <div className="hidden md:flex items-center gap-2 text-xs">
               <span className="text-[var(--text-tertiary)]">QQQ</span>
               <span className="font-mono font-semibold text-[var(--text-primary)]">${marketStatus.qqq.price.toFixed(2)}</span>
               <span className={cn(
@@ -969,12 +912,12 @@ export default function CompanionTerminal() {
           )}
         </div>
 
-        {/* LEFT PANEL CONTAINER - Unified container for overlays to prevent overlap */}
-        <div className="absolute top-4 left-4 z-10 flex flex-col gap-3 max-h-[calc(100%-2rem)] pointer-events-none">
+        {/* LEFT PANEL CONTAINER - Desktop Only */}
+        <div className="hidden lg:flex absolute top-4 left-4 z-10 flex-col gap-3 max-h-[calc(100%-2rem)] pointer-events-none">
           {/* LTP 2.0 SCORE HUD */}
           {selectedSymbol && (ltp2Score || ltpAnalysis) && (
             <div className="pointer-events-auto">
-              <LTP2ScoreHUD
+              <CompanionHUD
                 ltp2Score={ltp2Score}
                 ltpAnalysis={ltpAnalysis}
                 gammaRegime={gammaData?.regime || null}
@@ -985,33 +928,26 @@ export default function CompanionTerminal() {
             </div>
           )}
 
-          {/* WATCHLIST PANEL */}
-          <div className={cn(
-            'pointer-events-auto transition-all duration-300',
-            watchlistExpanded ? 'w-52' : 'w-12'
-          )}>
-            <WatchlistOverlay
+          {/* WATCHLIST PANEL - Desktop (self-expanding) */}
+          <div className="pointer-events-auto transition-all duration-300">
+            <CompanionWatchlist
               watchlist={watchlist}
               setups={setups}
               selectedSymbol={selectedSymbol}
               onSelectSymbol={setSelectedSymbol}
               onAddSymbol={addSymbol}
               onRemoveSymbol={removeSymbol}
-              newSymbol={newSymbol}
-              setNewSymbol={setNewSymbol}
               loading={loading}
-              expanded={watchlistExpanded}
-              onToggle={() => setWatchlistExpanded(!watchlistExpanded)}
             />
           </div>
         </div>
 
-        {/* COACH BOX (Bottom Right Floating Terminal) */}
+        {/* COACH BOX - Desktop (Bottom Right, offset to avoid AICommandCenter) */}
         <div className={cn(
-          'absolute bottom-16 right-4 z-10 transition-all duration-300',
+          'hidden lg:block absolute bottom-20 right-4 z-10 transition-all duration-300',
           coachBoxExpanded ? 'w-80 max-h-[50vh]' : 'w-12'
         )}>
-          <CoachBox
+          <CompanionCoachBox
             messages={coachingMessages}
             expanded={coachBoxExpanded}
             onToggle={() => setCoachBoxExpanded(!coachBoxExpanded)}
@@ -1020,428 +956,131 @@ export default function CompanionTerminal() {
             mode={mode}
           />
         </div>
+
+        {/* MOBILE TOGGLE BUTTONS - Fixed Bottom Bar */}
+        <div className="lg:hidden absolute bottom-4 left-4 right-4 z-20 flex justify-between items-center">
+          {/* Left: Watchlist Toggle */}
+          <button
+            onClick={() => setMobileWatchlistOpen(true)}
+            className={cn(
+              'flex items-center gap-2 px-3 py-2 rounded-lg',
+              'bg-[#0d0d0d]/90 backdrop-blur border border-[var(--border-primary)]',
+              'text-xs font-medium text-[var(--text-primary)]',
+              'hover:bg-[var(--bg-tertiary)] transition-colors'
+            )}
+          >
+            <Eye className="w-4 h-4 text-[var(--accent-primary)]" />
+            Watchlist
+            {readySetups.length > 0 && (
+              <span className="w-5 h-5 rounded-full bg-[var(--accent-primary)] text-white text-[10px] font-bold flex items-center justify-center">
+                {readySetups.length}
+              </span>
+            )}
+          </button>
+
+          {/* Center: HUD (Mobile Compact) */}
+          {selectedSymbol && (ltp2Score || ltpAnalysis) && (
+            <div className="pointer-events-auto">
+              <CompanionHUD
+                ltp2Score={ltp2Score}
+                ltpAnalysis={ltpAnalysis}
+                gammaRegime={gammaData?.regime || null}
+                currentPrice={currentQuote?.last_price || 0}
+                vwap={currentQuote?.vwap || 0}
+                isSpeaking={someshVoice.isSpeaking}
+              />
+            </div>
+          )}
+
+          {/* Right: Coach Toggle (offset left to avoid AICommandCenter) */}
+          <button
+            onClick={() => setMobileCoachOpen(true)}
+            className={cn(
+              'flex items-center gap-2 px-3 py-2 rounded-lg mr-14',
+              'bg-[#0d0d0d]/90 backdrop-blur border transition-all duration-300',
+              lastAlertType === 'entry'
+                ? 'border-[var(--success)] shadow-[0_0_10px_rgba(34,197,94,0.3)]'
+                : lastAlertType === 'patience'
+                ? 'border-[var(--warning)] shadow-[0_0_10px_rgba(251,191,36,0.3)]'
+                : lastAlertType === 'warning'
+                ? 'border-[var(--error)] shadow-[0_0_10px_rgba(239,68,68,0.3)]'
+                : 'border-[var(--border-primary)]',
+              'text-xs font-medium text-[var(--text-primary)]',
+              'hover:bg-[var(--bg-tertiary)]',
+              lastAlertType && 'animate-pulse'
+            )}
+          >
+            <Sparkles
+              className={cn(
+                'w-4 h-4',
+                lastAlertType === 'entry'
+                  ? 'text-[var(--success)]'
+                  : lastAlertType === 'patience'
+                  ? 'text-[var(--warning)]'
+                  : lastAlertType === 'warning'
+                  ? 'text-[var(--error)]'
+                  : 'text-[var(--accent-primary)]'
+              )}
+            />
+            Coach
+          </button>
+        </div>
+
+        {/* MOBILE WATCHLIST OVERLAY (Drawer from Left) */}
+        {mobileWatchlistOpen && (
+          <div className="lg:hidden fixed inset-0 z-50 flex">
+            {/* Backdrop */}
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setMobileWatchlistOpen(false)}
+            />
+            {/* Drawer */}
+            <div className="relative w-80 max-w-[85vw] h-full bg-[#0d0d0d] border-r border-[var(--border-primary)] animate-in slide-in-from-left duration-300">
+              <CompanionWatchlist
+                watchlist={watchlist}
+                setups={setups}
+                selectedSymbol={selectedSymbol}
+                onSelectSymbol={(symbol) => {
+                  setSelectedSymbol(symbol);
+                  setMobileWatchlistOpen(false);
+                }}
+                onAddSymbol={addSymbol}
+                onRemoveSymbol={removeSymbol}
+                loading={loading}
+                isOverlay={true}
+                onClose={() => setMobileWatchlistOpen(false)}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* MOBILE COACH OVERLAY (Drawer from Right) */}
+        {mobileCoachOpen && (
+          <div className="lg:hidden fixed inset-0 z-50 flex justify-end">
+            {/* Backdrop */}
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setMobileCoachOpen(false)}
+            />
+            {/* Drawer */}
+            <div className="relative w-96 max-w-[90vw] h-full bg-[#0d0d0d] border-l border-[var(--border-primary)] animate-in slide-in-from-right duration-300">
+              <CompanionCoachBox
+                messages={coachingMessages}
+                expanded={true}
+                onToggle={() => setMobileCoachOpen(false)}
+                alertType={lastAlertType}
+                selectedSymbol={selectedSymbol}
+                mode={mode}
+                isOverlay={true}
+                onClose={() => setMobileCoachOpen(false)}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* SESSION REPORT */}
       <CompanionSessionReport sessionId={sessionId} />
-    </div>
-  );
-}
-
-// ============================================================================
-// LTP 2.0 SCORE HUD OVERLAY - Compact Design
-// ============================================================================
-
-function LTP2ScoreHUD({
-  ltp2Score,
-  ltpAnalysis,
-  gammaRegime,
-  currentPrice,
-  vwap,
-  isSpeaking,
-}: {
-  ltp2Score: LTP2Score | null;
-  ltpAnalysis: LTPAnalysis | null;
-  gammaRegime: 'positive' | 'negative' | 'neutral' | null;
-  currentPrice: number;
-  vwap: number;
-  isSpeaking: boolean;
-}) {
-  const [expanded, setExpanded] = useState(false);
-
-  // LTP 2.0 grade colors and badges
-  const ltp2GradeStyles: Record<string, { bg: string; text: string; border: string; emoji: string; label: string }> = {
-    'Sniper': { bg: 'bg-[var(--success)]/20', text: 'text-[var(--success)]', border: 'border-[var(--success)]/50', emoji: '🎯', label: 'SNIPER' },
-    'Decent': { bg: 'bg-[var(--warning)]/15', text: 'text-[var(--warning)]', border: 'border-[var(--warning)]/30', emoji: '📊', label: 'DECENT' },
-    'Dumb Shit': { bg: 'bg-[var(--error)]/20', text: 'text-[var(--error)]', border: 'border-[var(--error)]/50', emoji: '💩', label: 'DUMB' },
-  };
-
-  const gammaColors: Record<string, string> = {
-    'positive': 'text-[var(--success)]',
-    'negative': 'text-[var(--error)]',
-    'neutral': 'text-[var(--text-secondary)]',
-  };
-
-  const aboveVwap = currentPrice > vwap;
-  const gradeStyle = ltp2Score ? ltp2GradeStyles[ltp2Score.grade] : null;
-
-  return (
-    <div className={cn(
-      'bg-[#0d0d0d]/95 backdrop-blur border rounded-lg overflow-hidden transition-all duration-300',
-      gradeStyle ? gradeStyle.border : 'border-[var(--border-primary)]',
-      expanded ? 'w-52' : 'w-auto'
-    )}>
-      {/* Compact Header - Always Visible */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className={cn(
-          'w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--bg-tertiary)]/50 transition-colors',
-          gradeStyle ? gradeStyle.bg : ''
-        )}
-      >
-        {/* Grade Badge */}
-        {ltp2Score && gradeStyle ? (
-          <span className={cn(
-            'text-xs font-black px-1.5 py-0.5 rounded border',
-            gradeStyle.bg, gradeStyle.text, gradeStyle.border
-          )}>
-            {gradeStyle.emoji} {gradeStyle.label}
-          </span>
-        ) : ltpAnalysis ? (
-          <span className="text-sm font-black text-[var(--accent-primary)]">
-            {ltpAnalysis.grade}
-          </span>
-        ) : null}
-
-        {/* Score */}
-        {ltp2Score && (
-          <span className={cn(
-            'text-lg font-black tabular-nums',
-            ltp2Score.score >= 75 ? 'text-[var(--success)]' :
-            ltp2Score.score >= 50 ? 'text-[var(--warning)]' :
-            'text-[var(--error)]'
-          )}>
-            {ltp2Score.score}
-          </span>
-        )}
-
-        {/* Quick Indicators */}
-        <div className="flex items-center gap-1.5 ml-auto">
-          <span className={cn('text-[10px] font-bold', aboveVwap ? 'text-[var(--success)]' : 'text-[var(--error)]')}>
-            {aboveVwap ? '▲' : '▼'}
-          </span>
-          {gammaRegime && (
-            <span className={cn('text-[10px] font-bold', gammaColors[gammaRegime])}>
-              {gammaRegime === 'positive' ? '+γ' : gammaRegime === 'negative' ? '-γ' : '~γ'}
-            </span>
-          )}
-          {isSpeaking && <Volume2 className="w-3 h-3 text-[var(--accent-primary)] animate-pulse" />}
-          <ChevronDown className={cn('w-3 h-3 text-[var(--text-tertiary)] transition-transform', expanded && 'rotate-180')} />
-        </div>
-      </button>
-
-      {/* Expanded Details */}
-      {expanded && ltp2Score && (
-        <div className="px-3 pb-3 border-t border-[var(--border-primary)]">
-          {/* Score Breakdown - Compact Bars */}
-          <div className="space-y-1 py-2">
-            <ScoreBar label="Cloud" value={ltp2Score.breakdown.cloudScore} max={25} color="var(--accent-primary)" />
-            <ScoreBar label="VWAP" value={ltp2Score.breakdown.vwapScore} max={20} color="var(--success)" />
-            <ScoreBar label="Gamma" value={ltp2Score.breakdown.gammaWallScore + ltp2Score.breakdown.gammaRegimeScore} max={35} color="#00ffff" />
-            <ScoreBar label="Patience" value={ltp2Score.breakdown.patienceScore} max={10} color="var(--warning)" />
-            {ltp2Score.breakdown.resistancePenalty < 0 && (
-              <ScoreBar label="Penalty" value={Math.abs(ltp2Score.breakdown.resistancePenalty)} max={20} color="var(--error)" />
-            )}
-          </div>
-
-          {/* Recommendation */}
-          <p className="text-[10px] text-[var(--text-secondary)] leading-relaxed">
-            {ltp2Score.recommendation}
-          </p>
-
-          {/* Warning */}
-          {ltp2Score.warnings.length > 0 && (
-            <div className="flex items-start gap-1 text-[9px] text-[var(--warning)] bg-[var(--warning)]/10 rounded px-2 py-1 mt-2">
-              <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
-              <span>{ltp2Score.warnings[0]}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Expanded Legacy LTP (fallback) */}
-      {expanded && !ltp2Score && ltpAnalysis && (
-        <div className="px-3 pb-3 space-y-1">
-          <ScoreBar label="Level" value={ltpAnalysis.levels.levelScore} color="var(--accent-primary)" />
-          <ScoreBar label="Trend" value={ltpAnalysis.trend.trendScore} color="var(--success)" />
-          <ScoreBar label="Patience" value={ltpAnalysis.patience.patienceScore} color="var(--warning)" />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ScoreBar({ label, value, max = 100, color }: { label: string; value: number; max?: number; color: string }) {
-  const percentage = max > 0 ? (value / max) * 100 : 0;
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-12 text-[10px] font-bold text-[var(--text-tertiary)] truncate">{label}</span>
-      <div className="flex-1 h-1.5 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${Math.min(percentage, 100)}%`, backgroundColor: color }}
-        />
-      </div>
-      <span className="w-8 text-[10px] font-mono text-right text-[var(--text-secondary)]">{value}</span>
-    </div>
-  );
-}
-
-// ============================================================================
-// WATCHLIST OVERLAY
-// ============================================================================
-
-function WatchlistOverlay({
-  watchlist,
-  setups,
-  selectedSymbol,
-  onSelectSymbol,
-  onAddSymbol,
-  onRemoveSymbol,
-  newSymbol,
-  setNewSymbol,
-  loading,
-  expanded,
-  onToggle,
-}: {
-  watchlist: WatchlistSymbol[];
-  setups: DetectedSetup[];
-  selectedSymbol: string | null;
-  onSelectSymbol: (symbol: string | null) => void;
-  onAddSymbol: () => void;
-  onRemoveSymbol: (symbol: string) => void;
-  newSymbol: string;
-  setNewSymbol: (v: string) => void;
-  loading: boolean;
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  if (!expanded) {
-    return (
-      <button
-        onClick={onToggle}
-        className="w-10 h-10 rounded-lg bg-[#0d0d0d]/90 backdrop-blur border border-[var(--border-primary)] flex items-center justify-center hover:bg-[var(--bg-tertiary)] transition-colors"
-      >
-        <Eye className="w-4 h-4 text-[var(--accent-primary)]" />
-      </button>
-    );
-  }
-
-  return (
-    <div className="bg-[#0d0d0d]/90 backdrop-blur border border-[var(--border-primary)] rounded-lg overflow-hidden max-h-[60vh]">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-primary)]">
-        <div className="flex items-center gap-2">
-          <Eye className="w-4 h-4 text-[var(--accent-primary)]" />
-          <span className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">Watch</span>
-        </div>
-        <button onClick={onToggle} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
-          <ChevronDown className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Add Symbol */}
-      <div className="p-2 border-b border-[var(--border-primary)]">
-        <div className="flex gap-1">
-          <input
-            type="text"
-            placeholder="Symbol..."
-            value={newSymbol}
-            onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
-            onKeyDown={(e) => e.key === 'Enter' && onAddSymbol()}
-            className="flex-1 px-2 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:border-[var(--accent-primary)] focus:outline-none rounded"
-          />
-          <button
-            onClick={onAddSymbol}
-            className="px-2 py-1 bg-[var(--accent-primary)] text-white rounded hover:bg-[var(--accent-primary)]/90"
-          >
-            <Plus className="w-3 h-3" />
-          </button>
-        </div>
-      </div>
-
-      {/* Symbol List */}
-      <div className="overflow-y-auto max-h-[40vh]">
-        {watchlist.map((item) => {
-          const setup = setups.find(s => s.symbol === item.symbol);
-          const isSelected = selectedSymbol === item.symbol;
-          const isReady = setup?.setup_stage === 'ready';
-
-          return (
-            <button
-              key={item.id}
-              onClick={() => onSelectSymbol(isSelected ? null : item.symbol)}
-              className={cn(
-                'w-full px-3 py-2 flex items-center justify-between text-left transition-colors',
-                isSelected
-                  ? 'bg-[var(--accent-primary)]/20 border-l-2 border-l-[var(--accent-primary)]'
-                  : 'hover:bg-[var(--bg-tertiary)]'
-              )}
-            >
-              <div className="flex items-center gap-2">
-                {isReady && <Zap className="w-3 h-3 text-[var(--accent-primary)]" />}
-                <span className={cn(
-                  'text-xs font-semibold',
-                  isSelected ? 'text-[var(--accent-primary)]' : 'text-[var(--text-primary)]'
-                )}>
-                  {item.symbol}
-                </span>
-              </div>
-
-              {item.quote && (
-                <span className={cn(
-                  'text-[10px] font-mono',
-                  item.quote.change_percent >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'
-                )}>
-                  {item.quote.change_percent >= 0 ? '+' : ''}{item.quote.change_percent.toFixed(1)}%
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// COACH BOX - FLOATING TERMINAL
-// ============================================================================
-
-function CoachBox({
-  messages,
-  expanded,
-  onToggle,
-  alertType,
-  selectedSymbol,
-  mode,
-}: {
-  messages: CoachingMessage[];
-  expanded: boolean;
-  onToggle: () => void;
-  alertType: 'patience' | 'entry' | 'warning' | null;
-  selectedSymbol: string | null;
-  mode: CoachingMode;
-}) {
-  const borderColor = alertType === 'entry'
-    ? 'border-[var(--success)]'
-    : alertType === 'patience'
-    ? 'border-[var(--warning)]'
-    : alertType === 'warning'
-    ? 'border-[var(--error)]'
-    : 'border-[var(--border-primary)]';
-
-  const glowEffect = alertType === 'entry'
-    ? 'shadow-[0_0_20px_rgba(34,197,94,0.3)]'
-    : alertType === 'patience'
-    ? 'shadow-[0_0_20px_rgba(251,191,36,0.3)]'
-    : alertType === 'warning'
-    ? 'shadow-[0_0_20px_rgba(239,68,68,0.3)]'
-    : '';
-
-  if (!expanded) {
-    return (
-      <button
-        onClick={onToggle}
-        className={cn(
-          'w-10 h-10 rounded-lg bg-[#0d0d0d]/90 backdrop-blur border flex items-center justify-center transition-all duration-300',
-          borderColor,
-          glowEffect,
-          alertType && 'animate-pulse'
-        )}
-      >
-        <MessageSquare className={cn(
-          'w-4 h-4',
-          alertType === 'entry' ? 'text-[var(--success)]' :
-          alertType === 'patience' ? 'text-[var(--warning)]' :
-          alertType === 'warning' ? 'text-[var(--error)]' :
-          'text-[var(--accent-primary)]'
-        )} />
-      </button>
-    );
-  }
-
-  const primaryMessage = messages[0];
-
-  return (
-    <div className={cn(
-      'bg-[#0d0d0d]/95 backdrop-blur border rounded-lg overflow-hidden transition-all duration-300',
-      borderColor,
-      glowEffect
-    )}>
-      {/* Header */}
-      <div className={cn(
-        'flex items-center justify-between px-3 py-2 border-b',
-        alertType === 'entry' ? 'border-[var(--success)] bg-[var(--success)]/10' :
-        alertType === 'patience' ? 'border-[var(--warning)] bg-[var(--warning)]/10' :
-        alertType === 'warning' ? 'border-[var(--error)] bg-[var(--error)]/10' :
-        'border-[var(--border-primary)]'
-      )}>
-        <div className="flex items-center gap-2">
-          <Sparkles className={cn(
-            'w-4 h-4',
-            alertType === 'entry' ? 'text-[var(--success)]' :
-            alertType === 'patience' ? 'text-[var(--warning)]' :
-            alertType === 'warning' ? 'text-[var(--error)]' :
-            'text-[var(--accent-primary)]'
-          )} />
-          <span className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
-            Digital Somesh
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-[var(--text-tertiary)] uppercase">{mode}</span>
-          <button onClick={onToggle} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
-            <Minimize2 className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Messages */}
-      <div className="p-3 max-h-64 overflow-y-auto space-y-3">
-        {messages.length === 0 ? (
-          <div className="text-center py-4">
-            <p className="text-xs text-[var(--text-tertiary)]">
-              {selectedSymbol
-                ? 'Analyzing setup...'
-                : 'Select a symbol to get coaching'}
-            </p>
-          </div>
-        ) : (
-          messages.slice(0, 4).map((msg, i) => (
-            <CoachMessage key={i} message={msg} isPrimary={i === 0} />
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CoachMessage({ message, isPrimary }: { message: CoachingMessage; isPrimary: boolean }) {
-  const typeStyles: Record<string, string> = {
-    opportunity: 'border-l-[var(--success)]',
-    warning: 'border-l-[var(--error)]',
-    guidance: 'border-l-[var(--accent-primary)]',
-    education: 'border-l-[var(--info)]',
-    trade_management: 'border-l-[var(--warning)]',
-  };
-
-  return (
-    <div className={cn(
-      'border-l-2 pl-3 py-1',
-      typeStyles[message.type] || 'border-l-[var(--border-primary)]',
-      isPrimary && 'bg-[var(--bg-tertiary)]/50 -mx-3 px-3 rounded-r'
-    )}>
-      <div className="flex items-start gap-2">
-        <span className={cn(
-          'text-xs font-bold',
-          isPrimary ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'
-        )}>
-          {message.title}
-        </span>
-      </div>
-      <p className={cn(
-        'text-[11px] leading-relaxed mt-1',
-        isPrimary ? 'text-[var(--text-secondary)]' : 'text-[var(--text-tertiary)]'
-      )}>
-        {message.message}
-      </p>
-      {message.action && isPrimary && (
-        <div className="mt-2 flex items-center gap-1 text-[10px] text-[var(--accent-primary)]">
-          <Target className="w-3 h-3" />
-          <span>{message.action}</span>
-        </div>
-      )}
     </div>
   );
 }
