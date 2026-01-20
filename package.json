@@ -13,7 +13,9 @@
     "migrate:videos": "tsx scripts/migrate-videos.ts",
     "migrate:videos:dry": "tsx scripts/migrate-videos.ts --dry-run",
     "migrate:quizzes": "tsx scripts/import-quizzes.ts",
-    "migrate:quizzes:dry": "tsx scripts/import-quizzes.ts --dry-run"
+    "migrate:quizzes:dry": "tsx scripts/import-quizzes.ts --dry-run",
+    "market-worker": "tsx scripts/market-worker.ts",
+    "market-worker:debug": "DEBUG=1 tsx scripts/market-worker.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",
@@ -48,6 +50,7 @@
     "tailwindcss": "^3.4.10",
     "tus-js-client": "^4.3.1",
     "uuid": "^13.0.0",
+    "ws": "^8.19.0",
     "youtube-transcript": "^1.2.1",
     "zod": "^3.25.76"
   },
@@ -61,6 +64,7 @@
     "@types/react-dom": "^18.3.0",
     "@types/tus-js-client": "^1.8.0",
     "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
     "eslint": "^8.57.0",
     "eslint-config-next": "14.2.35",
     "jest": "^30.2.0",

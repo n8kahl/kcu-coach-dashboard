@@ -1,262 +1,52 @@
+/**
+ * Market Data Stream API Route
+ *
+ * Provides Server-Sent Events (SSE) stream of market data to clients.
+ *
+ * Architecture:
+ * - This route is a STATELESS fan-out layer
+ * - It subscribes to Redis Pub/Sub channels via MarketRedistributor
+ * - Market data is ingested by a separate worker process (scripts/market-worker.ts)
+ * - This design allows horizontal scaling with multiple API instances
+ *
+ * Usage:
+ *   GET /api/market/stream?symbols=SPY,QQQ,AAPL
+ *
+ * Events sent:
+ *   - type: 'connecting' - Initial connection state
+ *   - type: 'subscribed' - Subscription confirmed with symbol list
+ *   - type: 'trade' - Real-time trade data
+ *   - type: 'bar' - Aggregated bar/candle data
+ *   - type: 'heartbeat' - Keep-alive ping (every 30s)
+ *   - type: 'error' - Error notification
+ */
+
 import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/auth';
+import {
+  createMarketRedistributor,
+  StreamMessage,
+  MarketRedistributor,
+} from '@/lib/market-redistributor';
+import { isRedisAvailable } from '@/lib/redis';
 
-// Massive.com WebSocket message types
-interface MassiveMessage {
-  ev?: string;
-  status?: string;
-  message?: string;
-  sym?: string;
-  p?: number;
-  s?: number;
-  t?: number;
-  v?: number;
-  vw?: number;
-  o?: number;
-  h?: number;
-  l?: number;
-  c?: number;
-}
+// Configuration
+const CONFIG = {
+  // Default symbols if none specified
+  defaultSymbols: ['SPY', 'QQQ'],
 
-// Normalized message format we send to clients
-interface StreamMessage {
-  type: 'connected' | 'subscribed' | 'quote' | 'trade' | 'bar' | 'error' | 'heartbeat';
-  symbol?: string;
-  data?: {
-    price?: number;
-    size?: number;
-    volume?: number;
-    vwap?: number;
-    open?: number;
-    high?: number;
-    low?: number;
-    close?: number;
-    timestamp?: number;
-  };
-  symbols?: string[];
-  message?: string;
-}
+  // Heartbeat interval in milliseconds
+  heartbeatIntervalMs: 30000,
 
-// Connection manager for shared WebSocket
-class MassiveWebSocketManager {
-  private static instance: MassiveWebSocketManager | null = null;
-  private ws: WebSocket | null = null;
-  private subscribers: Map<string, Set<(msg: StreamMessage) => void>> = new Map();
-  private globalListeners: Set<(msg: StreamMessage) => void> = new Set();
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
-  private reconnectTimeout: NodeJS.Timeout | null = null;
-  private isConnecting = false;
-  private subscribedSymbols: Set<string> = new Set();
+  // Maximum symbols per connection
+  maxSymbols: 50,
+};
 
-  static getInstance(): MassiveWebSocketManager {
-    if (!MassiveWebSocketManager.instance) {
-      MassiveWebSocketManager.instance = new MassiveWebSocketManager();
-    }
-    return MassiveWebSocketManager.instance;
-  }
-
-  private async connect(): Promise<void> {
-    if (this.isConnecting || this.ws?.readyState === WebSocket.OPEN) return;
-
-    const apiKey = process.env.MASSIVE_API_KEY;
-    if (!apiKey) {
-      this.notifyAll({ type: 'error', message: 'Market data not configured' });
-      return;
-    }
-
-    this.isConnecting = true;
-    const wsUrl = process.env.MASSIVE_WS_URL || 'wss://socket.massive.com/stocks';
-
-    try {
-      this.ws = new WebSocket(wsUrl);
-
-      this.ws.onopen = () => {
-        console.log('[MarketStream] Connected to Massive.com');
-        this.isConnecting = false;
-        this.reconnectAttempts = 0;
-
-        // Authenticate
-        this.ws?.send(JSON.stringify({ action: 'auth', params: apiKey }));
-      };
-
-      this.ws.onmessage = (event) => {
-        try {
-          const messages: MassiveMessage[] = JSON.parse(event.data);
-
-          for (const msg of messages) {
-            this.handleMessage(msg);
-          }
-        } catch (err) {
-          console.error('[MarketStream] Parse error:', err);
-        }
-      };
-
-      this.ws.onerror = (error) => {
-        console.error('[MarketStream] WebSocket error:', error);
-        this.isConnecting = false;
-      };
-
-      this.ws.onclose = () => {
-        console.log('[MarketStream] Disconnected');
-        this.isConnecting = false;
-        this.ws = null;
-        this.scheduleReconnect();
-      };
-    } catch (error) {
-      console.error('[MarketStream] Connection failed:', error);
-      this.isConnecting = false;
-      this.scheduleReconnect();
-    }
-  }
-
-  private handleMessage(msg: MassiveMessage): void {
-    // Authentication status
-    if (msg.ev === 'status') {
-      if (msg.status === 'auth_success') {
-        console.log('[MarketStream] Authenticated');
-        this.notifyAll({ type: 'connected' });
-
-        // Resubscribe to existing symbols
-        if (this.subscribedSymbols.size > 0) {
-          this.sendSubscribe(Array.from(this.subscribedSymbols));
-        }
-      } else if (msg.status === 'error') {
-        this.notifyAll({ type: 'error', message: msg.message });
-      }
-      return;
-    }
-
-    // Trade data
-    if (msg.ev === 'T' && msg.sym) {
-      const streamMsg: StreamMessage = {
-        type: 'trade',
-        symbol: msg.sym,
-        data: {
-          price: msg.p,
-          size: msg.s,
-          timestamp: msg.t,
-        },
-      };
-      this.notifySymbol(msg.sym, streamMsg);
-      return;
-    }
-
-    // Quote data
-    if (msg.ev === 'Q' && msg.sym) {
-      const streamMsg: StreamMessage = {
-        type: 'quote',
-        symbol: msg.sym,
-        data: {
-          price: msg.p,
-          size: msg.s,
-          timestamp: msg.t,
-        },
-      };
-      this.notifySymbol(msg.sym, streamMsg);
-      return;
-    }
-
-    // Aggregate (bar) data
-    if ((msg.ev === 'A' || msg.ev === 'AM') && msg.sym) {
-      const streamMsg: StreamMessage = {
-        type: 'bar',
-        symbol: msg.sym,
-        data: {
-          open: msg.o,
-          high: msg.h,
-          low: msg.l,
-          close: msg.c,
-          volume: msg.v,
-          vwap: msg.vw,
-          timestamp: msg.t,
-        },
-      };
-      this.notifySymbol(msg.sym, streamMsg);
-    }
-  }
-
-  private notifySymbol(symbol: string, msg: StreamMessage): void {
-    const listeners = this.subscribers.get(symbol);
-    if (listeners) {
-      Array.from(listeners).forEach(listener => listener(msg));
-    }
-    // Also notify global listeners
-    Array.from(this.globalListeners).forEach(listener => listener(msg));
-  }
-
-  private notifyAll(msg: StreamMessage): void {
-    Array.from(this.globalListeners).forEach(listener => listener(msg));
-    Array.from(this.subscribers.values()).forEach(listeners => {
-      Array.from(listeners).forEach(listener => listener(msg));
-    });
-  }
-
-  private scheduleReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('[MarketStream] Max reconnect attempts reached');
-      this.notifyAll({ type: 'error', message: 'Connection lost' });
-      return;
-    }
-
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-    this.reconnectAttempts++;
-
-    console.log(`[MarketStream] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
-
-    this.reconnectTimeout = setTimeout(() => {
-      this.connect();
-    }, delay);
-  }
-
-  private sendSubscribe(symbols: string[]): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      // Subscribe to trades and aggregates
-      this.ws.send(JSON.stringify({ action: 'subscribe', params: symbols.map(s => `T.${s}`).join(',') }));
-      this.ws.send(JSON.stringify({ action: 'subscribe', params: symbols.map(s => `AM.${s}`).join(',') }));
-    }
-  }
-
-  subscribe(symbols: string[], listener: (msg: StreamMessage) => void): () => void {
-    // Ensure connection
-    this.connect();
-
-    // Add listener to each symbol
-    for (const symbol of symbols) {
-      if (!this.subscribers.has(symbol)) {
-        this.subscribers.set(symbol, new Set());
-      }
-      this.subscribers.get(symbol)!.add(listener);
-
-      // Track and subscribe to new symbols
-      if (!this.subscribedSymbols.has(symbol)) {
-        this.subscribedSymbols.add(symbol);
-        if (this.ws?.readyState === WebSocket.OPEN) {
-          this.sendSubscribe([symbol]);
-        }
-      }
-    }
-
-    // Add as global listener for connection events
-    this.globalListeners.add(listener);
-
-    // Return unsubscribe function
-    return () => {
-      for (const symbol of symbols) {
-        this.subscribers.get(symbol)?.delete(listener);
-      }
-      this.globalListeners.delete(listener);
-    };
-  }
-
-  getConnectionState(): 'connected' | 'connecting' | 'disconnected' {
-    if (this.ws?.readyState === WebSocket.OPEN) return 'connected';
-    if (this.isConnecting || this.ws?.readyState === WebSocket.CONNECTING) return 'connecting';
-    return 'disconnected';
-  }
-}
-
-// SSE endpoint for clients
+/**
+ * GET /api/market/stream
+ *
+ * SSE endpoint for real-time market data
+ */
 export async function GET(request: NextRequest) {
   // Verify authentication
   const session = await getSession();
@@ -264,71 +54,152 @@ export async function GET(request: NextRequest) {
     return new Response('Unauthorized', { status: 401 });
   }
 
-  // Get symbols from query
+  // Check Redis availability
+  const redisAvailable = await isRedisAvailable();
+  if (!redisAvailable) {
+    return new Response(
+      JSON.stringify({
+        error: 'Market data service unavailable',
+        message: 'Redis connection not available. Market data streaming requires Redis.',
+      }),
+      {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  // Parse symbols from query parameters
   const { searchParams } = new URL(request.url);
   const symbolsParam = searchParams.get('symbols');
-  const symbols = symbolsParam ? symbolsParam.split(',').map(s => s.trim().toUpperCase()) : ['SPY', 'QQQ'];
+  let symbols = symbolsParam
+    ? symbolsParam.split(',').map(s => s.trim().toUpperCase()).filter(s => s.length > 0)
+    : CONFIG.defaultSymbols;
 
-  // Set up SSE stream
+  // Limit number of symbols
+  if (symbols.length > CONFIG.maxSymbols) {
+    symbols = symbols.slice(0, CONFIG.maxSymbols);
+    console.warn(`[MarketStream] Limiting symbols to ${CONFIG.maxSymbols}`);
+  }
+
+  // Create SSE stream
   const encoder = new TextEncoder();
   let isActive = true;
+  let redistributor: MarketRedistributor | null = null;
+  let unsubscribe: (() => void) | null = null;
+  let heartbeatInterval: NodeJS.Timeout | null = null;
 
   const stream = new ReadableStream({
-    start(controller) {
-      const manager = MassiveWebSocketManager.getInstance();
+    async start(controller) {
+      try {
+        // Create redistributor instance for this connection
+        redistributor = createMarketRedistributor();
 
-      // Send initial connection state
-      const initialState = manager.getConnectionState();
-      controller.enqueue(
-        encoder.encode(`data: ${JSON.stringify({ type: initialState === 'connected' ? 'connected' : 'connecting' })}\n\n`)
-      );
+        // Send initial connecting state
+        sendMessage(controller, encoder, {
+          type: 'connecting' as const,
+          message: 'Connecting to market data stream...',
+        });
 
-      // Subscribe to updates
-      const unsubscribe = manager.subscribe(symbols, (msg) => {
-        if (!isActive) return;
+        // Subscribe to requested symbols via Redis
+        unsubscribe = await redistributor.subscribeToUpdates(
+          symbols,
+          (symbol: string, message: StreamMessage) => {
+            if (!isActive) return;
 
-        try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(msg)}\n\n`));
-        } catch {
-          // Stream closed
-          isActive = false;
-        }
-      });
+            try {
+              // Forward the message to the client
+              sendMessage(controller, encoder, message);
+            } catch {
+              // Stream closed
+              isActive = false;
+              cleanup();
+            }
+          }
+        );
 
-      // Send confirmation of subscription
-      controller.enqueue(
-        encoder.encode(`data: ${JSON.stringify({ type: 'subscribed', symbols })}\n\n`)
-      );
+        // Send subscription confirmation
+        sendMessage(controller, encoder, {
+          type: 'subscribed' as const,
+          symbols,
+          message: `Subscribed to ${symbols.length} symbol(s)`,
+        });
 
-      // Heartbeat to keep connection alive
-      const heartbeatInterval = setInterval(() => {
-        if (!isActive) {
-          clearInterval(heartbeatInterval);
-          return;
-        }
-        try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'heartbeat' })}\n\n`));
-        } catch {
-          isActive = false;
-          clearInterval(heartbeatInterval);
-        }
-      }, 30000);
+        // Start heartbeat to keep connection alive
+        heartbeatInterval = setInterval(() => {
+          if (!isActive) {
+            cleanup();
+            return;
+          }
 
-      // Clean up on close
-      request.signal.addEventListener('abort', () => {
-        isActive = false;
-        clearInterval(heartbeatInterval);
-        unsubscribe();
-      });
+          try {
+            sendMessage(controller, encoder, { type: 'heartbeat' as const });
+          } catch {
+            isActive = false;
+            cleanup();
+          }
+        }, CONFIG.heartbeatIntervalMs);
+
+        console.log(`[MarketStream] Client subscribed to: ${symbols.join(', ')}`);
+      } catch (error) {
+        console.error('[MarketStream] Error setting up stream:', error);
+        sendMessage(controller, encoder, {
+          type: 'error' as const,
+          message: 'Failed to connect to market data stream',
+        });
+        controller.close();
+      }
+    },
+
+    cancel() {
+      cleanup();
     },
   });
+
+  // Clean up on request abort
+  request.signal.addEventListener('abort', () => {
+    isActive = false;
+    cleanup();
+  });
+
+  // Cleanup function
+  function cleanup(): void {
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
+
+    if (unsubscribe) {
+      unsubscribe();
+      unsubscribe = null;
+    }
+
+    if (redistributor) {
+      redistributor.close().catch(console.error);
+      redistributor = null;
+    }
+
+    console.log('[MarketStream] Client disconnected');
+  }
 
   return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
       'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
+      'X-Accel-Buffering': 'no', // Disable nginx buffering
     },
   });
+}
+
+/**
+ * Helper to send SSE message
+ */
+function sendMessage(
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  data: Record<string, unknown>
+): void {
+  const message = `data: ${JSON.stringify(data)}\n\n`;
+  controller.enqueue(encoder.encode(message));
 }
