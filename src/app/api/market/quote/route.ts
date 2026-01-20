@@ -23,7 +23,7 @@ async function quoteHandler(request: NextRequest) {
     }
 
     const response = await fetch(
-      `https://api.massive.com/v1/snapshot/stocks/tickers/${symbol.toUpperCase()}?apiKey=${apiKey}`
+      `https://api.massive.com/v2/snapshot/locale/us/markets/stocks/tickers/${symbol.toUpperCase()}?apiKey=${apiKey}`
     );
 
     if (!response.ok) {
