@@ -767,12 +767,15 @@ export function KCUChart({
         const startTime = toChartTime(data[0].time);
         const endTime = toChartTime(data[data.length - 1].time);
 
-        // Only set data if both times are valid
+        // Only set data if both times are valid and different (avoid duplicate timestamps)
         if (startTime !== null && endTime !== null) {
-          const lineData: LineData[] = [
-            { time: startTime, value: level.price },
-            { time: endTime, value: level.price },
-          ];
+          // If only one candle or same timestamp, use single point
+          const lineData: LineData[] = startTime === endTime
+            ? [{ time: startTime, value: level.price }]
+            : [
+                { time: startTime, value: level.price },
+                { time: endTime, value: level.price },
+              ];
           series.setData(lineData);
         }
       }
@@ -879,12 +882,15 @@ export function KCUChart({
       const startTime = toChartTime(data[0].time);
       const endTime = toChartTime(data[data.length - 1].time);
 
-      // Only set data if both times are valid
+      // Only set data if both times are valid and different (avoid duplicate timestamps)
       if (startTime !== null && endTime !== null) {
-        const lineData: LineData[] = [
-          { time: startTime, value: gamma.price },
-          { time: endTime, value: gamma.price },
-        ];
+        // If only one candle or same timestamp, use single point
+        const lineData: LineData[] = startTime === endTime
+          ? [{ time: startTime, value: gamma.price }]
+          : [
+              { time: startTime, value: gamma.price },
+              { time: endTime, value: gamma.price },
+            ];
         series.setData(lineData);
       }
 
