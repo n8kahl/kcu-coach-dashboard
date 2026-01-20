@@ -1,32 +1,14 @@
 'use client';
 
 /**
- * KCUChart - Unified Trading Chart Component
+ * KCUChart - Unified Trading Chart Component (HARDENED)
  *
- * A lightweight-charts based charting component that serves both
- * Companion Mode (live) and Practice Mode (replay).
- *
- * Features:
- * - Somesh's Indicators: 8 EMA, 21 EMA, 200 SMA, VWAP, Ripster Clouds
- * - Gamma Levels: Call Wall (cyan) and Put Wall (magenta)
- * - FVG Zones: Fair Value Gap visualization
- * - Patience Candle: Inside Bar detection with yellow diamond markers
- *
- * @example
- * ```tsx
- * <KCUChart
- *   mode="live"
- *   data={candles}
- *   levels={keyLevels}
- *   gammaLevels={gammaData}
- *   fvgZones={fvgData}
- *   symbol="TSLA"
- *   onCandleClick={(candle) => console.log(candle)}
- * />
- * ```
+ * CRITICAL FIX: Uses series pool pattern to prevent "Value is null" crashes.
+ * All series are pre-created at initialization - NO dynamic add/remove.
+ * Unused series are hidden by setting empty data, not removed.
  */
 
-import { useEffect, useRef, useCallback, useState, useLayoutEffect, memo } from 'react';
+import { useEffect, useRef, useState, useLayoutEffect, memo } from 'react';
 import {
   createChart,
   ColorType,
@@ -36,10 +18,8 @@ import {
   ISeriesApi,
   CandlestickData,
   LineData,
-  AreaData,
   Time,
   SeriesMarker,
-  SeriesMarkerShape,
 } from 'lightweight-charts';
 import { Loader2 } from 'lucide-react';
 
@@ -48,7 +28,7 @@ import { Loader2 } from 'lucide-react';
 // =============================================================================
 
 export interface Candle {
-  time: number | string; // Unix timestamp or ISO string
+  time: number | string;
   open: number;
   high: number;
   low: number;
@@ -67,7 +47,7 @@ export interface Level {
 export interface GammaLevel {
   price: number;
   type: 'call_wall' | 'put_wall' | 'zero_gamma' | 'max_pain';
-  strength?: number; // 0-100
+  strength?: number;
   label?: string;
 }
 
@@ -81,76 +61,45 @@ export interface FVGZone {
 }
 
 export interface KCUChartProps {
-  /** Chart operating mode */
   mode: 'live' | 'replay';
-  /** Candle data array */
   data: Candle[];
-  /** Key price levels */
   levels?: Level[];
-  /** Gamma exposure levels from options flow */
   gammaLevels?: GammaLevel[];
-  /** Fair Value Gap zones */
   fvgZones?: FVGZone[];
-  /** Trading symbol */
   symbol?: string;
-  /** Chart height in pixels */
   height?: number;
-  /** Show volume histogram */
   showVolume?: boolean;
-  /** Show Somesh's indicators */
   showIndicators?: boolean;
-  /** Show patience candle markers */
   showPatienceCandles?: boolean;
-  /** Callback when candle is clicked */
   onCandleClick?: (candle: Candle, index: number) => void;
-  /** Callback when crosshair moves */
   onCrosshairMove?: (price: number | null, time: Time | null) => void;
-  /** Current replay index for replay mode */
   replayIndex?: number;
-  /** Custom CSS class */
   className?: string;
 }
 
 // =============================================================================
-// Constants - Somesh's Indicator Colors
+// Constants
 // =============================================================================
 
 const CHART_COLORS = {
-  // Background
   background: '#0d0d0d',
   textColor: '#d1d5db',
   gridColor: 'rgba(255, 255, 255, 0.03)',
-
-  // Candles
   upColor: '#22c55e',
   downColor: '#ef4444',
   wickUpColor: '#22c55e',
   wickDownColor: '#ef4444',
-
-  // Somesh's Indicators
-  ema8: '#22c55e',      // GREEN - Fast EMA
-  ema21: '#ef4444',     // RED - Slow EMA
-  sma200: '#f97316',    // ORANGE - 200 SMA (dotted)
-  vwap: '#ffffff',      // WHITE - VWAP
-
-  // Ripster Clouds
-  cloudBullish: 'rgba(34, 197, 94, 0.15)',   // Green tint when EMA8 > EMA21
-  cloudBearish: 'rgba(239, 68, 68, 0.15)',   // Red tint when EMA8 < EMA21
-
-  // Gamma Levels (Institutional)
-  callWall: '#ff00ff',    // MAGENTA - Resistance (MM selling calls)
-  putWall: '#00ffff',     // CYAN - Support (MM selling puts)
-  zeroGamma: '#ffffff',   // WHITE - Gamma flip point
-  maxPain: '#8b5cf6',     // PURPLE - Max pain strike
-
-  // FVG Zones
-  fvgBullish: 'rgba(34, 197, 94, 0.2)',
-  fvgBearish: 'rgba(239, 68, 68, 0.2)',
-
-  // Patience Candle
-  patienceMarker: '#fbbf24', // YELLOW diamond
-
-  // Volume
+  ema8: '#22c55e',
+  ema21: '#ef4444',
+  sma200: '#f97316',
+  vwap: '#ffffff',
+  cloudBullish: 'rgba(34, 197, 94, 0.15)',
+  cloudBearish: 'rgba(239, 68, 68, 0.15)',
+  callWall: '#ff00ff',
+  putWall: '#00ffff',
+  zeroGamma: '#ffffff',
+  maxPain: '#8b5cf6',
+  patienceMarker: '#fbbf24',
   volumeUp: 'rgba(34, 197, 94, 0.5)',
   volumeDown: 'rgba(239, 68, 68, 0.5)',
 };
@@ -164,404 +113,153 @@ const LEVEL_COLORS: Record<Level['type'], string> = {
   custom: '#6b7280',
 };
 
+// Pool sizes - pre-allocate this many series
+const MAX_LEVEL_SERIES = 20;
+const MAX_GAMMA_SERIES = 10;
+const MIN_CHART_HEIGHT = 400;
+
 // =============================================================================
-// Indicator Calculation Utilities (Hardened - Returns null for invalid data)
+// Utility Functions
 // =============================================================================
 
-/**
- * Calculate EMA with null for insufficient data periods.
- * CRITICAL: Returns (number | null)[] - null values MUST be filtered before charting.
- */
+function isValidNumber(val: unknown): val is number {
+  return typeof val === 'number' && Number.isFinite(val) && !Number.isNaN(val);
+}
+
+function isValidPrice(val: unknown): val is number {
+  return isValidNumber(val) && val > 0;
+}
+
+function toChartTime(time: number | string | null | undefined): Time | null {
+  if (time == null) return null;
+
+  let result: number;
+  if (typeof time === 'string') {
+    const d = new Date(time);
+    if (isNaN(d.getTime())) return null;
+    result = Math.floor(d.getTime() / 1000);
+  } else if (typeof time === 'number') {
+    if (!Number.isFinite(time)) return null;
+    result = time >= 1e12 ? Math.floor(time / 1000) : Math.floor(time);
+  } else {
+    return null;
+  }
+
+  if (!Number.isFinite(result) || result <= 0) return null;
+  return result as Time;
+}
+
 function calculateEMA(data: number[], period: number): (number | null)[] {
   const ema: (number | null)[] = [];
-
-  // Guard: empty or insufficient data
-  if (data.length === 0 || period <= 0) return ema;
+  if (data.length < period) return new Array(data.length).fill(null);
 
   const multiplier = 2 / (period + 1);
-
-  // Fill with null for indices before the EMA can be calculated
-  for (let i = 0; i < Math.min(period - 1, data.length); i++) {
-    ema.push(null);
-  }
-
-  // Guard: if we don't have enough data to start EMA, return all nulls
-  if (data.length < period) {
-    return ema;
-  }
-
-  // First EMA is SMA of the first 'period' values
   let sum = 0;
-  let validCount = 0;
   for (let i = 0; i < period; i++) {
-    const val = data[i];
-    // Strict validation - skip invalid values
-    if (typeof val !== 'number' || !Number.isFinite(val)) {
-      continue;
-    }
-    sum += val;
-    validCount++;
-  }
-
-  // Guard: division by zero
-  if (validCount === 0) {
+    sum += data[i] || 0;
     ema.push(null);
-  } else {
-    const firstEma = sum / validCount;
-    ema.push(Number.isFinite(firstEma) ? firstEma : null);
   }
+  ema[period - 1] = sum / period;
 
-  // Calculate EMA for remaining values
   for (let i = period; i < data.length; i++) {
-    const prevEma = ema[i - 1];
-    const currentVal = data[i];
-
-    // If previous EMA is null or current value is invalid, propagate null
-    if (
-      prevEma === null ||
-      typeof currentVal !== 'number' ||
-      !Number.isFinite(currentVal)
-    ) {
-      ema.push(null);
+    const prev = ema[i - 1];
+    if (prev !== null && isValidNumber(data[i])) {
+      ema.push((data[i] - prev) * multiplier + prev);
     } else {
-      const newEma = (currentVal - prevEma) * multiplier + prevEma;
-      ema.push(Number.isFinite(newEma) ? newEma : null);
+      ema.push(null);
     }
   }
-
   return ema;
 }
 
-/**
- * Calculate SMA with null for insufficient data periods.
- * CRITICAL: Returns (number | null)[] - null values MUST be filtered before charting.
- */
 function calculateSMA(data: number[], period: number): (number | null)[] {
   const sma: (number | null)[] = [];
-
-  // Guard: invalid inputs
-  if (data.length === 0 || period <= 0) return sma;
-
   for (let i = 0; i < data.length; i++) {
-    // Return null for insufficient data - this is filtered out downstream
     if (i < period - 1) {
       sma.push(null);
       continue;
     }
-
     let sum = 0;
-    let validCount = 0;
+    let count = 0;
     for (let j = 0; j < period; j++) {
-      const val = data[i - j];
-      // Strict validation
-      if (typeof val === 'number' && Number.isFinite(val)) {
-        sum += val;
-        validCount++;
+      if (isValidNumber(data[i - j])) {
+        sum += data[i - j];
+        count++;
       }
     }
-
-    // Guard: division by zero - if no valid values, push null
-    if (validCount === 0) {
-      sma.push(null);
-    } else {
-      const avg = sum / validCount;
-      sma.push(Number.isFinite(avg) ? avg : null);
-    }
+    sma.push(count > 0 ? sum / count : null);
   }
-
   return sma;
 }
 
-/**
- * Calculate VWAP with null for invalid data points.
- * CRITICAL: Returns (number | null)[] - null values MUST be filtered before charting.
- */
 function calculateVWAP(candles: Candle[]): (number | null)[] {
   const vwap: (number | null)[] = [];
   let cumulativeTPV = 0;
   let cumulativeVolume = 0;
 
-  for (let i = 0; i < candles.length; i++) {
-    const candle = candles[i];
-
-    // Validate OHLC values
-    const high = candle.high;
-    const low = candle.low;
-    const close = candle.close;
-
-    if (
-      typeof high !== 'number' || !Number.isFinite(high) ||
-      typeof low !== 'number' || !Number.isFinite(low) ||
-      typeof close !== 'number' || !Number.isFinite(close)
-    ) {
+  for (const candle of candles) {
+    if (!isValidPrice(candle.high) || !isValidPrice(candle.low) || !isValidPrice(candle.close)) {
       vwap.push(null);
       continue;
     }
-
-    const typicalPrice = (high + low + close) / 3;
-    const volume = (typeof candle.volume === 'number' && Number.isFinite(candle.volume) && candle.volume > 0)
-      ? candle.volume
-      : 1; // Default to 1 to prevent division issues
-
+    const typicalPrice = (candle.high + candle.low + candle.close) / 3;
+    const volume = isValidNumber(candle.volume) && candle.volume > 0 ? candle.volume : 1;
     cumulativeTPV += typicalPrice * volume;
     cumulativeVolume += volume;
-
-    // Guard: division by zero
-    if (cumulativeVolume <= 0) {
-      vwap.push(null);
-    } else {
-      const vwapValue = cumulativeTPV / cumulativeVolume;
-      vwap.push(Number.isFinite(vwapValue) ? vwapValue : null);
-    }
+    vwap.push(cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : null);
   }
-
   return vwap;
 }
 
-/**
- * Detect Inside Bar (Patience Candle) pattern
- * An Inside Bar has: High < Previous High AND Low > Previous Low
- */
 function detectInsideBars(candles: Candle[]): number[] {
-  const insideBarIndices: number[] = [];
-
+  const indices: number[] = [];
   for (let i = 1; i < candles.length; i++) {
-    const current = candles[i];
-    const previous = candles[i - 1];
-
-    if (current.high < previous.high && current.low > previous.low) {
-      insideBarIndices.push(i);
+    const curr = candles[i];
+    const prev = candles[i - 1];
+    if (curr.high < prev.high && curr.low > prev.low) {
+      indices.push(i);
     }
   }
-
-  return insideBarIndices;
+  return indices;
 }
 
 /**
- * Convert timestamp to lightweight-charts Time format.
- * CRITICAL: Returns null for ANY invalid input to prevent "Value is null" crashes.
- *
- * Handles:
- * - null/undefined inputs
- * - NaN, Infinity, -Infinity
- * - Invalid date strings
- * - Negative timestamps
- * - Zero timestamps
- * - Both millisecond and second timestamps
+ * Safely set data on a series. Filters invalid points and wraps in try-catch.
  */
-function toChartTime(time: number | string | null | undefined): Time | null {
-  // Guard: null/undefined
-  if (time == null) return null;
+function safeSetData(
+  series: ISeriesApi<'Line'> | ISeriesApi<'Area'> | ISeriesApi<'Histogram'> | null,
+  data: LineData[]
+): void {
+  if (!series) return;
 
-  let result: number;
-
-  if (typeof time === 'string') {
-    // Guard: empty string
-    if (time.trim() === '') return null;
-
-    const date = new Date(time);
-    const timestamp = date.getTime();
-
-    // Guard: Invalid Date returns NaN
-    if (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || Number.isNaN(timestamp)) {
-      return null;
+  try {
+    const valid = data.filter(
+      (d) =>
+        d.time !== null &&
+        d.time !== undefined &&
+        isValidNumber(d.value)
+    );
+    series.setData(valid);
+  } catch (e) {
+    // Silently catch to prevent crash
+    console.warn('[KCUChart] safeSetData error:', e);
+    try {
+      series.setData([]);
+    } catch {
+      // Ignore
     }
-
-    result = Math.floor(timestamp / 1000);
-  } else if (typeof time === 'number') {
-    // Guard: NaN, Infinity, -Infinity
-    if (!Number.isFinite(time) || Number.isNaN(time)) return null;
-
-    // If already in seconds (< 1e12), use directly; if in ms (>= 1e12), convert
-    result = time >= 1e12 ? Math.floor(time / 1000) : Math.floor(time);
-  } else {
-    // Unknown type
-    return null;
   }
-
-  // Final validation - must be a finite positive integer
-  if (!Number.isFinite(result) || Number.isNaN(result) || result <= 0) {
-    return null;
-  }
-
-  // Sanity check: reasonable timestamp range (year 1970 to year 2100)
-  // This catches obviously wrong values
-  const MIN_TIMESTAMP = 0;           // 1970-01-01
-  const MAX_TIMESTAMP = 4102444800;  // 2100-01-01
-  if (result < MIN_TIMESTAMP || result > MAX_TIMESTAMP) {
-    return null;
-  }
-
-  return result as Time;
 }
 
 // =============================================================================
 // Main Component
 // =============================================================================
 
-// Minimum height fallback when container has 0 height
-const MIN_CHART_HEIGHT = 400;
-// Enable visual debugging (set to true to show red border)
-const DEBUG_CHART = false;
-// Enable detailed console logging for debugging "Value is null" errors
-const DEBUG_LOGGING = false;
-
-/**
- * Type guard to validate a line/area data point has valid time and value.
- * CRITICAL: Uses Number.isFinite (not isFinite) to reject null/undefined.
- */
-function isValidDataPoint(d: unknown): d is { time: Time; value: number } {
-  if (d === null || d === undefined || typeof d !== 'object') return false;
-  const point = d as Record<string, unknown>;
-
-  // Validate time
-  if (
-    point.time === null ||
-    point.time === undefined ||
-    typeof point.time !== 'number' ||
-    !Number.isFinite(point.time) ||
-    point.time <= 0
-  ) {
-    return false;
-  }
-
-  // Validate value (if present)
-  if ('value' in point) {
-    if (
-      point.value === null ||
-      point.value === undefined ||
-      typeof point.value !== 'number' ||
-      !Number.isFinite(point.value)
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/**
- * Bulletproof setData wrapper that:
- * 1. Filters out ANY invalid data points before passing to chart
- * 2. Handles empty arrays safely
- * 3. Wraps in try/catch to prevent crashes
- * 4. Logs warnings instead of crashing
- *
- * CRITICAL: This is the ONLY function that should call series.setData()
- */
-function safeSetData<T extends { time: Time; value?: number }>(
-  series: ISeriesApi<'Line'> | ISeriesApi<'Area'> | ISeriesApi<'Histogram'> | ISeriesApi<'Candlestick'> | null,
-  data: T[],
-  seriesName: string
-): boolean {
-  // Guard: null series (component may have unmounted)
-  if (series === null) {
-    if (DEBUG_LOGGING) {
-      console.warn(`[KCUChart] ${seriesName} - series is null, skipping setData`);
-    }
-    return false;
-  }
-
-  // CRITICAL: Filter out invalid data points BEFORE passing to chart
-  const validData = data.filter((d): d is T => {
-    // Check time is valid
-    if (
-      d.time === null ||
-      d.time === undefined ||
-      typeof d.time !== 'number' ||
-      !Number.isFinite(d.time as number) ||
-      (d.time as number) <= 0
-    ) {
-      return false;
-    }
-
-    // Check value is valid (if present - candlesticks don't have 'value')
-    if ('value' in d) {
-      if (
-        d.value === null ||
-        d.value === undefined ||
-        typeof d.value !== 'number' ||
-        !Number.isFinite(d.value)
-      ) {
-        return false;
-      }
-    }
-
-    return true;
-  });
-
-  if (DEBUG_LOGGING) {
-    const filteredCount = data.length - validData.length;
-    console.log(`[KCUChart] ${seriesName} - ${validData.length} valid points (filtered ${filteredCount} invalid)`);
-    if (validData.length > 0) {
-      console.log(`[KCUChart] ${seriesName} first:`, JSON.stringify(validData[0]));
-      console.log(`[KCUChart] ${seriesName} last:`, JSON.stringify(validData[validData.length - 1]));
-    }
-  }
-
-  try {
-    // CRITICAL: Always call setData, even with empty array (clears the series)
-    series.setData(validData as Parameters<typeof series.setData>[0]);
-    return true;
-  } catch (error) {
-    // Log but DON'T CRASH - this is the whole point of this function
-    console.warn(`[KCUChart] ${seriesName} setData failed safely:`, error);
-    if (DEBUG_LOGGING) {
-      console.warn(`[KCUChart] ${seriesName} data sample:`, JSON.stringify(validData.slice(0, 3)));
-    }
-    // Try to clear the series to recover
-    try {
-      series.setData([]);
-    } catch {
-      // Ignore - series may be in unrecoverable state
-    }
-    return false;
-  }
-}
-
-/**
- * Validate a candle has all required OHLC fields as finite numbers.
- */
-function isValidCandle(c: Candle): boolean {
-  return (
-    typeof c.open === 'number' && Number.isFinite(c.open) &&
-    typeof c.high === 'number' && Number.isFinite(c.high) &&
-    typeof c.low === 'number' && Number.isFinite(c.low) &&
-    typeof c.close === 'number' && Number.isFinite(c.close) &&
-    c.time != null
-  );
-}
-
-/**
- * Validate a price value is a finite positive number.
- * CRITICAL: Uses Number.isFinite (not isFinite) to properly reject null/undefined.
- */
-function isValidPrice(price: unknown): price is number {
-  return typeof price === 'number' && Number.isFinite(price) && price > 0;
-}
-
-/**
- * Create a validated LineData point, or null if invalid.
- * This is the ONLY way overlay lines should create data points.
- */
-function createLinePoint(time: Time | null, value: unknown): LineData | null {
-  if (time === null) {
-    if (DEBUG_LOGGING) console.warn('[KCUChart] createLinePoint: time is null');
-    return null;
-  }
-  if (!isValidPrice(value)) {
-    if (DEBUG_LOGGING) console.warn('[KCUChart] createLinePoint: invalid price', value);
-    return null;
-  }
-  return { time, value };
-}
-
 export const KCUChart = memo(function KCUChart({
   mode,
   data,
   levels = [],
   gammaLevels = [],
-  fvgZones = [],
   symbol,
   height,
   showVolume = true,
@@ -572,30 +270,11 @@ export const KCUChart = memo(function KCUChart({
   replayIndex,
   className = '',
 }: KCUChartProps) {
-  // Log incoming props for debugging
-  if (DEBUG_LOGGING) {
-    console.log(`[KCUChart] Render - symbol=${symbol}, mode=${mode}, data.length=${data?.length || 0}, levels=${levels.length}, gammaLevels=${gammaLevels.length}, fvgZones=${fvgZones.length}`);
-    if (data && data.length > 0) {
-      const firstCandle = data[0];
-      const lastCandle = data[data.length - 1];
-      console.log(`[KCUChart] Data range - first time: ${firstCandle.time}, last time: ${lastCandle.time}`);
-      // Check for any invalid candles in the data
-      const invalidCandles = data.filter((c, i) => {
-        const hasIssue = c.time == null || c.open == null || c.high == null || c.low == null || c.close == null ||
-          !isFinite(c.time as number) || !isFinite(c.open) || !isFinite(c.high) || !isFinite(c.low) || !isFinite(c.close);
-        if (hasIssue) {
-          console.error(`[KCUChart] INVALID CANDLE at index ${i}:`, JSON.stringify(c));
-        }
-        return hasIssue;
-      });
-      if (invalidCandles.length > 0) {
-        console.error(`[KCUChart] Found ${invalidCandles.length} invalid candles in incoming data!`);
-      }
-    }
-  }
-
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const mountedRef = useRef(true);
+
+  // Main series refs
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const ema8SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
@@ -603,87 +282,49 @@ export const KCUChart = memo(function KCUChart({
   const sma200SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const cloudSeriesRef = useRef<ISeriesApi<'Area'> | null>(null);
-  const levelSeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
 
-  // Track if component is mounted to prevent operations on destroyed chart
-  // This prevents "Value is null" errors from async rendering callbacks
-  const mountedRef = useRef(true);
+  // PRE-ALLOCATED SERIES POOLS - these are created once and reused
+  const levelSeriesPool = useRef<ISeriesApi<'Line'>[]>([]);
+  const gammaSeriesPool = useRef<ISeriesApi<'Line'>[]>([]);
 
+  const [dimensions, setDimensions] = useState({ width: 0, height: 400 });
   const [isInitialized, setIsInitialized] = useState(false);
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
-  // Gamma level refs for cleanup
-  const gammaSeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
-  // FVG area series refs
-  const fvgSeriesRef = useRef<Map<string, ISeriesApi<'Area'>>>(new Map());
-
-  // Pulsing overlay state - tracks which levels price is near
-  const [proximityAlerts, setProximityAlerts] = useState<{
-    type: 'call_wall' | 'put_wall' | 'zero_gamma';
-    price: number;
-    yCoordinate: number;
-  }[]>([]);
-
-  // =========================================================================
-  // Component Mount Lifecycle - MUST be first effect
-  // =========================================================================
-
+  // Track component mount
   useEffect(() => {
-    // Mark as mounted
     mountedRef.current = true;
-
     return () => {
-      // Mark as unmounted immediately - this prevents any async callbacks
-      // from trying to operate on the destroyed chart
       mountedRef.current = false;
     };
   }, []);
 
-  // =========================================================================
-  // Dimension Detection with ResizeObserver
-  // =========================================================================
-
+  // Resize observer
   useLayoutEffect(() => {
     if (!containerRef.current) return;
 
     const updateDimensions = () => {
-      if (containerRef.current) {
+      if (containerRef.current && mountedRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        const newWidth = rect.width || containerRef.current.clientWidth;
-        const newHeight = height || rect.height || containerRef.current.clientHeight || MIN_CHART_HEIGHT;
-
-        // Only update if dimensions actually changed
-        setDimensions(prev => {
-          if (prev.width !== newWidth || prev.height !== newHeight) {
-            return { width: newWidth, height: Math.max(newHeight, MIN_CHART_HEIGHT) };
+        const w = rect.width || containerRef.current.clientWidth;
+        const h = height || rect.height || containerRef.current.clientHeight || MIN_CHART_HEIGHT;
+        setDimensions((prev) => {
+          if (prev.width !== w || prev.height !== h) {
+            return { width: w, height: Math.max(h, MIN_CHART_HEIGHT) };
           }
           return prev;
         });
       }
     };
 
-    // Initial measurement
     updateDimensions();
-
-    // Use ResizeObserver for responsive updates
-    const resizeObserver = new ResizeObserver((entries) => {
-      // Use requestAnimationFrame to avoid resize loop issues
-      window.requestAnimationFrame(() => {
-        // Check if still mounted before updating dimensions
-        if (mountedRef.current && entries[0]) {
-          updateDimensions();
-        }
-      });
+    const observer = new ResizeObserver(() => {
+      requestAnimationFrame(updateDimensions);
     });
-
-    resizeObserver.observe(containerRef.current);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
   }, [height]);
 
-  // Update chart dimensions when they change
+  // Update chart size when dimensions change
   useEffect(() => {
     if (chartRef.current && dimensions.width > 0 && dimensions.height > 0) {
       chartRef.current.applyOptions({
@@ -693,22 +334,15 @@ export const KCUChart = memo(function KCUChart({
     }
   }, [dimensions]);
 
-  // =========================================================================
-  // Chart Initialization
-  // =========================================================================
-
+  // ==========================================================================
+  // Chart Initialization - CREATE ALL SERIES ONCE
+  // ==========================================================================
   useEffect(() => {
-    if (!containerRef.current) return;
-    // Wait for valid dimensions before creating chart
-    if (dimensions.width <= 0 || dimensions.height <= 0) return;
-
-    // Create chart with measured dimensions
-    const chartHeight = dimensions.height;
-    const chartWidth = dimensions.width;
+    if (!containerRef.current || dimensions.width <= 0 || dimensions.height <= 0) return;
 
     const chart = createChart(containerRef.current, {
-      width: chartWidth,
-      height: chartHeight,
+      width: dimensions.width,
+      height: dimensions.height,
       layout: {
         background: { type: ColorType.Solid, color: CHART_COLORS.background },
         textColor: CHART_COLORS.textColor,
@@ -717,27 +351,10 @@ export const KCUChart = memo(function KCUChart({
         vertLines: { color: CHART_COLORS.gridColor },
         horzLines: { color: CHART_COLORS.gridColor },
       },
-      crosshair: {
-        mode: CrosshairMode.Normal,
-        vertLine: {
-          color: 'rgba(255, 255, 255, 0.3)',
-          width: 1,
-          style: LineStyle.Dashed,
-          labelBackgroundColor: '#1e293b',
-        },
-        horzLine: {
-          color: 'rgba(255, 255, 255, 0.3)',
-          width: 1,
-          style: LineStyle.Dashed,
-          labelBackgroundColor: '#1e293b',
-        },
-      },
+      crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: {
         borderColor: 'rgba(255, 255, 255, 0.1)',
-        scaleMargins: {
-          top: 0.1,
-          bottom: showVolume ? 0.2 : 0.1,
-        },
+        scaleMargins: { top: 0.1, bottom: showVolume ? 0.2 : 0.1 },
       },
       timeScale: {
         borderColor: 'rgba(255, 255, 255, 0.1)',
@@ -749,132 +366,137 @@ export const KCUChart = memo(function KCUChart({
     chartRef.current = chart;
 
     // Create candlestick series
-    const candleSeries = chart.addCandlestickSeries({
+    candleSeriesRef.current = chart.addCandlestickSeries({
       upColor: CHART_COLORS.upColor,
       downColor: CHART_COLORS.downColor,
       wickUpColor: CHART_COLORS.wickUpColor,
       wickDownColor: CHART_COLORS.wickDownColor,
       borderVisible: false,
     });
-    candleSeriesRef.current = candleSeries;
 
-    // Create volume series if enabled
+    // Create volume series
     if (showVolume) {
-      const volumeSeries = chart.addHistogramSeries({
+      volumeSeriesRef.current = chart.addHistogramSeries({
         priceFormat: { type: 'volume' },
         priceScaleId: 'volume',
       });
-      volumeSeries.priceScale().applyOptions({
+      volumeSeriesRef.current.priceScale().applyOptions({
         scaleMargins: { top: 0.85, bottom: 0 },
       });
-      volumeSeriesRef.current = volumeSeries;
     }
 
-    // Create indicator series if enabled
+    // Create indicator series
     if (showIndicators) {
-      // EMA 8 (Green)
-      const ema8Series = chart.addLineSeries({
+      ema8SeriesRef.current = chart.addLineSeries({
         color: CHART_COLORS.ema8,
         lineWidth: 2,
         priceLineVisible: false,
         lastValueVisible: false,
       });
-      ema8SeriesRef.current = ema8Series;
-
-      // EMA 21 (Red)
-      const ema21Series = chart.addLineSeries({
+      ema21SeriesRef.current = chart.addLineSeries({
         color: CHART_COLORS.ema21,
         lineWidth: 2,
         priceLineVisible: false,
         lastValueVisible: false,
       });
-      ema21SeriesRef.current = ema21Series;
-
-      // SMA 200 (Orange, Dotted)
-      const sma200Series = chart.addLineSeries({
+      sma200SeriesRef.current = chart.addLineSeries({
         color: CHART_COLORS.sma200,
         lineWidth: 1,
         lineStyle: LineStyle.Dotted,
         priceLineVisible: false,
         lastValueVisible: false,
       });
-      sma200SeriesRef.current = sma200Series;
-
-      // VWAP (White)
-      const vwapSeries = chart.addLineSeries({
+      vwapSeriesRef.current = chart.addLineSeries({
         color: CHART_COLORS.vwap,
         lineWidth: 2,
         priceLineVisible: false,
         lastValueVisible: false,
       });
-      vwapSeriesRef.current = vwapSeries;
-
-      // Ripster Cloud (Area between EMA8 and EMA21)
-      const cloudSeries = chart.addAreaSeries({
+      cloudSeriesRef.current = chart.addAreaSeries({
         lineColor: 'transparent',
         topColor: CHART_COLORS.cloudBullish,
         bottomColor: 'transparent',
         priceLineVisible: false,
         lastValueVisible: false,
       });
-      cloudSeriesRef.current = cloudSeries;
     }
 
-    // Crosshair move handler
+    // PRE-CREATE LEVEL SERIES POOL (hidden with empty data)
+    const levelPool: ISeriesApi<'Line'>[] = [];
+    for (let i = 0; i < MAX_LEVEL_SERIES; i++) {
+      const series = chart.addLineSeries({
+        color: '#6b7280',
+        lineWidth: 1,
+        lineStyle: LineStyle.Solid,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      series.setData([]); // Start hidden
+      levelPool.push(series);
+    }
+    levelSeriesPool.current = levelPool;
+
+    // PRE-CREATE GAMMA SERIES POOL (hidden with empty data)
+    const gammaPool: ISeriesApi<'Line'>[] = [];
+    for (let i = 0; i < MAX_GAMMA_SERIES; i++) {
+      const series = chart.addLineSeries({
+        color: '#6b7280',
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      series.setData([]); // Start hidden
+      gammaPool.push(series);
+    }
+    gammaSeriesPool.current = gammaPool;
+
+    // Event handlers
     if (onCrosshairMove) {
       chart.subscribeCrosshairMove((param) => {
-        if (!param.point || !param.time) {
+        if (!param.point || !param.time || !candleSeriesRef.current) {
           onCrosshairMove(null, null);
           return;
         }
-        const price = candleSeries.coordinateToPrice(param.point.y);
+        const price = candleSeriesRef.current.coordinateToPrice(param.point.y);
         onCrosshairMove(price, param.time);
       });
     }
 
-    // Click handler
     if (onCandleClick) {
       chart.subscribeClick((param) => {
         if (!param.time) return;
-        const clickedCandle = data.find(
-          (c) => toChartTime(c.time) === param.time
-        );
+        const clickedCandle = data.find((c) => toChartTime(c.time) === param.time);
         if (clickedCandle) {
-          const index = data.indexOf(clickedCandle);
-          onCandleClick(clickedCandle, index);
+          onCandleClick(clickedCandle, data.indexOf(clickedCandle));
         }
       });
     }
 
-    // Note: ResizeObserver handles resize events, no need for window listener
-
     setIsInitialized(true);
 
+    // Cleanup
     return () => {
-      // CRITICAL: Clear all series DATA first, then remove series, then destroy chart
-      // This prevents "Value is null" errors during the chart's final render frame
+      // Clear all series data first
+      try {
+        levelSeriesPool.current.forEach((s) => {
+          try { s.setData([]); } catch { /* ignore */ }
+        });
+        gammaSeriesPool.current.forEach((s) => {
+          try { s.setData([]); } catch { /* ignore */ }
+        });
+        candleSeriesRef.current?.setData([]);
+        volumeSeriesRef.current?.setData([]);
+        ema8SeriesRef.current?.setData([]);
+        ema21SeriesRef.current?.setData([]);
+        sma200SeriesRef.current?.setData([]);
+        vwapSeriesRef.current?.setData([]);
+        cloudSeriesRef.current?.setData([]);
+      } catch { /* ignore */ }
 
-      // Clear overlay series data and remove them
-      levelSeriesRef.current.forEach((series) => {
-        try { series.setData([]); } catch { /* ignore */ }
-      });
-      gammaSeriesRef.current.forEach((series) => {
-        try { series.setData([]); } catch { /* ignore */ }
-      });
-      fvgSeriesRef.current.forEach((series) => {
-        try { series.setData([]); } catch { /* ignore */ }
-      });
-
-      // Clear main series data
-      try { candleSeriesRef.current?.setData([]); } catch { /* ignore */ }
-      try { volumeSeriesRef.current?.setData([]); } catch { /* ignore */ }
-      try { ema8SeriesRef.current?.setData([]); } catch { /* ignore */ }
-      try { ema21SeriesRef.current?.setData([]); } catch { /* ignore */ }
-      try { sma200SeriesRef.current?.setData([]); } catch { /* ignore */ }
-      try { vwapSeriesRef.current?.setData([]); } catch { /* ignore */ }
-      try { cloudSeriesRef.current?.setData([]); } catch { /* ignore */ }
-
-      // Now clear the refs
+      // Clear refs
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
       ema8SeriesRef.current = null;
@@ -882,45 +504,39 @@ export const KCUChart = memo(function KCUChart({
       sma200SeriesRef.current = null;
       vwapSeriesRef.current = null;
       cloudSeriesRef.current = null;
-      levelSeriesRef.current.clear();
-      gammaSeriesRef.current.clear();
-      fvgSeriesRef.current.clear();
+      levelSeriesPool.current = [];
+      gammaSeriesPool.current = [];
 
-      // Set initialized to false before removing chart
       setIsInitialized(false);
 
-      // Remove chart with try-catch to handle edge cases
       try {
         chart.remove();
-      } catch (e) {
-        // Chart may already be destroyed, ignore errors
-        if (DEBUG_LOGGING) {
-          console.warn('[KCUChart] Error during chart.remove():', e);
-        }
-      }
+      } catch { /* ignore */ }
       chartRef.current = null;
     };
   }, [dimensions.width, dimensions.height, showVolume, showIndicators]);
 
-  // =========================================================================
-  // Data Updates (Hardened)
-  // =========================================================================
-
+  // ==========================================================================
+  // Data Updates - Candles, Volume, Indicators
+  // ==========================================================================
   useEffect(() => {
-    // Early exit if not mounted or chart not ready
-    if (!mountedRef.current || !isInitialized || !candleSeriesRef.current || !chartRef.current) return;
+    if (!mountedRef.current || !isInitialized || !candleSeriesRef.current) return;
 
-    // Determine visible data based on mode and replay index
+    // Filter valid candles
     const rawData = mode === 'replay' && replayIndex !== undefined
       ? data.slice(0, replayIndex + 1)
       : data;
 
-    // CRITICAL: Filter out candles with invalid OHLC values using strict validation
-    const visibleData = rawData.filter(isValidCandle);
+    const validData = rawData.filter(
+      (c) =>
+        isValidPrice(c.open) &&
+        isValidPrice(c.high) &&
+        isValidPrice(c.low) &&
+        isValidPrice(c.close) &&
+        toChartTime(c.time) !== null
+    );
 
-    // Handle empty data gracefully
-    if (visibleData.length === 0) {
-      // Clear all series to avoid stale data
+    if (validData.length === 0) {
       try {
         candleSeriesRef.current?.setData([]);
         volumeSeriesRef.current?.setData([]);
@@ -929,868 +545,276 @@ export const KCUChart = memo(function KCUChart({
         sma200SeriesRef.current?.setData([]);
         vwapSeriesRef.current?.setData([]);
         cloudSeriesRef.current?.setData([]);
-      } catch {
-        // Ignore errors during cleanup
-      }
+      } catch { /* ignore */ }
       return;
     }
 
-    // Convert to chart format with strict time validation
-    const candleData: CandlestickData[] = [];
-    for (const c of visibleData) {
-      const time = toChartTime(c.time);
-      if (time === null) continue;
+    // Candle data
+    const candleData: CandlestickData[] = validData.map((c) => ({
+      time: toChartTime(c.time)!,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    }));
 
-      // Double-check OHLC values are finite numbers
-      if (
-        !Number.isFinite(c.open) ||
-        !Number.isFinite(c.high) ||
-        !Number.isFinite(c.low) ||
-        !Number.isFinite(c.close)
-      ) {
-        continue;
-      }
-
-      candleData.push({
-        time,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      });
+    try {
+      candleSeriesRef.current.setData(candleData);
+    } catch (e) {
+      console.warn('[KCUChart] Candle setData error:', e);
     }
 
-    // Update candle series with try-catch
-    if (candleData.length > 0 && candleSeriesRef.current) {
-      try {
-        candleSeriesRef.current.setData(candleData);
-      } catch (error) {
-        console.warn('[KCUChart] Candlestick setData failed safely:', error);
-      }
+    // Volume
+    if (showVolume && volumeSeriesRef.current) {
+      const volData = validData.map((c) => ({
+        time: toChartTime(c.time)!,
+        value: isValidNumber(c.volume) ? c.volume : 0,
+        color: c.close >= c.open ? CHART_COLORS.volumeUp : CHART_COLORS.volumeDown,
+      }));
+      safeSetData(volumeSeriesRef.current, volData);
     }
 
-    // Update volume series using safeSetData
-    if (showVolume) {
-      const volumeData = visibleData
-        .map((c) => {
-          const time = toChartTime(c.time);
-          if (time === null) return null;
-          const volume = typeof c.volume === 'number' && Number.isFinite(c.volume) ? c.volume : 0;
-          return {
-            time,
-            value: volume,
-            color: c.close >= c.open ? CHART_COLORS.volumeUp : CHART_COLORS.volumeDown,
-          };
-        })
-        .filter((v): v is NonNullable<typeof v> => v !== null && Number.isFinite(v.value));
-      safeSetData(volumeSeriesRef.current, volumeData, 'Volume');
-    }
+    // Indicators
+    if (showIndicators) {
+      const closes = validData.map((c) => c.close);
 
-    // Update indicators using safeSetData for ALL series
-    if (showIndicators && visibleData.length > 0) {
-      const closePrices = visibleData.map((c) => c.close);
-
-      // EMA 8 - uses safeSetData which handles filtering internally
-      const ema8Values = calculateEMA(closePrices, 8);
-      const ema8Data = visibleData.map((c, i) => {
-        const time = toChartTime(c.time);
-        const value = ema8Values[i];
-        if (time === null || value === null) return null;
-        return { time, value };
-      }).filter((d): d is LineData => d !== null && d.value !== null && Number.isFinite(d.value));
-      safeSetData(ema8SeriesRef.current, ema8Data, 'EMA8');
+      // EMA 8
+      const ema8 = calculateEMA(closes, 8);
+      const ema8Data = validData
+        .map((c, i) => ({ time: toChartTime(c.time)!, value: ema8[i] ?? undefined }))
+        .filter((d): d is LineData => d.value !== undefined && d.value !== null);
+      safeSetData(ema8SeriesRef.current, ema8Data);
 
       // EMA 21
-      const ema21Values = calculateEMA(closePrices, 21);
-      const ema21Data = visibleData.map((c, i) => {
-        const time = toChartTime(c.time);
-        const value = ema21Values[i];
-        if (time === null || value === null) return null;
-        return { time, value };
-      }).filter((d): d is LineData => d !== null && d.value !== null && Number.isFinite(d.value));
-      safeSetData(ema21SeriesRef.current, ema21Data, 'EMA21');
+      const ema21 = calculateEMA(closes, 21);
+      const ema21Data = validData
+        .map((c, i) => ({ time: toChartTime(c.time)!, value: ema21[i] ?? undefined }))
+        .filter((d): d is LineData => d.value !== undefined && d.value !== null);
+      safeSetData(ema21SeriesRef.current, ema21Data);
 
       // SMA 200
-      const sma200Values = calculateSMA(closePrices, 200);
-      const sma200Data = visibleData.map((c, i) => {
-        const time = toChartTime(c.time);
-        const value = sma200Values[i];
-        if (time === null || value === null) return null;
-        return { time, value };
-      }).filter((d): d is LineData => d !== null && d.value !== null && Number.isFinite(d.value));
-      safeSetData(sma200SeriesRef.current, sma200Data, 'SMA200');
+      const sma200 = calculateSMA(closes, 200);
+      const sma200Data = validData
+        .map((c, i) => ({ time: toChartTime(c.time)!, value: sma200[i] ?? undefined }))
+        .filter((d): d is LineData => d.value !== undefined && d.value !== null);
+      safeSetData(sma200SeriesRef.current, sma200Data);
 
       // VWAP
-      const vwapValues = calculateVWAP(visibleData);
-      const vwapData = visibleData.map((c, i) => {
-        const time = toChartTime(c.time);
-        const value = vwapValues[i];
-        if (time === null || value === null) return null;
-        return { time, value };
-      }).filter((d): d is LineData => d !== null && d.value !== null && Number.isFinite(d.value));
-      safeSetData(vwapSeriesRef.current, vwapData, 'VWAP');
+      const vwap = calculateVWAP(validData);
+      const vwapData = validData
+        .map((c, i) => ({ time: toChartTime(c.time)!, value: vwap[i] ?? undefined }))
+        .filter((d): d is LineData => d.value !== undefined && d.value !== null);
+      safeSetData(vwapSeriesRef.current, vwapData);
 
-      // Ripster Cloud (fill between EMA8 and EMA21)
-      // Note: ema8Values and ema21Values already calculated above
-      const cloudData: AreaData[] = visibleData.map((c, i) => {
-        const time = toChartTime(c.time);
-        if (time === null) return null;
-        const ema8 = ema8Values[i];
-        const ema21 = ema21Values[i];
-        // Strict validation
-        if (
-          ema8 === null || ema21 === null ||
-          !Number.isFinite(ema8) || !Number.isFinite(ema21)
-        ) {
-          return null;
-        }
-        const maxValue = Math.max(ema8, ema21);
-        if (!Number.isFinite(maxValue)) return null;
-        return { time, value: maxValue };
-      }).filter((d): d is AreaData => d !== null);
+      // Cloud
+      const cloudData = validData
+        .map((c, i) => {
+          const e8 = ema8[i];
+          const e21 = ema21[i];
+          if (e8 === null || e21 === null) return null;
+          return { time: toChartTime(c.time)!, value: Math.max(e8, e21) };
+        })
+        .filter((d): d is LineData => d !== null);
 
-      // Update cloud color based on trend
-      if (cloudData.length > 0 && cloudSeriesRef.current) {
-        const lastEma8 = ema8Values[ema8Values.length - 1];
-        const lastEma21 = ema21Values[ema21Values.length - 1];
-        const isBullish =
-          typeof lastEma8 === 'number' &&
-          typeof lastEma21 === 'number' &&
-          Number.isFinite(lastEma8) &&
-          Number.isFinite(lastEma21) &&
-          lastEma8 > lastEma21;
-
+      if (cloudSeriesRef.current) {
+        const lastE8 = ema8[ema8.length - 1];
+        const lastE21 = ema21[ema21.length - 1];
+        const isBullish = lastE8 !== null && lastE21 !== null && lastE8 > lastE21;
         try {
           cloudSeriesRef.current.applyOptions({
             topColor: isBullish ? CHART_COLORS.cloudBullish : CHART_COLORS.cloudBearish,
-            lineColor: isBullish ? CHART_COLORS.ema8 : CHART_COLORS.ema21,
           });
-        } catch {
-          // Ignore options error
-        }
+        } catch { /* ignore */ }
+        safeSetData(cloudSeriesRef.current, cloudData);
       }
-      safeSetData(cloudSeriesRef.current, cloudData, 'RipsterCloud');
     }
 
-    // Patience Candle Markers (Inside Bars)
+    // Patience candle markers
     if (showPatienceCandles && candleSeriesRef.current) {
-      const insideBarIndices = detectInsideBars(visibleData);
-      const markers: SeriesMarker<Time>[] = [];
-      for (const i of insideBarIndices) {
-        const time = toChartTime(visibleData[i].time);
-        if (time === null) continue;
-        markers.push({
-          time,
-          position: 'aboveBar',
-          color: CHART_COLORS.patienceMarker,
-          shape: 'arrowDown' as SeriesMarkerShape, // Diamond-like appearance
-          text: '◆', // Diamond symbol
-          size: 1,
-        });
-      }
-      candleSeriesRef.current.setMarkers(markers);
+      const indices = detectInsideBars(validData);
+      const markers: SeriesMarker<Time>[] = indices
+        .map((i) => {
+          const t = toChartTime(validData[i].time);
+          if (!t) return null;
+          return {
+            time: t,
+            position: 'aboveBar' as const,
+            color: CHART_COLORS.patienceMarker,
+            shape: 'arrowDown' as const,
+            text: '◆',
+            size: 1,
+          };
+        })
+        .filter((m): m is SeriesMarker<Time> => m !== null);
+      try {
+        candleSeriesRef.current.setMarkers(markers);
+      } catch { /* ignore */ }
     }
 
-    // Fit content - check mounted to prevent errors on destroyed chart
-    if (mountedRef.current && chartRef.current) {
+    // Fit content
+    if (chartRef.current) {
       try {
         chartRef.current.timeScale().fitContent();
-      } catch (e) {
-        if (DEBUG_LOGGING) {
-          console.warn('[KCUChart] Error during fitContent:', e);
-        }
-      }
+      } catch { /* ignore */ }
     }
   }, [data, mode, replayIndex, isInitialized, showVolume, showIndicators, showPatienceCandles]);
 
-  // =========================================================================
-  // Level Lines (Support/Resistance/Custom)
-  // CRITICAL: Don't remove/recreate series on each update - causes race conditions
-  // Instead: Clear series data with setData([]) and reuse, or skip if not needed
-  // =========================================================================
-
+  // ==========================================================================
+  // Level Lines - REUSE POOL, DON'T CREATE/REMOVE
+  // ==========================================================================
   useEffect(() => {
-    if (DEBUG_LOGGING) {
-      console.log('[KCUChart] Level Lines effect triggered', {
-        mounted: mountedRef.current,
-        isInitialized,
-        hasChart: !!chartRef.current,
-        levelsCount: levels.length,
-        dataLength: data.length,
-      });
-    }
+    if (!mountedRef.current || !isInitialized || data.length === 0) return;
 
-    // Check mounted status to prevent operations on destroyed chart
-    if (!mountedRef.current || !isInitialized || !chartRef.current) {
-      if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines - early exit: not ready');
-      return;
-    }
+    const pool = levelSeriesPool.current;
+    if (pool.length === 0) return;
 
-    // CRITICAL FIX: Use requestAnimationFrame to batch updates and avoid race conditions
-    // with the chart's internal render loop
-    const rafId = requestAnimationFrame(() => {
-      // Double-check we're still mounted after RAF delay
-      if (!mountedRef.current || !chartRef.current) {
-        if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines - unmounted during RAF');
-        return;
-      }
+    const startTime = toChartTime(data[0].time);
+    const endTime = toChartTime(data[data.length - 1].time);
+    if (!startTime || !endTime) return;
 
-      // Clear existing level lines INSIDE the RAF callback
-      // CRITICAL: Clear series data BEFORE removing to prevent "Value is null" during render
-      if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines - clearing', levelSeriesRef.current.size, 'existing series');
-      levelSeriesRef.current.forEach((series) => {
+    // Filter valid levels
+    const validLevels = levels.filter((l) => isValidPrice(l.price)).slice(0, MAX_LEVEL_SERIES);
+
+    // Update each pool series
+    pool.forEach((series, i) => {
+      const level = validLevels[i];
+
+      if (!level) {
+        // No level for this slot - hide it
         try {
-          // First clear the data to prevent render errors
           series.setData([]);
-        } catch {
-          // Ignore - series may already be invalid
-        }
-      });
-      // Now remove the empty series
-      levelSeriesRef.current.forEach((series) => {
-        try {
-          chartRef.current?.removeSeries(series);
-        } catch {
-          // Ignore removal errors
-        }
-      });
-      levelSeriesRef.current.clear();
-
-      // If no data or levels, we're done
-      if (data.length === 0 || levels.length === 0) {
-        if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines - no data or levels, done');
+        } catch { /* ignore */ }
         return;
       }
 
-      // Add new level lines - use Number.isFinite for strict validation
-      const validLevels = levels.filter(l => isValidPrice(l.price));
-      if (DEBUG_LOGGING) {
-        console.log(`[KCUChart] Level Lines - ${validLevels.length}/${levels.length} valid`);
+      // Update series options
+      try {
+        series.applyOptions({
+          color: level.color || LEVEL_COLORS[level.type] || '#6b7280',
+          lineStyle:
+            level.lineStyle === 'dotted'
+              ? LineStyle.Dotted
+              : level.lineStyle === 'dashed'
+              ? LineStyle.Dashed
+              : LineStyle.Solid,
+          title: level.label,
+        });
+      } catch { /* ignore */ }
+
+      // Set level line data
+      const lineData: LineData[] = [
+        { time: startTime, value: level.price },
+      ];
+      if (startTime !== endTime) {
+        lineData.push({ time: endTime, value: level.price });
       }
 
-      // Calculate price range for filtering
-      const prices = data
-        .flatMap(c => [c.high, c.low])
-        .filter((p): p is number => isValidPrice(p));
-      if (prices.length === 0) return;
-
-      const minPrice = Math.min(...prices);
-      const maxPrice = Math.max(...prices);
-      const midPrice = (maxPrice + minPrice) / 2;
-      if (!Number.isFinite(midPrice)) return;
-
-      const priceRange = maxPrice - minPrice;
-      const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
-      const nearbyLevels = validLevels.filter(l => Math.abs(l.price - midPrice) <= maxDistance);
-
-      // Get time range
-      const startTime = toChartTime(data[0].time);
-      const endTime = toChartTime(data[data.length - 1].time);
-      if (startTime === null || endTime === null) return;
-
-      // Create series for each level
-      nearbyLevels.forEach((level, index) => {
-        if (!mountedRef.current || !chartRef.current) return;
-
-        const point1 = createLinePoint(startTime, level.price);
-        const point2 = startTime === endTime ? null : createLinePoint(endTime, level.price);
-
-        const lineData: LineData[] = [];
-        if (point1) lineData.push(point1);
-        if (point2) lineData.push(point2);
-
-        if (lineData.length === 0) return;
-
-        try {
-          const series = chartRef.current.addLineSeries({
-            color: level.color || LEVEL_COLORS[level.type],
-            lineWidth: 1,
-            lineStyle: level.lineStyle === 'dotted' ? LineStyle.Dotted :
-                       level.lineStyle === 'dashed' ? LineStyle.Dashed :
-                       LineStyle.Solid,
-            priceLineVisible: false,
-            lastValueVisible: false,
-            crosshairMarkerVisible: false,
-            title: level.label,
-          });
-
-          safeSetData(series, lineData, `Level-${index}-${level.label}`);
-          levelSeriesRef.current.set(`level-${index}`, series);
-        } catch (e) {
-          console.error(`[KCUChart] Level-${index} error:`, e);
-        }
-      });
-
-      if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines complete -', levelSeriesRef.current.size, 'series');
+      safeSetData(series, lineData);
     });
-
-    // Cleanup: cancel RAF if component unmounts during delay
-    return () => {
-      cancelAnimationFrame(rafId);
-    };
   }, [levels, data, isInitialized]);
 
-  // =========================================================================
-  // Gamma Levels - Institutional Walls
-  // CRITICAL: Use RAF to avoid race conditions with chart's internal render loop
-  // =========================================================================
-
+  // ==========================================================================
+  // Gamma Levels - REUSE POOL, DON'T CREATE/REMOVE
+  // ==========================================================================
   useEffect(() => {
-    if (DEBUG_LOGGING) {
-      console.log('[KCUChart] Gamma Levels effect triggered', {
-        mounted: mountedRef.current,
-        isInitialized,
-        hasChart: !!chartRef.current,
-        gammaLevelsCount: gammaLevels.length,
-        dataLength: data.length,
-      });
-    }
+    if (!mountedRef.current || !isInitialized || data.length === 0) return;
 
-    // Check mounted status to prevent operations on destroyed chart
-    if (!mountedRef.current || !isInitialized || !chartRef.current) {
-      if (DEBUG_LOGGING) console.log('[KCUChart] Gamma Levels - early exit: not ready');
-      return;
-    }
+    const pool = gammaSeriesPool.current;
+    if (pool.length === 0) return;
 
-    // CRITICAL FIX: Use requestAnimationFrame to batch updates
-    const rafId = requestAnimationFrame(() => {
-      // Double-check we're still mounted after RAF delay
-      if (!mountedRef.current || !chartRef.current) {
-        if (DEBUG_LOGGING) console.log('[KCUChart] Gamma Levels - unmounted during RAF');
-        return;
-      }
+    const startTime = toChartTime(data[0].time);
+    const endTime = toChartTime(data[data.length - 1].time);
+    if (!startTime || !endTime) return;
 
-      // Clear existing gamma level lines INSIDE RAF
-      // CRITICAL: Clear series data BEFORE removing to prevent "Value is null" during render
-      gammaSeriesRef.current.forEach((series) => {
+    // Filter valid gamma levels
+    const validGamma = gammaLevels.filter((g) => isValidPrice(g.price)).slice(0, MAX_GAMMA_SERIES);
+
+    // Update each pool series
+    pool.forEach((series, i) => {
+      const gamma = validGamma[i];
+
+      if (!gamma) {
+        // No gamma for this slot - hide it
         try {
-          // First clear the data to prevent render errors
           series.setData([]);
-        } catch {
-          // Ignore - series may already be invalid
-        }
-      });
-      // Now remove the empty series
-      gammaSeriesRef.current.forEach((series) => {
-        try {
-          chartRef.current?.removeSeries(series);
-        } catch {
-          // Ignore removal errors
-        }
-      });
-      gammaSeriesRef.current.clear();
-
-      // If no data or gamma levels, we're done
-      if (data.length === 0 || gammaLevels.length === 0) {
+        } catch { /* ignore */ }
         return;
       }
 
-      // Filter valid gamma levels
-      const validGammaLevels = gammaLevels.filter(g => isValidPrice(g.price));
-      if (validGammaLevels.length === 0) return;
+      // Determine color based on type
+      let color = '#6b7280';
+      let lineWidth = 2;
+      if (gamma.type === 'call_wall') {
+        color = CHART_COLORS.callWall;
+        lineWidth = 3;
+      } else if (gamma.type === 'put_wall') {
+        color = CHART_COLORS.putWall;
+        lineWidth = 3;
+      } else if (gamma.type === 'zero_gamma') {
+        color = CHART_COLORS.zeroGamma;
+      } else if (gamma.type === 'max_pain') {
+        color = CHART_COLORS.maxPain;
+      }
 
-      // Calculate price range for filtering
-      const prices = data
-        .flatMap(c => [c.high, c.low])
-        .filter((p): p is number => isValidPrice(p));
-      if (prices.length === 0) return;
+      // Update series options
+      try {
+        series.applyOptions({
+          color,
+          lineWidth: lineWidth as 1 | 2 | 3 | 4,
+          title: gamma.label || gamma.type.replace('_', ' ').toUpperCase(),
+        });
+      } catch { /* ignore */ }
 
-      const minPrice = Math.min(...prices);
-      const maxPrice = Math.max(...prices);
-      const midPrice = (maxPrice + minPrice) / 2;
-      if (!Number.isFinite(midPrice)) return;
+      // Set gamma line data
+      const lineData: LineData[] = [
+        { time: startTime, value: gamma.price },
+      ];
+      if (startTime !== endTime) {
+        lineData.push({ time: endTime, value: gamma.price });
+      }
 
-      const priceRange = maxPrice - minPrice;
-      const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
-      const nearbyGammaLevels = validGammaLevels.filter(g =>
-        Math.abs(g.price - midPrice) <= maxDistance
-      );
-
-      // Get time range
-      const startTime = toChartTime(data[0].time);
-      const endTime = toChartTime(data[data.length - 1].time);
-      if (startTime === null || endTime === null) return;
-
-      // Create series for each gamma level
-      nearbyGammaLevels.forEach((gamma, index) => {
-        if (!mountedRef.current || !chartRef.current) return;
-
-        // Determine styling based on type
-        let color: string;
-        let lineWidth: number;
-        let lineStyle: LineStyle;
-        let title: string;
-
-        switch (gamma.type) {
-          case 'call_wall':
-            color = CHART_COLORS.callWall;
-            lineWidth = 3;
-            lineStyle = LineStyle.Solid;
-            title = gamma.label || '📈 CALL WALL';
-            break;
-          case 'put_wall':
-            color = CHART_COLORS.putWall;
-            lineWidth = 3;
-            lineStyle = LineStyle.Solid;
-            title = gamma.label || '📉 PUT WALL';
-            break;
-          case 'zero_gamma':
-            color = CHART_COLORS.zeroGamma;
-            lineWidth = 2;
-            lineStyle = LineStyle.Dashed;
-            title = gamma.label || '⚡ ZERO GAMMA';
-            break;
-          case 'max_pain':
-            color = CHART_COLORS.maxPain;
-            lineWidth = 2;
-            lineStyle = LineStyle.Dotted;
-            title = gamma.label || '💀 MAX PAIN';
-            break;
-          default:
-            color = '#6b7280';
-            lineWidth = 1;
-            lineStyle = LineStyle.Dotted;
-            title = gamma.label || 'LEVEL';
-        }
-
-        const point1 = createLinePoint(startTime, gamma.price);
-        const point2 = startTime === endTime ? null : createLinePoint(endTime, gamma.price);
-
-        const lineData: LineData[] = [];
-        if (point1) lineData.push(point1);
-        if (point2) lineData.push(point2);
-
-        if (lineData.length === 0) return;
-
-        try {
-          const series = chartRef.current.addLineSeries({
-            color,
-            lineWidth: lineWidth as 1 | 2 | 3 | 4,
-            lineStyle,
-            priceLineVisible: false,
-            lastValueVisible: false,
-            title,
-            crosshairMarkerVisible: false,
-          });
-
-          safeSetData(series, lineData, `Gamma-${gamma.type}-${index}`);
-          gammaSeriesRef.current.set(`gamma-${gamma.type}-${index}`, series);
-        } catch (e) {
-          console.error(`[KCUChart] Gamma-${gamma.type}-${index} error:`, e);
-        }
-      });
-
-      if (DEBUG_LOGGING) console.log('[KCUChart] Gamma Levels complete -', gammaSeriesRef.current.size, 'series');
+      safeSetData(series, lineData);
     });
-
-    // Cleanup: cancel RAF if component unmounts during delay
-    return () => {
-      cancelAnimationFrame(rafId);
-    };
   }, [gammaLevels, data, isInitialized]);
 
-  // =========================================================================
-  // Proximity Alert Detection - Check if price is within 1% of gamma walls
-  // =========================================================================
-
-  useEffect(() => {
-    if (DEBUG_LOGGING) {
-      console.log('[KCUChart] Proximity Alert effect triggered', {
-        mounted: mountedRef.current,
-        isInitialized,
-        hasChart: !!chartRef.current,
-        hasCandleSeries: !!candleSeriesRef.current,
-        gammaLevelsCount: gammaLevels.length,
-        dataLength: data.length,
-      });
-    }
-
-    // Check mounted status to prevent operations on destroyed chart
-    if (!mountedRef.current || !isInitialized || !chartRef.current || !candleSeriesRef.current) {
-      if (DEBUG_LOGGING) console.log('[KCUChart] Proximity Alert - early exit: not ready');
-      return;
-    }
-    if (data.length === 0 || gammaLevels.length === 0) {
-      setProximityAlerts([]);
-      return;
-    }
-
-    // Get current price (last close)
-    const currentPrice = data[data.length - 1].close;
-    if (!isValidPrice(currentPrice)) {
-      if (DEBUG_LOGGING) console.warn('[KCUChart] Proximity Alert - invalid currentPrice:', currentPrice);
-      setProximityAlerts([]);
-      return;
-    }
-
-    const alerts: typeof proximityAlerts = [];
-
-    // Check each gamma level for proximity
-    gammaLevels.forEach((gamma) => {
-      if (gamma.type === 'max_pain') return; // Don't pulse for max pain
-
-      // Validate gamma price
-      if (!isValidPrice(gamma.price)) {
-        if (DEBUG_LOGGING) console.warn('[KCUChart] Proximity Alert - invalid gamma price:', gamma.price);
-        return;
-      }
-
-      const distance = Math.abs(currentPrice - gamma.price) / gamma.price;
-      const proximityThreshold = 0.01; // 1%
-
-      if (distance <= proximityThreshold) {
-        // Guard against operating on destroyed chart during iteration
-        if (!mountedRef.current || !chartRef.current || !candleSeriesRef.current) return;
-
-        // Use candlestick series to get coordinate with try-catch
-        let yCoordinate: number | null = null;
-        try {
-          yCoordinate = candleSeriesRef.current.priceToCoordinate(gamma.price);
-          if (DEBUG_LOGGING) console.log(`[KCUChart] Proximity Alert - priceToCoordinate(${gamma.price}) = ${yCoordinate}`);
-        } catch (e) {
-          // Chart may be in invalid state, skip this level
-          if (DEBUG_LOGGING) console.warn('[KCUChart] Proximity Alert - priceToCoordinate error:', e);
-          return;
-        }
-
-        if (yCoordinate !== null && Number.isFinite(yCoordinate)) {
-          alerts.push({
-            type: gamma.type as 'call_wall' | 'put_wall' | 'zero_gamma',
-            price: gamma.price,
-            yCoordinate,
-          });
-        }
-      }
-    });
-
-    if (DEBUG_LOGGING) console.log('[KCUChart] Proximity Alert - found', alerts.length, 'alerts');
-
-    // CRITICAL: Only update state if alerts actually changed to prevent infinite re-renders
-    // Compare by serializing since array references will always differ
-    setProximityAlerts(prev => {
-      // Quick length check first
-      if (prev.length !== alerts.length) return alerts;
-
-      // Deep comparison - check each alert
-      const isSame = prev.every((prevAlert, i) => {
-        const newAlert = alerts[i];
-        return (
-          prevAlert.type === newAlert.type &&
-          prevAlert.price === newAlert.price &&
-          Math.abs(prevAlert.yCoordinate - newAlert.yCoordinate) < 1 // Allow tiny floating point differences
-        );
-      });
-
-      return isSame ? prev : alerts;
-    });
-  }, [data, gammaLevels, isInitialized, dimensions]);
-
-  // =========================================================================
-  // FVG Zones - Fair Value Gap Boxes
-  // CRITICAL: Use RAF to avoid race conditions with chart's internal render loop
-  // =========================================================================
-
-  useEffect(() => {
-    if (DEBUG_LOGGING) {
-      console.log('[KCUChart] FVG Zones effect triggered', {
-        mounted: mountedRef.current,
-        isInitialized,
-        hasChart: !!chartRef.current,
-        fvgZonesCount: fvgZones.length,
-        dataLength: data.length,
-      });
-    }
-
-    // Check mounted status to prevent operations on destroyed chart
-    if (!mountedRef.current || !isInitialized || !chartRef.current) {
-      if (DEBUG_LOGGING) console.log('[KCUChart] FVG Zones - early exit: not ready');
-      return;
-    }
-
-    // CRITICAL FIX: Use requestAnimationFrame to batch updates
-    const rafId = requestAnimationFrame(() => {
-      // Double-check we're still mounted after RAF delay
-      if (!mountedRef.current || !chartRef.current) {
-        if (DEBUG_LOGGING) console.log('[KCUChart] FVG Zones - unmounted during RAF');
-        return;
-      }
-
-      // Clear existing FVG series INSIDE RAF
-      // CRITICAL: Clear series data BEFORE removing to prevent "Value is null" during render
-      fvgSeriesRef.current.forEach((series) => {
-        try {
-          // First clear the data to prevent render errors
-          series.setData([]);
-        } catch {
-          // Ignore - series may already be invalid
-        }
-      });
-      // Now remove the empty series
-      fvgSeriesRef.current.forEach((series) => {
-        try {
-          chartRef.current?.removeSeries(series);
-        } catch {
-          // Ignore removal errors
-        }
-      });
-      fvgSeriesRef.current.clear();
-
-      // If no data or zones, we're done
-      if (data.length === 0 || fvgZones.length === 0) {
-        return;
-      }
-
-      // Filter valid FVG zones
-      const validFvgZones = fvgZones.filter(z =>
-        isValidPrice(z.high) && isValidPrice(z.low)
-      );
-      if (validFvgZones.length === 0) return;
-
-      // Calculate price range for filtering
-      const prices = data
-        .flatMap(c => [c.high, c.low])
-        .filter((p): p is number => isValidPrice(p));
-      if (prices.length === 0) return;
-
-      const minPrice = Math.min(...prices);
-      const maxPrice = Math.max(...prices);
-      const midPrice = (maxPrice + minPrice) / 2;
-      if (!Number.isFinite(midPrice)) return;
-
-      const priceRange = maxPrice - minPrice;
-      const maxDistance = Math.max(priceRange * 2, midPrice * 0.15);
-
-      const nearbyFvgZones = validFvgZones.filter(z => {
-        const zoneMid = (z.high + z.low) / 2;
-        return Math.abs(zoneMid - midPrice) <= maxDistance;
-      });
-      if (nearbyFvgZones.length === 0) return;
-
-      // Get last timestamp for extending boxes
-      const lastTime = toChartTime(data[data.length - 1].time);
-      if (lastTime === null) return;
-
-      // Render each FVG zone
-      nearbyFvgZones.forEach((zone, index) => {
-        if (!mountedRef.current || !chartRef.current) return;
-
-        const isBullish = zone.direction === 'bullish';
-        const fillColor = isBullish
-          ? 'rgba(34, 197, 94, 0.25)'
-          : 'rgba(239, 68, 68, 0.25)';
-        const lineColor = isBullish
-          ? 'rgba(34, 197, 94, 0.6)'
-          : 'rgba(239, 68, 68, 0.6)';
-
-        const startTime = toChartTime(zone.startTime);
-        const endTime = zone.filled ? toChartTime(zone.endTime) : lastTime;
-
-        if (startTime === null || endTime === null) return;
-
-        const startNum = startTime as number;
-        const endNum = endTime as number;
-
-        const topData: LineData[] = [];
-        const bottomData: LineData[] = [];
-        const areaData: AreaData[] = [];
-
-        if (startNum === endNum) {
-          const time = Math.floor(startNum) as Time;
-          if (isValidPrice(zone.high)) {
-            topData.push({ time, value: zone.high });
-            areaData.push({ time, value: zone.high });
-          }
-          if (isValidPrice(zone.low)) {
-            bottomData.push({ time, value: zone.low });
-          }
-        } else {
-          const numPoints = 10;
-          const timeStep = (endNum - startNum) / numPoints;
-          if (!Number.isFinite(timeStep)) return;
-
-          let lastAddedTime = -1;
-          for (let i = 0; i <= numPoints; i++) {
-            const rawTime = startNum + timeStep * i;
-            if (!Number.isFinite(rawTime)) continue;
-
-            const time = Math.floor(rawTime);
-            if (time === lastAddedTime) continue;
-            lastAddedTime = time;
-
-            const chartTime = time as Time;
-            if (isValidPrice(zone.high)) {
-              topData.push({ time: chartTime, value: zone.high });
-              areaData.push({ time: chartTime, value: zone.high });
-            }
-            if (isValidPrice(zone.low)) {
-              bottomData.push({ time: chartTime, value: zone.low });
-            }
-          }
-        }
-
-        if (topData.length === 0 && bottomData.length === 0) return;
-
-        try {
-          const topSeries = chartRef.current.addLineSeries({
-            color: lineColor,
-            lineWidth: 1,
-            lineStyle: LineStyle.Solid,
-            priceLineVisible: false,
-            lastValueVisible: false,
-            crosshairMarkerVisible: false,
-          });
-
-          const bottomSeries = chartRef.current.addLineSeries({
-            color: lineColor,
-            lineWidth: 1,
-            lineStyle: LineStyle.Solid,
-            priceLineVisible: false,
-            lastValueVisible: false,
-            crosshairMarkerVisible: false,
-          });
-
-          const areaSeries = chartRef.current.addAreaSeries({
-            topColor: fillColor,
-            bottomColor: fillColor,
-            lineColor: 'transparent',
-            lineWidth: 1,
-            priceLineVisible: false,
-            lastValueVisible: false,
-            crosshairMarkerVisible: false,
-          });
-
-          safeSetData(topSeries, topData, `FVG-top-${index}`);
-          safeSetData(bottomSeries, bottomData, `FVG-bottom-${index}`);
-          safeSetData(areaSeries, areaData, `FVG-area-${index}`);
-
-          fvgSeriesRef.current.set(`fvg-top-${index}`, topSeries as unknown as ISeriesApi<'Area'>);
-          fvgSeriesRef.current.set(`fvg-bottom-${index}`, bottomSeries as unknown as ISeriesApi<'Area'>);
-          fvgSeriesRef.current.set(`fvg-area-${index}`, areaSeries);
-        } catch (e) {
-          console.error(`[KCUChart] FVG-${index} error:`, e);
-        }
-      });
-
-      if (DEBUG_LOGGING) console.log('[KCUChart] FVG Zones complete -', fvgSeriesRef.current.size, 'series');
-    });
-
-    // Cleanup: cancel RAF if component unmounts during delay
-    return () => {
-      cancelAnimationFrame(rafId);
-    };
-  }, [fvgZones, data, isInitialized]);
-
-  // =========================================================================
+  // ==========================================================================
   // Render
-  // =========================================================================
-
-  // Determine if we should show loading state
-  const safeData = data || [];
-  const isDataEmpty = safeData.length === 0;
-  const showLoadingState = isDataEmpty || !isInitialized || dimensions.width <= 0;
+  // ==========================================================================
+  const isLoading = !isInitialized || data.length === 0 || dimensions.width <= 0;
 
   return (
-    <div
-      className={`relative ${className}`}
-      style={{
-        minHeight: MIN_CHART_HEIGHT,
-        // Debug border - set DEBUG_CHART to true to see chart bounds
-        ...(DEBUG_CHART ? { border: '1px solid red' } : {}),
-      }}
-    >
-      {/* Chart Container */}
+    <div className={`relative ${className}`} style={{ minHeight: MIN_CHART_HEIGHT }}>
       <div
         ref={containerRef}
         className="w-full h-full"
-        style={{
-          minHeight: MIN_CHART_HEIGHT,
-          height: height || '100%',
-          position: 'relative',
-          zIndex: 1,
-        }}
+        style={{ minHeight: MIN_CHART_HEIGHT, height: height || '100%' }}
       />
 
-      {/* Loading / No Data State Overlay */}
-      {showLoadingState && (
-        <div
-          className="absolute inset-0 flex flex-col items-center justify-center bg-[#0d0d0d]/90 z-10"
-          style={{ minHeight: MIN_CHART_HEIGHT }}
-        >
+      {isLoading && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0d0d0d]/90 z-10">
           <Loader2 className="w-8 h-8 text-[var(--accent-primary)] animate-spin mb-3" />
           <p className="text-sm text-[var(--text-secondary)] font-mono">
-            {isDataEmpty ? 'Waiting for Market Data...' : 'Initializing Chart...'}
+            {data.length === 0 ? 'Waiting for Market Data...' : 'Initializing Chart...'}
           </p>
-          {symbol && (
-            <p className="text-xs text-[var(--text-tertiary)] mt-1">{symbol}</p>
-          )}
-          {DEBUG_CHART && (
-            <p className="text-xs text-red-500 mt-2">
-              Debug: {dimensions.width}x{dimensions.height} | Data: {safeData.length}
-            </p>
-          )}
+          {symbol && <p className="text-xs text-[var(--text-tertiary)] mt-1">{symbol}</p>}
         </div>
       )}
 
-      {/* Pulsing Gamma Level Proximity Alerts */}
-      {proximityAlerts.map((alert, index) => {
-        const color = alert.type === 'call_wall'
-          ? CHART_COLORS.callWall
-          : alert.type === 'put_wall'
-          ? CHART_COLORS.putWall
-          : CHART_COLORS.zeroGamma;
-
-        const label = alert.type === 'call_wall'
-          ? '📈 CALL WALL'
-          : alert.type === 'put_wall'
-          ? '📉 PUT WALL'
-          : '⚡ ZERO γ';
-
-        return (
-          <div
-            key={`proximity-${alert.type}-${index}`}
-            className="absolute left-0 right-12 pointer-events-none z-20"
-            style={{
-              top: alert.yCoordinate - 2,
-              height: 4,
-            }}
-          >
-            {/* Glowing bar */}
-            <div
-              className="w-full h-full animate-pulse"
-              style={{
-                background: `linear-gradient(90deg, transparent, ${color}40, ${color}80, ${color}40, transparent)`,
-                boxShadow: `0 0 20px ${color}, 0 0 40px ${color}60, 0 0 60px ${color}30`,
-              }}
-            />
-            {/* Label badge */}
-            <div
-              className="absolute right-0 top-1/2 -translate-y-1/2 px-2 py-0.5 text-[10px] font-bold font-mono animate-pulse rounded"
-              style={{
-                backgroundColor: `${color}30`,
-                color: color,
-                border: `1px solid ${color}60`,
-                boxShadow: `0 0 10px ${color}40`,
-              }}
-            >
-              {label} ${alert.price.toFixed(2)}
-            </div>
-          </div>
-        );
-      })}
-
       {/* Symbol Badge */}
       {symbol && (
-        <div className="absolute top-3 left-3 px-2 py-1 bg-[#1e293b]/80 border border-terminal-border text-kcu-gold font-mono text-sm">
+        <div className="absolute top-3 left-3 px-2 py-1 bg-[#1e293b]/80 border border-[var(--border-primary)] text-[var(--accent-gold)] font-mono text-sm">
           {symbol}
         </div>
       )}
 
       {/* Mode Indicator */}
-      <div className={`absolute top-3 right-3 px-2 py-1 text-xs font-mono uppercase ${
-        mode === 'live'
-          ? 'bg-green-500/20 text-green-400 border border-green-500/50'
-          : 'bg-blue-500/20 text-blue-400 border border-blue-500/50'
-      }`}>
+      <div
+        className={`absolute top-3 right-3 px-2 py-1 text-xs font-mono uppercase ${
+          mode === 'live'
+            ? 'bg-green-500/20 text-green-400 border border-green-500/50'
+            : 'bg-blue-500/20 text-blue-400 border border-blue-500/50'
+        }`}
+      >
         {mode === 'live' ? '● LIVE' : '▶ REPLAY'}
       </div>
 
@@ -1806,7 +830,7 @@ export const KCUChart = memo(function KCUChart({
             <span className="text-[#ef4444]">EMA 21</span>
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-3 h-0.5 bg-[#f97316]" style={{ borderTop: '2px dotted #f97316' }}></span>
+            <span className="w-3 h-0.5 bg-[#f97316]"></span>
             <span className="text-[#f97316]">SMA 200</span>
           </span>
           <span className="flex items-center gap-1">
@@ -1822,31 +846,33 @@ export const KCUChart = memo(function KCUChart({
         </div>
       )}
 
-      {/* Gamma/Institutional Levels Legend */}
+      {/* Gamma Legend */}
       {gammaLevels.length > 0 && (
         <div className="absolute bottom-3 right-3 flex flex-col gap-1 text-[10px] font-mono bg-[#0d0d0d]/80 px-2 py-1.5 rounded border border-[var(--border-primary)]">
-          <span className="text-[var(--text-tertiary)] uppercase tracking-wider mb-0.5">Institutional</span>
-          {gammaLevels.some(g => g.type === 'call_wall') && (
+          <span className="text-[var(--text-tertiary)] uppercase tracking-wider mb-0.5">
+            Institutional
+          </span>
+          {gammaLevels.some((g) => g.type === 'call_wall') && (
             <span className="flex items-center gap-1.5">
               <span className="w-4 h-0.5" style={{ backgroundColor: CHART_COLORS.callWall }}></span>
               <span style={{ color: CHART_COLORS.callWall }}>Call Wall</span>
             </span>
           )}
-          {gammaLevels.some(g => g.type === 'put_wall') && (
+          {gammaLevels.some((g) => g.type === 'put_wall') && (
             <span className="flex items-center gap-1.5">
               <span className="w-4 h-0.5" style={{ backgroundColor: CHART_COLORS.putWall }}></span>
               <span style={{ color: CHART_COLORS.putWall }}>Put Wall</span>
             </span>
           )}
-          {gammaLevels.some(g => g.type === 'zero_gamma') && (
+          {gammaLevels.some((g) => g.type === 'zero_gamma') && (
             <span className="flex items-center gap-1.5">
-              <span className="w-4 h-0.5 border-t border-dashed" style={{ borderColor: CHART_COLORS.zeroGamma }}></span>
+              <span className="w-4 h-0.5" style={{ backgroundColor: CHART_COLORS.zeroGamma }}></span>
               <span style={{ color: CHART_COLORS.zeroGamma }}>Zero γ</span>
             </span>
           )}
-          {gammaLevels.some(g => g.type === 'max_pain') && (
+          {gammaLevels.some((g) => g.type === 'max_pain') && (
             <span className="flex items-center gap-1.5">
-              <span className="w-4 h-0.5 border-t border-dotted" style={{ borderColor: CHART_COLORS.maxPain }}></span>
+              <span className="w-4 h-0.5" style={{ backgroundColor: CHART_COLORS.maxPain }}></span>
               <span style={{ color: CHART_COLORS.maxPain }}>Max Pain</span>
             </span>
           )}
