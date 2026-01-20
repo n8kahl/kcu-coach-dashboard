@@ -851,8 +851,30 @@ export const KCUChart = memo(function KCUChart({
     setIsInitialized(true);
 
     return () => {
-      // Clear all series refs BEFORE removing chart to prevent
-      // async rendering callbacks from operating on destroyed series
+      // CRITICAL: Clear all series DATA first, then remove series, then destroy chart
+      // This prevents "Value is null" errors during the chart's final render frame
+
+      // Clear overlay series data and remove them
+      levelSeriesRef.current.forEach((series) => {
+        try { series.setData([]); } catch { /* ignore */ }
+      });
+      gammaSeriesRef.current.forEach((series) => {
+        try { series.setData([]); } catch { /* ignore */ }
+      });
+      fvgSeriesRef.current.forEach((series) => {
+        try { series.setData([]); } catch { /* ignore */ }
+      });
+
+      // Clear main series data
+      try { candleSeriesRef.current?.setData([]); } catch { /* ignore */ }
+      try { volumeSeriesRef.current?.setData([]); } catch { /* ignore */ }
+      try { ema8SeriesRef.current?.setData([]); } catch { /* ignore */ }
+      try { ema21SeriesRef.current?.setData([]); } catch { /* ignore */ }
+      try { sma200SeriesRef.current?.setData([]); } catch { /* ignore */ }
+      try { vwapSeriesRef.current?.setData([]); } catch { /* ignore */ }
+      try { cloudSeriesRef.current?.setData([]); } catch { /* ignore */ }
+
+      // Now clear the refs
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
       ema8SeriesRef.current = null;
@@ -1114,8 +1136,18 @@ export const KCUChart = memo(function KCUChart({
       }
 
       // Clear existing level lines INSIDE the RAF callback
+      // CRITICAL: Clear series data BEFORE removing to prevent "Value is null" during render
       if (DEBUG_LOGGING) console.log('[KCUChart] Level Lines - clearing', levelSeriesRef.current.size, 'existing series');
-      levelSeriesRef.current.forEach((series, key) => {
+      levelSeriesRef.current.forEach((series) => {
+        try {
+          // First clear the data to prevent render errors
+          series.setData([]);
+        } catch {
+          // Ignore - series may already be invalid
+        }
+      });
+      // Now remove the empty series
+      levelSeriesRef.current.forEach((series) => {
         try {
           chartRef.current?.removeSeries(series);
         } catch {
@@ -1229,6 +1261,16 @@ export const KCUChart = memo(function KCUChart({
       }
 
       // Clear existing gamma level lines INSIDE RAF
+      // CRITICAL: Clear series data BEFORE removing to prevent "Value is null" during render
+      gammaSeriesRef.current.forEach((series) => {
+        try {
+          // First clear the data to prevent render errors
+          series.setData([]);
+        } catch {
+          // Ignore - series may already be invalid
+        }
+      });
+      // Now remove the empty series
       gammaSeriesRef.current.forEach((series) => {
         try {
           chartRef.current?.removeSeries(series);
@@ -1474,6 +1516,16 @@ export const KCUChart = memo(function KCUChart({
       }
 
       // Clear existing FVG series INSIDE RAF
+      // CRITICAL: Clear series data BEFORE removing to prevent "Value is null" during render
+      fvgSeriesRef.current.forEach((series) => {
+        try {
+          // First clear the data to prevent render errors
+          series.setData([]);
+        } catch {
+          // Ignore - series may already be invalid
+        }
+      });
+      // Now remove the empty series
       fvgSeriesRef.current.forEach((series) => {
         try {
           chartRef.current?.removeSeries(series);
