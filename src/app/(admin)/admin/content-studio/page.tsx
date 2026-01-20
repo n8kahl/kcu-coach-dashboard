@@ -66,8 +66,11 @@ import {
   Library,
   Youtube,
   Scissors,
+  MoreVertical,
 } from 'lucide-react';
 import { LibraryManager, VideoPickerModal, type LibraryVideo } from '@/components/admin/content/library-manager';
+import { PreviewPlayer } from '@/components/admin/content/PreviewPlayer';
+import { CourseGrid } from '@/components/admin/content/studio/CourseGrid';
 import { VideoContentStudio } from '@/components/social';
 
 // ============================================
@@ -95,14 +98,19 @@ function SortableTreeItem({
   isSelected,
   onSelect,
   onToggleExpand,
+  onEdit,
+  onDelete,
   depth = 0,
 }: {
   item: TreeItem;
   isSelected: boolean;
   onSelect: () => void;
   onToggleExpand?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
   depth?: number;
 }) {
+  const [showMenu, setShowMenu] = useState(false);
   const {
     attributes,
     listeners,
@@ -123,7 +131,7 @@ function SortableTreeItem({
   const lessonData = !isModule ? (item.data as CourseLesson) : null;
 
   return (
-    <div ref={setNodeRef} style={style}>
+    <div ref={setNodeRef} style={style} className="relative group">
       <div
         className={cn(
           'flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors',
@@ -192,6 +200,61 @@ function SortableTreeItem({
             {lessonData.isPublished ? 'Live' : 'Draft'}
           </Badge>
         )}
+
+        {/* Actions Menu Button */}
+        <div className="relative">
+          <button
+            className={cn(
+              'p-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] rounded transition-opacity',
+              showMenu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu(!showMenu);
+            }}
+          >
+            <MoreVertical className="w-4 h-4" />
+          </button>
+
+          {/* Actions Dropdown Menu */}
+          {showMenu && (
+            <>
+              {/* Backdrop to close menu */}
+              <div
+                className="fixed inset-0 z-10"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMenu(false);
+                }}
+              />
+              {/* Menu */}
+              <div className="absolute right-0 top-full mt-1 z-20 min-w-[120px] py-1 bg-[var(--bg-card)] border border-[var(--border-primary)] rounded-md shadow-lg">
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] flex items-center gap-2"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowMenu(false);
+                    onEdit?.();
+                  }}
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  Edit
+                </button>
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-2"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowMenu(false);
+                    onDelete?.();
+                  }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -205,16 +268,22 @@ function VideoUploader({
   lesson,
   onUploadComplete,
   onTranscriptGenerated,
+  onStatusChange,
 }: {
   lesson: CourseLesson | null;
   onUploadComplete: (videoUid: string, duration: number) => void;
   onTranscriptGenerated?: (transcript: string) => void;
+  onStatusChange?: (status: 'pending' | 'processing' | 'ready' | 'error', metadata?: { duration?: number; thumbnailUrl?: string }) => void;
 }) {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [generatingTranscript, setGeneratingTranscript] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Environment check for Cloudflare Stream domain
+  const streamDomain = process.env.NEXT_PUBLIC_CLOUDFLARE_STREAM_DOMAIN;
+  const missingEnvVar = !streamDomain;
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -347,73 +416,71 @@ function VideoUploader({
     }
   };
 
-  if (lesson?.videoUid) {
-    // Show Cloudflare Stream player
-    const streamDomain =
-      process.env.NEXT_PUBLIC_CLOUDFLARE_STREAM_DOMAIN || 'customer-f33zs165nr7gyfy4.cloudflarestream.com';
+  // Handle status changes from PreviewPlayer
+  const handlePreviewStatusChange = (status: 'pending' | 'processing' | 'ready' | 'error', metadata?: { duration?: number; thumbnailUrl?: string }) => {
+    onStatusChange?.(status, metadata);
+  };
 
+  if (lesson?.videoUid) {
+    // Show PreviewPlayer for Cloudflare videos
     return (
       <div className="space-y-4">
-        <div className="aspect-video bg-black rounded-lg overflow-hidden">
-          <iframe
-            src={`https://${streamDomain}/${lesson.videoUid}/iframe`}
-            className="w-full h-full"
-            allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
-            allowFullScreen
-          />
-        </div>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-[var(--text-tertiary)]">
-            Duration: {lesson.videoDurationSeconds ? `${Math.floor(lesson.videoDurationSeconds / 60)}:${String(lesson.videoDurationSeconds % 60).padStart(2, '0')}` : 'Unknown'}
-          </span>
-          <div className="flex items-center gap-2">
-            <Badge variant="success" size="sm">
-              <CheckCircle className="w-3 h-3 mr-1" />
-              Video Ready
-            </Badge>
+        <PreviewPlayer
+          videoUid={lesson.videoUid}
+          videoStatus={lesson.videoStatus}
+          videoDurationSeconds={lesson.videoDurationSeconds}
+          thumbnailUrl={lesson.thumbnailUrl}
+          onStatusChange={handlePreviewStatusChange}
+        />
+
+        {/* Replace button - only show if video is ready */}
+        {lesson.videoStatus === 'ready' && (
+          <div className="flex justify-end">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => fileInputRef.current?.click()}
             >
-              Replace
+              Replace Video
             </Button>
           </div>
-        </div>
+        )}
 
         {/* Generate Transcript Button */}
-        <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-[var(--text-primary)]">
-                {lesson.transcriptText ? 'Transcript Available' : 'No Transcript'}
-              </p>
-              <p className="text-xs text-[var(--text-tertiary)]">
-                {lesson.transcriptText
-                  ? `${lesson.transcriptText.split(' ').length} words`
-                  : 'Generate using AI transcription'}
-              </p>
+        {lesson.videoStatus === 'ready' && (
+          <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-[var(--text-primary)]">
+                  {lesson.transcriptText ? 'Transcript Available' : 'No Transcript'}
+                </p>
+                <p className="text-xs text-[var(--text-tertiary)]">
+                  {lesson.transcriptText
+                    ? `${lesson.transcriptText.split(' ').length} words`
+                    : 'Generate using AI transcription'}
+                </p>
+              </div>
+              <Button
+                variant={lesson.transcriptText ? 'secondary' : 'primary'}
+                size="sm"
+                onClick={handleGenerateTranscript}
+                disabled={generatingTranscript}
+              >
+                {generatingTranscript ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="w-4 h-4 mr-2" />
+                    {lesson.transcriptText ? 'Regenerate' : 'Generate'} Transcript
+                  </>
+                )}
+              </Button>
             </div>
-            <Button
-              variant={lesson.transcriptText ? 'secondary' : 'primary'}
-              size="sm"
-              onClick={handleGenerateTranscript}
-              disabled={generatingTranscript}
-            >
-              {generatingTranscript ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <FileText className="w-4 h-4 mr-2" />
-                  {lesson.transcriptText ? 'Regenerate' : 'Generate'} Transcript
-                </>
-              )}
-            </Button>
           </div>
-        </div>
+        )}
 
         {error && (
           <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-400">
@@ -428,6 +495,25 @@ function VideoUploader({
           onChange={handleFileSelect}
           className="hidden"
         />
+      </div>
+    );
+  }
+
+  // Show configuration error if env var is missing
+  if (missingEnvVar) {
+    return (
+      <div className="space-y-4">
+        <div className="aspect-video bg-red-500/10 border-2 border-dashed border-red-500/50 rounded-lg flex flex-col items-center justify-center p-6">
+          <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mb-3">
+            <X className="w-6 h-6 text-red-500" />
+          </div>
+          <p className="text-sm font-medium text-red-400 text-center mb-2">
+            Configuration Error
+          </p>
+          <p className="text-xs text-red-400/80 text-center max-w-sm">
+            <code className="bg-red-500/20 px-1 py-0.5 rounded">NEXT_PUBLIC_CLOUDFLARE_STREAM_DOMAIN</code> environment variable is not set. Video upload and playback will not work.
+          </p>
+        </div>
       </div>
     );
   }
@@ -611,6 +697,103 @@ function ResourceEditor({
 }
 
 // ============================================
+// Confirmation Dialog Component
+// ============================================
+
+function ConfirmDeleteDialog({
+  isOpen,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmText = 'DELETE',
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  message: string;
+  confirmText?: string;
+}) {
+  const [inputValue, setInputValue] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setInputValue('');
+    }
+  }, [isOpen]);
+
+  const handleConfirm = async () => {
+    if (inputValue !== confirmText) return;
+    setDeleting(true);
+    try {
+      await onConfirm();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
+      <div className="bg-[var(--bg-card)] border border-red-500/30 rounded-lg w-full max-w-md mx-4 shadow-2xl">
+        <div className="p-4 border-b border-red-500/30">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center">
+              <Trash2 className="w-5 h-5 text-red-500" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-red-400">{title}</h2>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-4">
+          <p className="text-sm text-[var(--text-secondary)]">{message}</p>
+          <div>
+            <label className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
+              Type <span className="font-mono text-red-400">{confirmText}</span> to confirm:
+            </label>
+            <Input
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder={confirmText}
+              className="font-mono"
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 p-4 border-t border-[var(--border-primary)]">
+          <Button variant="secondary" onClick={onClose} className="flex-1">
+            Cancel
+          </Button>
+          <Button
+            variant="error"
+            onClick={handleConfirm}
+            disabled={inputValue !== confirmText || deleting}
+            className="flex-1 bg-red-600 hover:bg-red-700"
+          >
+            {deleting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                Deleting...
+              </>
+            ) : (
+              <>
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
 // Course Editor Modal
 // ============================================
 
@@ -619,11 +802,13 @@ function CourseEditorModal({
   isOpen,
   onClose,
   onSave,
+  onDelete,
 }: {
   course: Course | null;
   isOpen: boolean;
   onClose: () => void;
   onSave: (course: Partial<Course>) => Promise<void>;
+  onDelete?: (courseId: string) => Promise<void>;
 }) {
   const [formData, setFormData] = useState<Partial<Course>>({
     title: '',
@@ -634,6 +819,7 @@ function CourseEditorModal({
     complianceRequired: false,
   });
   const [saving, setSaving] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (course) {
@@ -648,6 +834,7 @@ function CourseEditorModal({
         complianceRequired: false,
       });
     }
+    setShowDeleteConfirm(false);
   }, [course, isOpen]);
 
   const handleSave = async () => {
@@ -660,115 +847,148 @@ function CourseEditorModal({
     }
   };
 
+  const handleDelete = async () => {
+    if (!course?.id || !onDelete) return;
+    await onDelete(course.id);
+    setShowDeleteConfirm(false);
+    onClose();
+  };
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-[var(--bg-card)] border border-[var(--border-primary)] rounded-lg w-full max-w-lg mx-4 shadow-2xl">
-        <div className="flex items-center justify-between p-4 border-b border-[var(--border-primary)]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-[var(--accent-primary)]/20 flex items-center justify-center">
-              <Layers className="w-5 h-5 text-[var(--accent-primary)]" />
+    <>
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="bg-[var(--bg-card)] border border-[var(--border-primary)] rounded-lg w-full max-w-lg mx-4 shadow-2xl">
+          <div className="flex items-center justify-between p-4 border-b border-[var(--border-primary)]">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-[var(--accent-primary)]/20 flex items-center justify-center">
+                <Layers className="w-5 h-5 text-[var(--accent-primary)]" />
+              </div>
+              <div>
+                <h2 className="font-semibold text-[var(--text-primary)]">
+                  {course ? 'Edit Course' : 'New Course'}
+                </h2>
+                <p className="text-xs text-[var(--text-tertiary)]">
+                  {course ? 'Update course details' : 'Create a new course'}
+                </p>
+              </div>
             </div>
+            <button
+              onClick={onClose}
+              className="p-1 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="p-4 space-y-4">
             <div>
-              <h2 className="font-semibold text-[var(--text-primary)]">
-                {course ? 'Edit Course' : 'New Course'}
-              </h2>
-              <p className="text-xs text-[var(--text-tertiary)]">
-                {course ? 'Update course details' : 'Create a new course'}
-              </p>
+              <label className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
+                Course Title
+              </label>
+              <Input
+                value={formData.title || ''}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                placeholder="e.g., KCU Masterclass"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
+                URL Slug
+              </label>
+              <Input
+                value={formData.slug || ''}
+                onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
+                placeholder="e.g., kcu-masterclass"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
+                Description
+              </label>
+              <Textarea
+                value={formData.description || ''}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Course description..."
+                rows={3}
+              />
+            </div>
+
+            <div className="flex items-center gap-6">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.isPublished}
+                  onChange={(e) => setFormData({ ...formData, isPublished: e.target.checked })}
+                  className="w-4 h-4 rounded border-[var(--border-primary)] accent-[var(--accent-primary)]"
+                />
+                <span className="text-sm text-[var(--text-primary)]">Published</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.isGated}
+                  onChange={(e) => setFormData({ ...formData, isGated: e.target.checked })}
+                  className="w-4 h-4 rounded border-[var(--border-primary)] accent-[var(--accent-primary)]"
+                />
+                <span className="text-sm text-[var(--text-primary)]">Gated</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.complianceRequired}
+                  onChange={(e) => setFormData({ ...formData, complianceRequired: e.target.checked })}
+                  className="w-4 h-4 rounded border-[var(--border-primary)] accent-[var(--accent-primary)]"
+                />
+                <span className="text-sm text-[var(--text-primary)]">Compliance</span>
+              </label>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
 
-        <div className="p-4 space-y-4">
-          <div>
-            <label className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
-              Course Title
-            </label>
-            <Input
-              value={formData.title || ''}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              placeholder="e.g., KCU Masterclass"
-            />
+          <div className="flex items-center justify-between p-4 border-t border-[var(--border-primary)]">
+            {/* Delete button - left side, only for existing courses */}
+            {course && onDelete && (
+              <Button
+                variant="ghost"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="text-red-500 hover:text-red-400 hover:bg-red-500/10"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete Course
+              </Button>
+            )}
+            {!course && <div />}
+
+            {/* Save/Cancel buttons - right side */}
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleSave}
+                disabled={saving || !formData.title}
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+                {course ? 'Update' : 'Create'}
+              </Button>
+            </div>
           </div>
-
-          <div>
-            <label className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
-              URL Slug
-            </label>
-            <Input
-              value={formData.slug || ''}
-              onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
-              placeholder="e.g., kcu-masterclass"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
-              Description
-            </label>
-            <Textarea
-              value={formData.description || ''}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Course description..."
-              rows={3}
-            />
-          </div>
-
-          <div className="flex items-center gap-6">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={formData.isPublished}
-                onChange={(e) => setFormData({ ...formData, isPublished: e.target.checked })}
-                className="w-4 h-4 rounded border-[var(--border-primary)] accent-[var(--accent-primary)]"
-              />
-              <span className="text-sm text-[var(--text-primary)]">Published</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={formData.isGated}
-                onChange={(e) => setFormData({ ...formData, isGated: e.target.checked })}
-                className="w-4 h-4 rounded border-[var(--border-primary)] accent-[var(--accent-primary)]"
-              />
-              <span className="text-sm text-[var(--text-primary)]">Gated</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={formData.complianceRequired}
-                onChange={(e) => setFormData({ ...formData, complianceRequired: e.target.checked })}
-                className="w-4 h-4 rounded border-[var(--border-primary)] accent-[var(--accent-primary)]"
-              />
-              <span className="text-sm text-[var(--text-primary)]">Compliance</span>
-            </label>
-          </div>
-        </div>
-
-        <div className="flex gap-2 p-4 border-t border-[var(--border-primary)]">
-          <Button variant="secondary" onClick={onClose} className="flex-1">
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleSave}
-            disabled={saving || !formData.title}
-            className="flex-1"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-            {course ? 'Update' : 'Create'}
-          </Button>
         </div>
       </div>
-    </div>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDeleteDialog
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={handleDelete}
+        title="Delete Course"
+        message={`This will permanently delete "${course?.title}" and all its modules and lessons. This action cannot be undone.`}
+      />
+    </>
   );
 }
 
@@ -987,6 +1207,10 @@ export default function ContentStudioPage() {
   // Video Library Picker Modal
   const [videoPickerOpen, setVideoPickerOpen] = useState(false);
 
+  // Delete Confirmation State
+  const [deleteModuleConfirm, setDeleteModuleConfirm] = useState<{ id: string; title: string } | null>(null);
+  const [deleteLessonConfirm, setDeleteLessonConfirm] = useState<{ id: string; title: string } | null>(null);
+
   // DnD Sensors
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -1140,33 +1364,124 @@ export default function ContentStudioPage() {
       }
     }
 
-    // Handle lesson reordering within same module
-    if (activeItem.type === 'lesson' && overItem.type === 'lesson' && activeItem.parentId === overItem.parentId) {
-      const moduleId = (activeItem.data as CourseLesson).moduleId;
-      setModules((prev) =>
-        prev.map((m) => {
-          if (m.id === moduleId) {
-            const oldIndex = m.lessons.findIndex((l) => `lesson-${l.id}` === active.id);
-            const newIndex = m.lessons.findIndex((l) => `lesson-${l.id}` === over.id);
-            if (oldIndex !== -1 && newIndex !== -1) {
-              const newLessons = arrayMove(m.lessons, oldIndex, newIndex);
+    // Handle lesson reordering
+    if (activeItem.type === 'lesson') {
+      const activeLesson = activeItem.data as CourseLesson;
+      const sourceModuleId = activeLesson.moduleId;
 
-              // Save new order to backend
-              fetch('/api/admin/content/lessons/reorder', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  moduleId: m.id,
-                  lessonIds: newLessons.map((l) => l.id),
-                }),
-              }).catch(console.error);
+      // Determine target module
+      let targetModuleId: string;
+      let targetIndex: number;
 
-              return { ...m, lessons: newLessons };
+      if (overItem.type === 'module') {
+        // Dropped onto a module - add to end of that module
+        targetModuleId = (overItem.data as ModuleWithLessons).id;
+        targetIndex = (overItem.data as ModuleWithLessons).lessons?.length || 0;
+      } else if (overItem.type === 'lesson') {
+        // Dropped onto a lesson - get that lesson's module
+        const overLesson = overItem.data as CourseLesson;
+        targetModuleId = overLesson.moduleId;
+
+        const targetModule = modules.find((m) => m.id === targetModuleId);
+        if (targetModule) {
+          targetIndex = targetModule.lessons.findIndex((l) => `lesson-${l.id}` === over.id);
+        } else {
+          return;
+        }
+      } else {
+        return;
+      }
+
+      // Same module reordering
+      if (sourceModuleId === targetModuleId) {
+        setModules((prev) =>
+          prev.map((m) => {
+            if (m.id === sourceModuleId) {
+              const oldIndex = m.lessons.findIndex((l) => `lesson-${l.id}` === active.id);
+              const newIndex = m.lessons.findIndex((l) => `lesson-${l.id}` === over.id);
+              if (oldIndex !== -1 && newIndex !== -1) {
+                const newLessons = arrayMove(m.lessons, oldIndex, newIndex);
+
+                // Save new order to backend
+                fetch('/api/admin/content/lessons/reorder', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    moduleId: m.id,
+                    lessonIds: newLessons.map((l) => l.id),
+                  }),
+                }).catch(console.error);
+
+                return { ...m, lessons: newLessons };
+              }
             }
+            return m;
+          })
+        );
+      } else {
+        // Cross-module move
+        // Update lesson's moduleId in the database
+        try {
+          const res = await fetch(`/api/admin/content/lessons/${activeLesson.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              moduleId: targetModuleId,
+            }),
+          });
+
+          if (res.ok) {
+            // Update local state
+            setModules((prev) => {
+              // Remove from source module
+              const updated = prev.map((m) => {
+                if (m.id === sourceModuleId) {
+                  return {
+                    ...m,
+                    lessons: m.lessons.filter((l) => l.id !== activeLesson.id),
+                  };
+                }
+                return m;
+              });
+
+              // Add to target module
+              return updated.map((m) => {
+                if (m.id === targetModuleId) {
+                  const updatedLesson = { ...activeLesson, moduleId: targetModuleId };
+                  const newLessons = [...m.lessons];
+                  newLessons.splice(targetIndex, 0, updatedLesson);
+
+                  // Reorder in backend
+                  fetch('/api/admin/content/lessons/reorder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      moduleId: m.id,
+                      lessonIds: newLessons.map((l) => l.id),
+                    }),
+                  }).catch(console.error);
+
+                  return { ...m, lessons: newLessons };
+                }
+                return m;
+              });
+            });
+
+            showToast({
+              type: 'success',
+              title: 'Lesson Moved',
+              message: 'Lesson moved to new module',
+            });
           }
-          return m;
-        })
-      );
+        } catch (err) {
+          console.error('Error moving lesson:', err);
+          showToast({
+            type: 'error',
+            title: 'Error',
+            message: 'Failed to move lesson',
+          });
+        }
+      }
     }
   };
 
@@ -1326,6 +1641,7 @@ export default function ContentStudioPage() {
         videoUid: null, // Clear Cloudflare UID if switching to YouTube
         videoDurationSeconds: video.duration ?? null,
         videoStatus: video.status === 'ready' ? 'ready' : 'pending',
+        thumbnailUrl: video.thumbnailUrl || `https://img.youtube.com/vi/${video.videoId}/mqdefault.jpg`,
       });
     } else {
       // Cloudflare video - set videoUid
@@ -1335,6 +1651,7 @@ export default function ContentStudioPage() {
         videoUrl: null, // Clear YouTube URL if switching to Cloudflare
         videoDurationSeconds: video.duration ?? null,
         videoStatus: video.status === 'ready' ? 'ready' : 'pending',
+        thumbnailUrl: video.thumbnailUrl || null,
       });
     }
 
@@ -1344,6 +1661,105 @@ export default function ContentStudioPage() {
       title: 'Video Selected',
       message: `Using "${video.title}"`,
     });
+  };
+
+  // Handle video status changes from PreviewPlayer polling
+  const handleVideoStatusChange = (status: 'pending' | 'processing' | 'ready' | 'error', metadata?: { duration?: number; thumbnailUrl?: string }) => {
+    if (!editedLesson) return;
+
+    setEditedLesson({
+      ...editedLesson,
+      videoStatus: status,
+      ...(metadata?.duration && { videoDurationSeconds: metadata.duration }),
+      ...(metadata?.thumbnailUrl && { thumbnailUrl: metadata.thumbnailUrl }),
+    });
+  };
+
+  // ============================================
+  // Delete Handlers
+  // ============================================
+
+  const handleDeleteCourse = async (courseId: string) => {
+    try {
+      const res = await fetch(`/api/admin/content/courses/${courseId}`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        showToast({
+          type: 'success',
+          title: 'Course Deleted',
+          message: 'Course has been permanently deleted',
+        });
+        setSelectedCourse(null);
+        setModules([]);
+        setSelectedItem(null);
+        setEditedLesson(null);
+        fetchCourses();
+      } else {
+        throw new Error('Failed to delete course');
+      }
+    } catch (err) {
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to delete course',
+      });
+    }
+  };
+
+  const handleDeleteModule = async (moduleId: string) => {
+    try {
+      const res = await fetch(`/api/admin/content/modules/${moduleId}`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        showToast({
+          type: 'success',
+          title: 'Module Deleted',
+          message: 'Module and all its lessons have been deleted',
+        });
+        setSelectedItem(null);
+        setEditedLesson(null);
+        fetchModules();
+      } else {
+        throw new Error('Failed to delete module');
+      }
+    } catch (err) {
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to delete module',
+      });
+    }
+  };
+
+  const handleDeleteLesson = async (lessonId: string) => {
+    try {
+      const res = await fetch(`/api/admin/content/lessons/${lessonId}`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        showToast({
+          type: 'success',
+          title: 'Lesson Deleted',
+          message: 'Lesson has been permanently deleted',
+        });
+        setSelectedItem(null);
+        setEditedLesson(null);
+        fetchModules();
+      } else {
+        throw new Error('Failed to delete lesson');
+      }
+    } catch (err) {
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to delete lesson',
+      });
+    }
   };
 
   // ============================================
@@ -1526,6 +1942,23 @@ export default function ContentStudioPage() {
                                     ? () => toggleModuleExpand((item.data as ModuleWithLessons).id)
                                     : undefined
                                 }
+                                onEdit={() => {
+                                  if (item.type === 'module') {
+                                    setEditingModule(item.data as CourseModule);
+                                    setModuleModalOpen(true);
+                                  } else {
+                                    handleSelectItem(item);
+                                  }
+                                }}
+                                onDelete={() => {
+                                  if (item.type === 'module') {
+                                    const moduleData = item.data as ModuleWithLessons;
+                                    setDeleteModuleConfirm({ id: moduleData.id, title: moduleData.title });
+                                  } else {
+                                    const lessonData = item.data as CourseLesson;
+                                    setDeleteLessonConfirm({ id: lessonData.id, title: lessonData.title });
+                                  }
+                                }}
                                 depth={item.parentId ? 1 : 0}
                               />
                             ))}
@@ -1686,26 +2119,20 @@ export default function ContentStudioPage() {
 
                               {/* Show YouTube video if using videoUrl */}
                               {editedLesson.videoUrl && !editedLesson.videoUid && (
-                                <div className="space-y-2">
-                                  <div className="aspect-video bg-black rounded-lg overflow-hidden">
-                                    <iframe
-                                      src={`https://www.youtube.com/embed/${new URL(editedLesson.videoUrl).searchParams.get('v') || editedLesson.videoUrl.split('/').pop()}`}
-                                      className="w-full h-full"
-                                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                      allowFullScreen
-                                    />
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                      <Youtube className="w-4 h-4 text-red-500" />
-                                      <span className="text-sm text-[var(--text-tertiary)]">YouTube Video</span>
-                                    </div>
+                                <div className="space-y-3">
+                                  <PreviewPlayer
+                                    videoUrl={editedLesson.videoUrl}
+                                    videoStatus={editedLesson.videoStatus}
+                                    videoDurationSeconds={editedLesson.videoDurationSeconds}
+                                    thumbnailUrl={editedLesson.thumbnailUrl}
+                                  />
+                                  <div className="flex justify-end">
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      onClick={() => setEditedLesson({ ...editedLesson, videoUrl: null })}
+                                      onClick={() => setEditedLesson({ ...editedLesson, videoUrl: null, thumbnailUrl: null })}
                                     >
-                                      Remove
+                                      Remove Video
                                     </Button>
                                   </div>
                                 </div>
@@ -1719,6 +2146,7 @@ export default function ContentStudioPage() {
                                   onTranscriptGenerated={(transcript) => {
                                     setEditedLesson({ ...editedLesson, transcriptText: transcript });
                                   }}
+                                  onStatusChange={handleVideoStatusChange}
                                 />
                               )}
                             </div>
@@ -1861,27 +2289,14 @@ export default function ContentStudioPage() {
           </PageSection>
         ) : (
           <PageSection>
-            <Card>
-              <CardContent className="py-16">
-                <div className="text-center text-[var(--text-tertiary)]">
-                  <LayoutGrid className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                  <h3 className="text-lg font-medium text-[var(--text-primary)] mb-2">
-                    No Course Selected
-                  </h3>
-                  <p className="mb-4">Select a course from the dropdown or create a new one</p>
-                  <Button
-                    variant="primary"
-                    icon={<Plus className="w-4 h-4" />}
-                    onClick={() => {
-                      setEditingCourse(null);
-                      setCourseModalOpen(true);
-                    }}
-                  >
-                    Create First Course
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            <CourseGrid
+              courses={courses}
+              onSelectCourse={setSelectedCourse}
+              onCreateCourse={() => {
+                setEditingCourse(null);
+                setCourseModalOpen(true);
+              }}
+            />
           </PageSection>
         )}
           </>
@@ -1901,6 +2316,7 @@ export default function ContentStudioPage() {
         isOpen={courseModalOpen}
         onClose={() => setCourseModalOpen(false)}
         onSave={handleSaveCourse}
+        onDelete={handleDeleteCourse}
       />
 
       {/* Module Editor Modal */}
@@ -1913,6 +2329,34 @@ export default function ContentStudioPage() {
           onSave={handleSaveModule}
         />
       )}
+
+      {/* Delete Module Confirmation */}
+      <ConfirmDeleteDialog
+        isOpen={!!deleteModuleConfirm}
+        onClose={() => setDeleteModuleConfirm(null)}
+        onConfirm={async () => {
+          if (deleteModuleConfirm) {
+            await handleDeleteModule(deleteModuleConfirm.id);
+            setDeleteModuleConfirm(null);
+          }
+        }}
+        title="Delete Module"
+        message={`This will permanently delete "${deleteModuleConfirm?.title}" and all lessons within it. This action cannot be undone.`}
+      />
+
+      {/* Delete Lesson Confirmation */}
+      <ConfirmDeleteDialog
+        isOpen={!!deleteLessonConfirm}
+        onClose={() => setDeleteLessonConfirm(null)}
+        onConfirm={async () => {
+          if (deleteLessonConfirm) {
+            await handleDeleteLesson(deleteLessonConfirm.id);
+            setDeleteLessonConfirm(null);
+          }
+        }}
+        title="Delete Lesson"
+        message={`This will permanently delete "${deleteLessonConfirm?.title}". This action cannot be undone.`}
+      />
     </>
   );
 }
