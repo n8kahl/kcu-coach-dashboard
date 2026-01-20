@@ -26,11 +26,30 @@ async function barsHandler(request: NextRequest) {
     }
 
     // Calculate date range
+    // Account for weekends/holidays by using generous multipliers
+    // Trading day has ~7 hours, ~78 5-min bars, ~390 1-min bars
     const to = new Date().toISOString().split('T')[0];
-    const daysBack = timespan === 'week' ? parseInt(limit) * 7 :
-                     timespan === 'day' ? parseInt(limit) :
-                     timespan === 'hour' ? Math.ceil(parseInt(limit) / 7) :
-                     Math.ceil(parseInt(limit) / 78);
+    const mult = parseInt(multiplier) || 1;
+    let daysBack: number;
+
+    if (timespan === 'week') {
+      daysBack = parseInt(limit) * 7;
+    } else if (timespan === 'day') {
+      // Add 50% buffer for holidays
+      daysBack = Math.ceil(parseInt(limit) * 1.5);
+    } else if (timespan === 'hour') {
+      // ~7 market hours per day, add weekend buffer (7/5 ≈ 1.4)
+      daysBack = Math.ceil((parseInt(limit) / 7) * 2);
+    } else {
+      // minute bars: ~78 5-min bars or ~390 1-min bars per day
+      // Multiply by 2 to account for weekends/holidays
+      const barsPerDay = timespan === 'minute' ? (390 / mult) : 78;
+      daysBack = Math.ceil((parseInt(limit) / barsPerDay) * 2.5);
+    }
+
+    // Minimum 7 days to ensure at least 5 trading days
+    daysBack = Math.max(daysBack, 7);
+
     const fromDate = new Date();
     fromDate.setDate(fromDate.getDate() - daysBack);
     const from = fromDate.toISOString().split('T')[0];

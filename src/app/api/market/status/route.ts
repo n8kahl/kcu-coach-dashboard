@@ -19,7 +19,7 @@ export async function GET() {
       marketDataService.getMarketStatus(),
       marketDataService.getQuote('SPY').catch(() => null),
       marketDataService.getQuote('QQQ').catch(() => null),
-      marketDataService.getQuote('VIX').catch(() => null),
+      marketDataService.getIndexQuote('VIX').catch(() => null), // VIX uses v3 indices endpoint
     ]);
 
     // Determine if market is open
@@ -42,7 +42,7 @@ export async function GET() {
     return NextResponse.json({
       spy: spyQuote ? { price: spyQuote.last, change: spyQuote.changePercent } : { price: 0, change: 0 },
       qqq: qqqQuote ? { price: qqqQuote.last, change: qqqQuote.changePercent } : { price: 0, change: 0 },
-      vix: vixQuote ? { price: vixQuote.last, change: vixQuote.changePercent } : undefined,
+      vix: vixQuote ? { price: vixQuote.value, change: vixQuote.changePercent } : undefined, // IndexQuote uses 'value'
       isOpen,
       timeToClose,
       // Also include raw status for compatibility
