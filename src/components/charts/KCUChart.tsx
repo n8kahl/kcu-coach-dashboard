@@ -168,33 +168,45 @@ const LEVEL_COLORS: Record<Level['type'], string> = {
 // Indicator Calculation Utilities
 // =============================================================================
 
-function calculateEMA(data: number[], period: number): number[] {
-  const ema: number[] = [];
+function calculateEMA(data: number[], period: number): (number | null)[] {
+  const ema: (number | null)[] = [];
   const multiplier = 2 / (period + 1);
 
   if (data.length === 0) return ema;
 
-  // First EMA is SMA
+  // Fill with null for indices before the EMA starts
+  for (let i = 0; i < period - 1; i++) {
+    ema.push(null);
+  }
+
+  // First EMA is SMA of the first 'period' values
   let sum = 0;
   for (let i = 0; i < Math.min(period, data.length); i++) {
     sum += data[i];
   }
-  ema[period - 1] = sum / Math.min(period, data.length);
+  const firstEma = sum / Math.min(period, data.length);
+  ema.push(firstEma);
 
   // Calculate EMA for remaining values
   for (let i = period; i < data.length; i++) {
-    ema[i] = (data[i] - ema[i - 1]) * multiplier + ema[i - 1];
+    const prevEma = ema[i - 1];
+    if (prevEma === null) {
+      ema.push(null);
+    } else {
+      ema.push((data[i] - prevEma) * multiplier + prevEma);
+    }
   }
 
   return ema;
 }
 
-function calculateSMA(data: number[], period: number): number[] {
-  const sma: number[] = [];
+function calculateSMA(data: number[], period: number): (number | null)[] {
+  const sma: (number | null)[] = [];
 
   for (let i = 0; i < data.length; i++) {
     if (i < period - 1) {
-      sma[i] = NaN;
+      // Return null for insufficient data - this is filtered out downstream
+      sma.push(null);
       continue;
     }
 
@@ -202,7 +214,7 @@ function calculateSMA(data: number[], period: number): number[] {
     for (let j = 0; j < period; j++) {
       sum += data[i - j];
     }
-    sma[i] = sum / period;
+    sma.push(sum / period);
   }
 
   return sma;
@@ -718,6 +730,16 @@ export function KCUChart({
     if (showIndicators && visibleData.length > 0) {
       const closePrices = visibleData.map((c) => c.close);
 
+      // Helper to strictly validate line data points
+      const isValidLineData = (d: { time: Time; value: number | null | undefined } | null): d is LineData => {
+        return d !== null &&
+          d.time !== null &&
+          d.value !== null &&
+          d.value !== undefined &&
+          typeof d.value === 'number' &&
+          Number.isFinite(d.value);
+      };
+
       // EMA 8
       if (ema8SeriesRef.current) {
         const ema8Values = calculateEMA(closePrices, 8);
@@ -725,10 +747,14 @@ export function KCUChart({
           .map((c, i) => {
             const time = toChartTime(c.time);
             if (time === null) return null;
-            return { time, value: ema8Values[i] };
+            const value = ema8Values[i];
+            return { time, value };
           })
-          .filter((d): d is LineData => d !== null && d.value != null && isFinite(d.value));
-        safeSetData(ema8SeriesRef.current, ema8Data, 'EMA8');
+          .filter(isValidLineData);
+        // Guard: only setData if we have valid points, otherwise clear
+        if (ema8Data.length > 0) {
+          safeSetData(ema8SeriesRef.current, ema8Data, 'EMA8');
+        }
       }
 
       // EMA 21
@@ -738,10 +764,14 @@ export function KCUChart({
           .map((c, i) => {
             const time = toChartTime(c.time);
             if (time === null) return null;
-            return { time, value: ema21Values[i] };
+            const value = ema21Values[i];
+            return { time, value };
           })
-          .filter((d): d is LineData => d !== null && d.value != null && isFinite(d.value));
-        safeSetData(ema21SeriesRef.current, ema21Data, 'EMA21');
+          .filter(isValidLineData);
+        // Guard: only setData if we have valid points
+        if (ema21Data.length > 0) {
+          safeSetData(ema21SeriesRef.current, ema21Data, 'EMA21');
+        }
       }
 
       // SMA 200
@@ -751,10 +781,14 @@ export function KCUChart({
           .map((c, i) => {
             const time = toChartTime(c.time);
             if (time === null) return null;
-            return { time, value: sma200Values[i] };
+            const value = sma200Values[i];
+            return { time, value };
           })
-          .filter((d): d is LineData => d !== null && d.value != null && isFinite(d.value));
-        safeSetData(sma200SeriesRef.current, sma200Data, 'SMA200');
+          .filter(isValidLineData);
+        // Guard: only setData if we have valid points (SMA200 needs 200+ candles)
+        if (sma200Data.length > 0) {
+          safeSetData(sma200SeriesRef.current, sma200Data, 'SMA200');
+        }
       }
 
       // VWAP
@@ -764,10 +798,14 @@ export function KCUChart({
           .map((c, i) => {
             const time = toChartTime(c.time);
             if (time === null) return null;
-            return { time, value: vwapValues[i] };
+            const value = vwapValues[i];
+            return { time, value };
           })
-          .filter((d): d is LineData => d !== null && d.value != null && isFinite(d.value));
-        safeSetData(vwapSeriesRef.current, vwapData, 'VWAP');
+          .filter(isValidLineData);
+        // Guard: only setData if we have valid points
+        if (vwapData.length > 0) {
+          safeSetData(vwapSeriesRef.current, vwapData, 'VWAP');
+        }
       }
 
       // Ripster Cloud (fill between EMA8 and EMA21)
@@ -781,31 +819,46 @@ export function KCUChart({
             if (time === null) return null;
             const ema8 = ema8Values[i];
             const ema21 = ema21Values[i];
-            // Use isFinite() to catch NaN, Infinity, and -Infinity
-            if (!isFinite(ema8) || !isFinite(ema21)) {
+            // Strict validation: check for null/undefined and use Number.isFinite
+            if (
+              ema8 === null ||
+              ema8 === undefined ||
+              ema21 === null ||
+              ema21 === undefined ||
+              typeof ema8 !== 'number' ||
+              typeof ema21 !== 'number' ||
+              !Number.isFinite(ema8) ||
+              !Number.isFinite(ema21)
+            ) {
               return null;
             }
             const maxValue = Math.max(ema8, ema21);
-            if (!isFinite(maxValue)) return null;
+            if (!Number.isFinite(maxValue)) return null;
             return {
               time,
               value: maxValue,
-              // Note: Area series doesn't support per-point colors directly
-              // We use the higher EMA as the top line
             };
           })
           .filter((d): d is AreaData => d !== null);
 
-        // Update cloud color based on trend
-        const lastEma8 = ema8Values[ema8Values.length - 1];
-        const lastEma21 = ema21Values[ema21Values.length - 1];
-        const isBullish = lastEma8 > lastEma21;
+        // Guard: only setData if we have valid points
+        if (cloudData.length > 0) {
+          // Update cloud color based on trend (check last valid values)
+          const lastEma8 = ema8Values[ema8Values.length - 1];
+          const lastEma21 = ema21Values[ema21Values.length - 1];
+          const isBullish =
+            typeof lastEma8 === 'number' &&
+            typeof lastEma21 === 'number' &&
+            Number.isFinite(lastEma8) &&
+            Number.isFinite(lastEma21) &&
+            lastEma8 > lastEma21;
 
-        cloudSeriesRef.current.applyOptions({
-          topColor: isBullish ? CHART_COLORS.cloudBullish : CHART_COLORS.cloudBearish,
-          lineColor: isBullish ? CHART_COLORS.ema8 : CHART_COLORS.ema21,
-        });
-        safeSetData(cloudSeriesRef.current, cloudData, 'RipsterCloud');
+          cloudSeriesRef.current.applyOptions({
+            topColor: isBullish ? CHART_COLORS.cloudBullish : CHART_COLORS.cloudBearish,
+            lineColor: isBullish ? CHART_COLORS.ema8 : CHART_COLORS.ema21,
+          });
+          safeSetData(cloudSeriesRef.current, cloudData, 'RipsterCloud');
+        }
       }
     }
 
