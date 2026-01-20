@@ -54,7 +54,7 @@ import { usePageContext } from '@/components/ai/hooks/usePageContext';
 
 // Stable options object for useLearningProgress - prevents infinite re-renders
 const PROGRESS_PAGE_OPTIONS = {
-  include: ['stats', 'modules', 'activity'] as const,
+  include: ['stats', 'modules', 'activity'] as ('stats' | 'courses' | 'modules' | 'activity')[],
   autoRefresh: true,
   refreshInterval: 120000, // Refresh every 2 minutes
 };
