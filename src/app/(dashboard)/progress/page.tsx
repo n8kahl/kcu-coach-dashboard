@@ -327,21 +327,33 @@ export default function ProgressPage() {
   // STEP 3: AI CONTEXT SYNCHRONIZATION
   // ============================================================================
 
+  // Memoize pageData to prevent infinite re-renders
+  // (usePageContext has pageData in its dependency array)
+  const pageData = useMemo(() => ({
+    completionPercent: data?.stats?.overallProgress,
+    currentStreak: data?.stats?.currentStreak,
+    weakAreas,
+    recommendedModule: recommendedModule?.moduleName,
+    totalLessonsCompleted: data?.stats?.totalLessonsCompleted,
+    totalWatchTimeHours: data?.stats?.totalWatchTimeSeconds
+      ? Math.round(data.stats.totalWatchTimeSeconds / 3600 * 10) / 10
+      : 0,
+    modulesInProgress: data?.modules?.filter(m => m.progress > 0 && m.progress < 100).length || 0,
+    modulesCompleted: data?.modules?.filter(m => m.progress >= 100).length || 0,
+  }), [
+    data?.stats?.overallProgress,
+    data?.stats?.currentStreak,
+    data?.stats?.totalLessonsCompleted,
+    data?.stats?.totalWatchTimeSeconds,
+    data?.modules,
+    weakAreas,
+    recommendedModule?.moduleName,
+  ]);
+
   // Use page context for automatic route tracking
   const { page } = usePageContext({
-    pageData: {
-      completionPercent: data?.stats?.overallProgress,
-      currentStreak: data?.stats?.currentStreak,
-      weakAreas,
-      recommendedModule: recommendedModule?.moduleName,
-      totalLessonsCompleted: data?.stats?.totalLessonsCompleted,
-      totalWatchTimeHours: data?.stats?.totalWatchTimeSeconds
-        ? Math.round(data.stats.totalWatchTimeSeconds / 3600 * 10) / 10
-        : 0,
-      modulesInProgress: data?.modules?.filter(m => m.progress > 0 && m.progress < 100).length || 0,
-      modulesCompleted: data?.modules?.filter(m => m.progress >= 100).length || 0,
-    },
-    deps: [data],
+    pageData,
+    deps: [pageData],
   });
 
   // ============================================================================
