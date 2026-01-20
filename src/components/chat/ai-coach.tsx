@@ -1,14 +1,27 @@
 /**
  * Floating AI Coach Button - DEPRECATED
  *
- * @deprecated This component has been replaced by the AI Command Center panel.
+ * @deprecated This component has been replaced by the integrated AI coaching system.
+ *
+ * NEW PROACTIVE COACHING SYSTEM (2026):
+ * - LiveCoachOverlay: Real-time market breadth, warnings, and stream-of-consciousness updates
+ * - useTradeInterceptor: Pre-trade validation hook with blocking/warning capabilities
+ * - TradeInterceptorModal: Modal for blocked/warned trades
+ * - CoachingInterventionEngine: Centralized decision engine for proactive interventions
+ *
  * New users should use:
- * - AICommandCenter (right-side panel)
- * - useAIContext().openPanel() to open programmatically
- * - Cmd+J keyboard shortcut to toggle
+ * - AICommandCenter (right-side panel) for chat interactions
+ * - LiveCoachOverlay for passive market monitoring
+ * - useTradeInterceptor hook for trade validation
+ * - Cmd+J keyboard shortcut to toggle AI panel
  *
  * This file is kept for reference but is no longer rendered in the dashboard layout.
- * See: src/components/ai/AICommandCenter.tsx
+ *
+ * See:
+ * - src/components/coach/LiveCoachOverlay.tsx (proactive coaching)
+ * - src/hooks/useTradeInterceptor.ts (trade validation)
+ * - src/lib/coaching-intervention-engine.ts (decision engine)
+ * - src/components/ai/AICommandCenter.tsx (chat interface)
  */
 
 'use client';

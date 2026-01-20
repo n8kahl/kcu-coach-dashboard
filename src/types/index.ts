@@ -20,6 +20,110 @@ export interface User {
 }
 
 // ============================================
+// Trading Profile Types (For Proactive Coaching)
+// ============================================
+
+export type TradingWeakness =
+  | 'chasing_entries'      // Entering too late, FOMO
+  | 'no_stop_loss'         // Failing to set/honor stops
+  | 'trend_fighting'       // Going against the trend
+  | 'overtrading'          // Too many trades per day
+  | 'revenge_trading'      // Trading after losses
+  | 'early_profit_taking'  // Taking profits too soon
+  | 'moving_stops'         // Moving stops to "give room"
+  | 'size_too_big'         // Position sizing issues
+  | 'averaging_down'       // Adding to losers
+  | 'not_waiting'          // Not waiting for patience candle
+  | 'level_ignoring'       // Not trading at levels
+  | 'fomo_buying'          // Fear of missing out
+  | 'fear_selling'         // Panic selling at lows
+  | 'holding_losers'       // Not cutting losses
+  | 'lack_of_plan';        // No entry/exit plan
+
+export type SetupType =
+  | 'breakout'
+  | 'breakdown'
+  | 'bounce_support'
+  | 'rejection_resistance'
+  | 'trend_continuation'
+  | 'reversal'
+  | 'gap_fill'
+  | 'orb_breakout'
+  | 'vwap_bounce'
+  | 'ema_crossover'
+  | 'fvg_fill'
+  | 'structure_break';
+
+export type RiskToleranceLevel = 'conservative' | 'moderate' | 'aggressive' | 'very_aggressive';
+
+export type CoachingIntensity = 'light' | 'normal' | 'intense';
+
+export interface UserTradingProfile {
+  id: string;
+  user_id: string;
+
+  // Trading Weaknesses (AI will watch for these)
+  weaknesses: TradingWeakness[];
+  weakness_severity: Record<TradingWeakness, number>; // 1-10
+
+  // Favorite Setups
+  favorite_setups: SetupType[];
+  setup_win_rates: Record<SetupType, number>; // 0-100
+
+  // Risk Profile
+  risk_tolerance: RiskToleranceLevel;
+  max_daily_trades: number;
+  max_daily_loss_percent: number;
+  preferred_position_size_percent: number;
+
+  // Mental Capital Score (0-100)
+  mental_capital: number;
+  mental_capital_updated_at: string;
+
+  // Recent Performance Patterns
+  recent_win_rate?: number;
+  recent_avg_ltp_score?: number;
+  consecutive_losses: number;
+  consecutive_wins: number;
+
+  // Trading Session Preferences
+  preferred_market_session: string[];
+  avoid_around_events: boolean;
+
+  // Coaching Preferences
+  coaching_intensity: CoachingIntensity;
+  allow_blocking_warnings: boolean;
+  notification_preferences: {
+    breadth_warnings: boolean;
+    event_warnings: boolean;
+    pattern_warnings: boolean;
+  };
+
+  // Behavioral Patterns (detected by AI)
+  detected_patterns: Record<string, unknown>;
+
+  // Custom Notes/Reminders
+  coach_notes: string[];
+  personal_rules: string[];
+
+  // Timestamps
+  created_at: string;
+  updated_at: string;
+}
+
+// Coaching context for the AI
+export interface CoachingContext {
+  weaknesses: TradingWeakness[];
+  mental_capital: number;
+  risk_tolerance: RiskToleranceLevel;
+  consecutive_losses: number;
+  coaching_intensity: CoachingIntensity;
+  allow_blocking: boolean;
+  should_trade: boolean;
+  warning_message: string;
+}
+
+// ============================================
 // Learning System Types
 // ============================================
 

@@ -13,6 +13,8 @@ import type {
   SymbolLevel,
   PracticeScenario,
   RichContent,
+  UserTradingProfile,
+  TradingWeakness,
 } from './index';
 
 // Alias for backward compatibility
@@ -191,6 +193,75 @@ export interface MarketContext {
     date: string;
     timing: 'before' | 'after' | 'during';
   }>;
+
+  // =========================================
+  // Proactive Coaching Context (Hot Context)
+  // =========================================
+
+  // Market Breadth (from market-worker)
+  breadth?: {
+    add: { value: number; trend: string };
+    vold: { value: number; trend: string };
+    tick: { current: number; extremeReading: boolean };
+    tradingBias: 'favor_longs' | 'favor_shorts' | 'neutral' | 'caution';
+    healthScore: number;
+    coachingMessage?: string;
+  };
+
+  // Trading conditions status
+  tradingConditions?: {
+    status: 'green' | 'yellow' | 'red';
+    message: string;
+    restrictions: string[];
+  };
+
+  // Active warnings from the intervention engine
+  activeWarnings?: Array<{
+    id: string;
+    severity: 'critical' | 'warning' | 'info';
+    title: string;
+    message: string;
+  }>;
+
+  // Next economic event
+  nextEvent?: {
+    event: string;
+    minutesUntil: number;
+    impact: 'high' | 'medium' | 'low';
+    isImminent: boolean;
+  };
+}
+
+// =============================================================================
+// User Trading Profile Context (For Proactive Coaching)
+// =============================================================================
+
+export interface UserProfileContext {
+  // User's known weaknesses (AI should watch for these)
+  weaknesses: TradingWeakness[];
+  weaknessSeverity: Record<string, number>; // weakness -> severity (1-10)
+
+  // Mental capital (emotional state)
+  mentalCapital: number; // 0-100
+  consecutiveLosses: number;
+  consecutiveWins: number;
+
+  // Risk profile
+  riskTolerance: 'conservative' | 'moderate' | 'aggressive' | 'very_aggressive';
+  maxDailyTrades: number;
+  maxDailyLossPercent: number;
+
+  // Coaching preferences
+  coachingIntensity: 'light' | 'normal' | 'intense';
+  allowBlockingWarnings: boolean;
+
+  // Should the user trade today?
+  shouldTrade: boolean;
+  warningMessage?: string;
+
+  // Personal rules and reminders
+  coachNotes: string[];
+  personalRules: string[];
 }
 
 // =============================================================================
@@ -253,6 +324,9 @@ export interface AIContext {
 
   // Market state (lazy-loaded, may be undefined)
   marketContext?: MarketContext;
+
+  // User Trading Profile (for proactive coaching)
+  tradingProfile?: UserProfileContext;
 
   // Admin context (only for admin users)
   adminContext?: AdminContext;

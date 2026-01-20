@@ -12,6 +12,7 @@ import type {
   QuickAction,
   QuickActionId,
   MarketContext,
+  UserProfileContext,
 } from '@/types/ai';
 import { getCurriculumReference } from './curriculum-context';
 
@@ -777,6 +778,189 @@ ${timeInfo.timeUntilChange}`;
 }
 
 /**
+ * Generate trading profile context for proactive coaching
+ * This is the "Elephant's Memory" - the AI knows WHO it is coaching
+ */
+function getTradingProfilePrompt(profile?: UserProfileContext): string {
+  if (!profile) {
+    return '';
+  }
+
+  let prompt = `
+=== USER TRADING PROFILE (CRITICAL FOR PROACTIVE COACHING) ===`;
+
+  // Weaknesses - AI should watch for these
+  if (profile.weaknesses && profile.weaknesses.length > 0) {
+    const weaknessDescriptions: Record<string, string> = {
+      'chasing_entries': "CHASING - They enter too late, FOMO-driven. WARN them immediately if they're entering after a big move.",
+      'no_stop_loss': "NO STOP DISCIPLINE - They don't set or honor stops. ALWAYS ask about their stop before any trade discussion.",
+      'trend_fighting': "TREND FIGHTER - They go against the trend. If breadth is bearish and they want to go long, BLOCK IT.",
+      'overtrading': "OVERTRADER - Too many trades. Track their daily count and WARN after 2-3 trades.",
+      'revenge_trading': "REVENGE TRADER - Trades after losses to 'make it back'. After a loss, encourage stepping away.",
+      'early_profit_taking': "EARLY PROFIT TAKER - Takes profits too soon. Remind them to let winners run.",
+      'moving_stops': "STOP MOVER - Moves stops to 'give room'. This is account killer behavior. Call it out HARD.",
+      'size_too_big': "POSITION SIZE ISSUES - Trades too big. Always verify their size is appropriate for the setup.",
+      'averaging_down': "AVERAGES DOWN - Adds to losers. This is DUMB SHIT. Never let them do this.",
+      'not_waiting': "IMPATIENT - Doesn't wait for patience candle. Always remind them to wait for the close.",
+      'level_ignoring': "LEVEL IGNORANT - Doesn't trade at levels. Ask 'Where's your level?' for every setup.",
+      'fomo_buying': "FOMO BUYER - Fear of missing out. Remind them: Missed trades are NOT losses.",
+      'fear_selling': "PANIC SELLER - Sells at lows. When VIX spikes, check in on them.",
+      'holding_losers': "LOSS HOLDER - Doesn't cut losses. Remind them: Cut losers, let winners run.",
+      'lack_of_plan': "NO PLAN - Trades without entry/exit plan. Always ask for their plan before entry.",
+    };
+
+    prompt += `
+
+🚨 USER WEAKNESSES (WATCH FOR THESE AND INTERVENE):`;
+    profile.weaknesses.forEach(weakness => {
+      const severity = profile.weaknessSeverity?.[weakness] || 5;
+      const desc = weaknessDescriptions[weakness] || weakness;
+      prompt += `\n- [Severity ${severity}/10] ${desc}`;
+    });
+  }
+
+  // Mental Capital
+  prompt += `
+
+🧠 MENTAL CAPITAL: ${profile.mentalCapital}/100`;
+  if (profile.mentalCapital <= 40) {
+    prompt += `
+⚠️ CRITICAL: Mental capital is LOW. This user should probably NOT be trading today.
+${profile.warningMessage || 'Recommend they step away and reset.'}`;
+  } else if (profile.mentalCapital <= 60) {
+    prompt += `
+⚠️ Mental capital is below optimal. Encourage smaller position sizes.`;
+  }
+
+  // Consecutive losses/wins
+  if (profile.consecutiveLosses >= 2) {
+    prompt += `
+🔴 ALERT: ${profile.consecutiveLosses} consecutive losses. Watch for revenge trading behavior.`;
+  }
+  if (profile.consecutiveWins >= 3) {
+    prompt += `
+🟢 Note: ${profile.consecutiveWins} consecutive wins. Watch for overconfidence and size inflation.`;
+  }
+
+  // Risk profile
+  prompt += `
+
+📊 RISK PROFILE:
+- Tolerance: ${profile.riskTolerance}
+- Max Daily Trades: ${profile.maxDailyTrades}
+- Max Daily Loss: ${profile.maxDailyLossPercent}%`;
+
+  // Coaching preferences
+  prompt += `
+
+🎯 COACHING STYLE: ${profile.coachingIntensity.toUpperCase()}`;
+  if (profile.coachingIntensity === 'intense') {
+    prompt += ` - Be DIRECT, call out mistakes immediately, use strong language.`;
+  } else if (profile.coachingIntensity === 'light') {
+    prompt += ` - Be supportive, gentle nudges rather than warnings.`;
+  } else {
+    prompt += ` - Balanced approach, firm but fair.`;
+  }
+
+  if (profile.allowBlockingWarnings) {
+    prompt += `\nUser has OPTED IN to blocking warnings. You CAN prevent trades that violate rules.`;
+  }
+
+  // Personal rules
+  if (profile.personalRules && profile.personalRules.length > 0) {
+    prompt += `
+
+📜 USER'S PERSONAL TRADING RULES (They set these - help them follow them):`;
+    profile.personalRules.forEach((rule, i) => {
+      prompt += `\n${i + 1}. ${rule}`;
+    });
+  }
+
+  // Coach notes
+  if (profile.coachNotes && profile.coachNotes.length > 0) {
+    prompt += `
+
+📝 SOMESH-STYLE REMINDERS FOR THIS USER:`;
+    profile.coachNotes.forEach(note => {
+      prompt += `\n- ${note}`;
+    });
+  }
+
+  return prompt;
+}
+
+/**
+ * Generate proactive coaching context from market hot context
+ */
+function getProactiveCoachingPrompt(marketContext?: MarketContext): string {
+  if (!marketContext) {
+    return '';
+  }
+
+  let prompt = '';
+
+  // Market Breadth Context
+  if (marketContext.breadth) {
+    const { breadth } = marketContext;
+    prompt += `
+
+=== MARKET BREADTH (Live Situational Awareness) ===
+ADD (Advance-Decline): ${breadth.add.value} (${breadth.add.trend})
+VOLD (Volume Delta): ${breadth.vold.value} (${breadth.vold.trend})
+TICK: ${breadth.tick.current}${breadth.tick.extremeReading ? ' ⚡ EXTREME' : ''}
+Market Health Score: ${breadth.healthScore}/100
+Trading Bias: ${breadth.tradingBias.toUpperCase()}
+${breadth.coachingMessage ? `\n💬 ${breadth.coachingMessage}` : ''}`;
+  }
+
+  // Trading Conditions
+  if (marketContext.tradingConditions) {
+    const { tradingConditions } = marketContext;
+    const statusEmoji = tradingConditions.status === 'red' ? '🔴' :
+                        tradingConditions.status === 'yellow' ? '🟡' : '🟢';
+    prompt += `
+
+=== TRADING CONDITIONS: ${statusEmoji} ${tradingConditions.status.toUpperCase()} ===
+${tradingConditions.message}`;
+    if (tradingConditions.restrictions.length > 0) {
+      prompt += `\nRestrictions:`;
+      tradingConditions.restrictions.forEach(r => {
+        prompt += `\n- ${r}`;
+      });
+    }
+  }
+
+  // Active Warnings
+  if (marketContext.activeWarnings && marketContext.activeWarnings.length > 0) {
+    prompt += `
+
+=== ACTIVE WARNINGS (Surface these to the user!) ===`;
+    marketContext.activeWarnings.forEach(warning => {
+      const emoji = warning.severity === 'critical' ? '🚨' :
+                    warning.severity === 'warning' ? '⚠️' : 'ℹ️';
+      prompt += `\n${emoji} [${warning.severity.toUpperCase()}] ${warning.title}: ${warning.message}`;
+    });
+  }
+
+  // Next Event
+  if (marketContext.nextEvent) {
+    const { nextEvent } = marketContext;
+    if (nextEvent.isImminent) {
+      prompt += `
+
+🚨 IMMINENT EVENT: ${nextEvent.event} in ${nextEvent.minutesUntil} MINUTES!
+Impact: ${nextEvent.impact.toUpperCase()} - Warn user to flatten or avoid new trades!`;
+    } else if (nextEvent.minutesUntil <= 60 && nextEvent.impact === 'high') {
+      prompt += `
+
+⏰ UPCOMING: ${nextEvent.event} in ${nextEvent.minutesUntil} minutes (${nextEvent.impact} impact)`;
+    }
+  }
+
+  return prompt;
+}
+
+/**
  * Generate the complete system prompt based on context
  */
 export function generateSystemPrompt(context: AIContext): string {
@@ -786,7 +970,9 @@ export function generateSystemPrompt(context: AIContext): string {
     getCurriculumReference(),
     `\n=== CURRENT PAGE CONTEXT ===\n${getPageContextPrompt(context)}`,
     getUserContextPrompt(context),
+    getTradingProfilePrompt(context.tradingProfile),
     getMarketContextPrompt(context.marketContext),
+    getProactiveCoachingPrompt(context.marketContext),
   ];
 
   return parts.filter(Boolean).join('\n');
