@@ -280,7 +280,7 @@ const MIN_CHART_HEIGHT = 400;
 // Enable visual debugging (set to true to show red border)
 const DEBUG_CHART = false;
 // Enable detailed console logging for debugging "Value is null" errors
-const DEBUG_LOGGING = true;
+const DEBUG_LOGGING = false;
 
 /**
  * Safe setData wrapper that logs data before setting and catches errors
@@ -370,6 +370,10 @@ export function KCUChart({
   const cloudSeriesRef = useRef<ISeriesApi<'Area'> | null>(null);
   const levelSeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
 
+  // Track if component is mounted to prevent operations on destroyed chart
+  // This prevents "Value is null" errors from async rendering callbacks
+  const mountedRef = useRef(true);
+
   const [isInitialized, setIsInitialized] = useState(false);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
@@ -384,6 +388,21 @@ export function KCUChart({
     price: number;
     yCoordinate: number;
   }[]>([]);
+
+  // =========================================================================
+  // Component Mount Lifecycle - MUST be first effect
+  // =========================================================================
+
+  useEffect(() => {
+    // Mark as mounted
+    mountedRef.current = true;
+
+    return () => {
+      // Mark as unmounted immediately - this prevents any async callbacks
+      // from trying to operate on the destroyed chart
+      mountedRef.current = false;
+    };
+  }, []);
 
   // =========================================================================
   // Dimension Detection with ResizeObserver
@@ -415,7 +434,8 @@ export function KCUChart({
     const resizeObserver = new ResizeObserver((entries) => {
       // Use requestAnimationFrame to avoid resize loop issues
       window.requestAnimationFrame(() => {
-        if (entries[0]) {
+        // Check if still mounted before updating dimensions
+        if (mountedRef.current && entries[0]) {
           updateDimensions();
         }
       });
@@ -596,9 +616,32 @@ export function KCUChart({
     setIsInitialized(true);
 
     return () => {
-      chart.remove();
-      chartRef.current = null;
+      // Clear all series refs BEFORE removing chart to prevent
+      // async rendering callbacks from operating on destroyed series
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      ema8SeriesRef.current = null;
+      ema21SeriesRef.current = null;
+      sma200SeriesRef.current = null;
+      vwapSeriesRef.current = null;
+      cloudSeriesRef.current = null;
+      levelSeriesRef.current.clear();
+      gammaSeriesRef.current.clear();
+      fvgSeriesRef.current.clear();
+
+      // Set initialized to false before removing chart
       setIsInitialized(false);
+
+      // Remove chart with try-catch to handle edge cases
+      try {
+        chart.remove();
+      } catch (e) {
+        // Chart may already be destroyed, ignore errors
+        if (DEBUG_LOGGING) {
+          console.warn('[KCUChart] Error during chart.remove():', e);
+        }
+      }
+      chartRef.current = null;
     };
   }, [dimensions.width, dimensions.height, showVolume, showIndicators]);
 
@@ -607,7 +650,8 @@ export function KCUChart({
   // =========================================================================
 
   useEffect(() => {
-    if (!isInitialized || !candleSeriesRef.current) return;
+    // Early exit if not mounted or chart not ready
+    if (!mountedRef.current || !isInitialized || !candleSeriesRef.current || !chartRef.current) return;
 
     // Determine visible data based on mode and replay index
     const rawData = mode === 'replay' && replayIndex !== undefined
@@ -784,9 +828,15 @@ export function KCUChart({
       candleSeriesRef.current.setMarkers(markers);
     }
 
-    // Fit content
-    if (chartRef.current) {
-      chartRef.current.timeScale().fitContent();
+    // Fit content - check mounted to prevent errors on destroyed chart
+    if (mountedRef.current && chartRef.current) {
+      try {
+        chartRef.current.timeScale().fitContent();
+      } catch (e) {
+        if (DEBUG_LOGGING) {
+          console.warn('[KCUChart] Error during fitContent:', e);
+        }
+      }
     }
   }, [data, mode, replayIndex, isInitialized, showVolume, showIndicators, showPatienceCandles]);
 
@@ -795,7 +845,8 @@ export function KCUChart({
   // =========================================================================
 
   useEffect(() => {
-    if (!isInitialized || !chartRef.current) return;
+    // Check mounted status to prevent operations on destroyed chart
+    if (!mountedRef.current || !isInitialized || !chartRef.current) return;
 
     // Clear existing level lines
     levelSeriesRef.current.forEach((series) => {
@@ -831,7 +882,10 @@ export function KCUChart({
     if (startTime === null || endTime === null) return;
 
     nearbyLevels.forEach((level, index) => {
-      const series = chartRef.current!.addLineSeries({
+      // Guard against chart being destroyed during iteration
+      if (!mountedRef.current || !chartRef.current) return;
+
+      const series = chartRef.current.addLineSeries({
         color: level.color || LEVEL_COLORS[level.type],
         lineWidth: 1,
         lineStyle: level.lineStyle === 'dotted' ? LineStyle.Dotted :
@@ -865,7 +919,8 @@ export function KCUChart({
   // =========================================================================
 
   useEffect(() => {
-    if (!isInitialized || !chartRef.current) return;
+    // Check mounted status to prevent operations on destroyed chart
+    if (!mountedRef.current || !isInitialized || !chartRef.current) return;
 
     // Clear existing gamma level lines
     gammaSeriesRef.current.forEach((series) => {
@@ -910,6 +965,9 @@ export function KCUChart({
     // Add gamma level lines with proper institutional styling
     // Use nearbyGammaLevels to avoid distorting the chart scale
     nearbyGammaLevels.forEach((gamma, index) => {
+      // Guard against chart being destroyed during iteration
+      if (!mountedRef.current || !chartRef.current) return;
+
       // Determine color and line style based on type
       let color: string;
       let lineWidth: number;
@@ -948,7 +1006,7 @@ export function KCUChart({
           title = gamma.label || 'LEVEL';
       }
 
-      const series = chartRef.current!.addLineSeries({
+      const series = chartRef.current.addLineSeries({
         color,
         lineWidth: lineWidth as 1 | 2 | 3 | 4,
         lineStyle,
@@ -994,7 +1052,8 @@ export function KCUChart({
   // =========================================================================
 
   useEffect(() => {
-    if (!isInitialized || !chartRef.current || !candleSeriesRef.current) return;
+    // Check mounted status to prevent operations on destroyed chart
+    if (!mountedRef.current || !isInitialized || !chartRef.current || !candleSeriesRef.current) return;
     if (data.length === 0 || gammaLevels.length === 0) {
       setProximityAlerts([]);
       return;
@@ -1012,10 +1071,17 @@ export function KCUChart({
       const proximityThreshold = 0.01; // 1%
 
       if (distance <= proximityThreshold) {
-        // Convert price to Y coordinate for the overlay
-        const priceScale = chartRef.current!.priceScale('right');
-        // Use candlestick series to get coordinate
-        const yCoordinate = candleSeriesRef.current!.priceToCoordinate(gamma.price);
+        // Guard against operating on destroyed chart during iteration
+        if (!mountedRef.current || !chartRef.current || !candleSeriesRef.current) return;
+
+        // Use candlestick series to get coordinate with try-catch
+        let yCoordinate: number | null = null;
+        try {
+          yCoordinate = candleSeriesRef.current.priceToCoordinate(gamma.price);
+        } catch {
+          // Chart may be in invalid state, skip this level
+          return;
+        }
 
         if (yCoordinate !== null) {
           alerts.push({
@@ -1035,7 +1101,8 @@ export function KCUChart({
   // =========================================================================
 
   useEffect(() => {
-    if (!isInitialized || !chartRef.current) return;
+    // Check mounted status to prevent operations on destroyed chart
+    if (!mountedRef.current || !isInitialized || !chartRef.current) return;
 
     // Clear existing FVG series
     fvgSeriesRef.current.forEach((series) => {
@@ -1083,6 +1150,9 @@ export function KCUChart({
 
     // Render each FVG as a filled area (box)
     nearbyFvgZones.forEach((zone, index) => {
+      // Guard against chart being destroyed during iteration
+      if (!mountedRef.current || !chartRef.current) return;
+
       const isBullish = zone.direction === 'bullish';
       const fillColor = isBullish
         ? 'rgba(34, 197, 94, 0.25)'  // Green with more opacity
@@ -1101,7 +1171,7 @@ export function KCUChart({
       if (startTime === null || endTime === null) return;
 
       // Top boundary line
-      const topSeries = chartRef.current!.addLineSeries({
+      const topSeries = chartRef.current.addLineSeries({
         color: lineColor,
         lineWidth: 1,
         lineStyle: LineStyle.Solid,
@@ -1111,7 +1181,7 @@ export function KCUChart({
       });
 
       // Bottom boundary line
-      const bottomSeries = chartRef.current!.addLineSeries({
+      const bottomSeries = chartRef.current.addLineSeries({
         color: lineColor,
         lineWidth: 1,
         lineStyle: LineStyle.Solid,
@@ -1122,7 +1192,7 @@ export function KCUChart({
 
       // Area fill between boundaries
       // We use an area series from the top price down
-      const areaSeries = chartRef.current!.addAreaSeries({
+      const areaSeries = chartRef.current.addAreaSeries({
         topColor: fillColor,
         bottomColor: fillColor,
         lineColor: 'transparent',
