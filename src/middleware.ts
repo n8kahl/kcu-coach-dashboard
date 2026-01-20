@@ -127,7 +127,7 @@ function addSecurityHeaders(response: NextResponse): NextResponse {
     "img-src 'self' data: https: blob:",
     "font-src 'self' data:",
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://discord.com https://api.anthropic.com https://cdn.discordapp.com https://api.massive.com wss://socket.massive.com",
-    "frame-src 'self' https://www.youtube.com https://player.vimeo.com https://*.cloudflarestream.com",
+    "frame-src 'self' https://www.youtube.com https://player.vimeo.com https://*.cloudflarestream.com https://iframe.cloudflarestream.com https://customer-f33zs165nr7gyfy4.cloudflarestream.com https://customer-qs22v6yba9gv1pps.cloudflarestream.com",
     "media-src 'self' https:",
     "object-src 'none'", // Prevent Flash/plugin exploits
     "base-uri 'self'", // Prevent base tag hijacking

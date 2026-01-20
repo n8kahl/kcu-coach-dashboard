@@ -303,7 +303,7 @@ export function AdvancedPracticeChart({
         time: (timestamps[i] / 1000) as Time,
         value,
       }))
-      .filter(d => d.value > 0);
+      .filter(d => d.value != null && isFinite(d.value) && d.value > 0);
   }, []);
 
   // Initialize chart
@@ -518,6 +518,9 @@ export function AdvancedPracticeChart({
     const endTime = visibleCandles[visibleCandles.length - 1].t / 1000;
 
     keyLevels.forEach(level => {
+      // Skip levels with invalid prices
+      if (level.price == null || !isFinite(level.price) || level.price <= 0) return;
+
       const color = LEVEL_COLOR_MAP[level.type] || COLORS.text;
       const lineStyle = level.strength >= 70 ? LineStyle.Solid : LineStyle.Dashed;
 
@@ -530,10 +533,14 @@ export function AdvancedPracticeChart({
         crosshairMarkerVisible: false,
       });
 
-      lineSeries.setData([
-        { time: startTime as Time, value: level.price },
-        { time: endTime as Time, value: level.price },
-      ]);
+      // Handle duplicate timestamps (single candle case)
+      const lineData = startTime === endTime
+        ? [{ time: startTime as Time, value: level.price }]
+        : [
+            { time: startTime as Time, value: level.price },
+            { time: endTime as Time, value: level.price },
+          ];
+      lineSeries.setData(lineData);
 
       levelSeriesRef.current.push(lineSeries);
     });
@@ -541,7 +548,7 @@ export function AdvancedPracticeChart({
     // Add user placement lines
     if (enableInteraction) {
       const addPlacementLine = (price: number | null, color: string, label: string) => {
-        if (price === null) return;
+        if (price === null || !isFinite(price) || price <= 0) return;
         const lineSeries = chartRef.current!.addLineSeries({
           color,
           lineWidth: 2,
@@ -551,10 +558,14 @@ export function AdvancedPracticeChart({
           crosshairMarkerVisible: false,
           title: label,
         });
-        lineSeries.setData([
-          { time: startTime as Time, value: price },
-          { time: endTime as Time, value: price },
-        ]);
+        // Handle duplicate timestamps (single candle case)
+        const lineData = startTime === endTime
+          ? [{ time: startTime as Time, value: price }]
+          : [
+              { time: startTime as Time, value: price },
+              { time: endTime as Time, value: price },
+            ];
+        lineSeries.setData(lineData);
         levelSeriesRef.current.push(lineSeries);
       };
 
