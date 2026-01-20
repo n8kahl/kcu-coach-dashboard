@@ -302,6 +302,10 @@ export function useMarketDataStream(
         log('SSE connected');
         reconnectAttemptRef.current = 0;
         stopFallback();
+
+        // Always do an initial REST fetch to get current prices immediately
+        // This is especially important during market closed hours when streams have no data
+        fetchFallbackData();
       };
 
       eventSource.onmessage = (event) => {
@@ -382,7 +386,7 @@ export function useMarketDataStream(
       setConnectionStatus('error');
       startFallback();
     }
-  }, [flushPriceBuffer, log, maxReconnectAttempts, startFallback, stopFallback]);
+  }, [fetchFallbackData, flushPriceBuffer, log, maxReconnectAttempts, startFallback, stopFallback]);
 
   // Subscribe to additional symbols
   const subscribe = useCallback(

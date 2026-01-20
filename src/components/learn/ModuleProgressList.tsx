@@ -77,6 +77,8 @@ interface LegacyModuleProgressListProps {
   modules: (CourseModule & { progress: TypeModuleProgress })[];
   courseSlug: string;
   className?: string;
+  compact?: boolean;
+  title?: string;
 }
 
 // ============================================================================
@@ -506,7 +508,7 @@ function CompactModuleItem({
               </Badge>
             </div>
             <div className="mt-1">
-              <ProgressBar value={module.progress} size="xs" variant={status === 'mastered' ? 'gold' : 'default'} />
+              <ProgressBar value={module.progress} size="sm" variant={status === 'mastered' ? 'gold' : 'default'} />
             </div>
           </div>
           {status !== 'locked' && (
