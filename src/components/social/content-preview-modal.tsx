@@ -20,6 +20,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Portal } from '@/components/ui/portal';
 import { PlatformBadge, TikTokIcon } from './platform-badge';
 import { CategoryBadge } from './category-badge';
 import type { ContentSuggestion, SocialPlatform, ContentCategory, PlatformVariants } from '@/types/social';
@@ -371,11 +372,12 @@ export function ContentPreviewModal({
   };
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
+    <Portal>
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -727,8 +729,9 @@ export function ContentPreviewModal({
               </div>
             </div>
           </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+          </>
+        )}
+      </AnimatePresence>
+    </Portal>
   );
 }
