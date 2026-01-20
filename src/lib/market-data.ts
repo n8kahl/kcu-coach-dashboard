@@ -222,6 +222,166 @@ export interface EarningsEvent {
   revenueEstimate?: number;
 }
 
+// =============================================================================
+// PROACTIVE COACHING DATA TYPES
+// =============================================================================
+
+/**
+ * Market Breadth Data - The "pulse" of the market
+ * ADD: Advance-Decline Line - net advancing stocks
+ * VOLD: Volume Delta - buying vs selling volume difference
+ * TICK: NYSE TICK - net upticks vs downticks
+ */
+export interface MarketBreadth {
+  timestamp: string;
+
+  // Advance-Decline Line (ADD)
+  add: {
+    value: number;           // Current ADD value (positive = more advancing)
+    change: number;          // Change from open
+    trend: 'strong_bullish' | 'bullish' | 'neutral' | 'bearish' | 'strong_bearish';
+    divergence?: 'bullish' | 'bearish' | null; // Divergence from price
+  };
+
+  // Volume Delta (VOLD)
+  vold: {
+    value: number;           // Current VOLD (millions)
+    change: number;          // Change from previous reading
+    trend: 'buying_pressure' | 'neutral' | 'selling_pressure';
+    intensity: 'extreme' | 'strong' | 'moderate' | 'weak';
+  };
+
+  // NYSE TICK (instantaneous breadth)
+  tick: {
+    current: number;         // Current TICK reading (-1500 to +1500 typical)
+    high: number;            // Session high
+    low: number;             // Session low
+    extremeReading: boolean; // True if |TICK| > 1000
+    signal: 'buy_signal' | 'sell_signal' | 'neutral';
+  };
+
+  // Overall market health score (0-100)
+  healthScore: number;
+
+  // Coaching implications
+  tradingBias: 'favor_longs' | 'favor_shorts' | 'neutral' | 'caution';
+  coachingMessage?: string;
+}
+
+/**
+ * Order Flow Intensity - Tape reading for the AI
+ * Measures buying vs selling pressure momentum
+ */
+export interface OrderFlow {
+  timestamp: string;
+  symbol: string;
+
+  // Buy/Sell Pressure Ratio (1.0 = balanced)
+  pressureRatio: number;
+
+  // Pressure direction
+  direction: 'buying' | 'selling' | 'balanced';
+
+  // Intensity level
+  intensity: 'extreme' | 'strong' | 'moderate' | 'weak';
+
+  // Large order activity (institutional)
+  largeOrderActivity: {
+    detected: boolean;
+    direction: 'buying' | 'selling' | null;
+    significance: 'high' | 'medium' | 'low';
+  };
+
+  // Volume analysis
+  volumeProfile: {
+    relativeVolume: number;  // vs 20-day average (1.5 = 50% higher)
+    volumeSpike: boolean;    // Unusual volume detected
+    volumeTrend: 'increasing' | 'decreasing' | 'stable';
+  };
+
+  // Tape momentum (short-term)
+  tapeMomentum: {
+    score: number;           // -100 to +100
+    acceleration: 'accelerating' | 'decelerating' | 'stable';
+  };
+}
+
+/**
+ * Enhanced Economic Event with time-to-event calculations
+ * For proactive "Fed speaks in 5 mins" warnings
+ */
+export interface EnhancedEconomicEvent {
+  id: string;
+  date: string;
+  time: string;              // HH:MM ET format
+  timezone: string;          // Always 'America/New_York'
+  event: string;
+  impact: 'high' | 'medium' | 'low';
+  forecast?: string;
+  previous?: string;
+  actual?: string;
+
+  // Time calculations (computed on fetch)
+  eventTimestamp: number;    // Unix timestamp
+  minutesUntilEvent: number; // Can be negative if passed
+  isImminent: boolean;       // True if < 10 minutes away
+  isPast: boolean;           // True if event has passed
+
+  // Coaching implications
+  tradingGuidance: 'flatten_positions' | 'reduce_size' | 'avoid_new_trades' | 'normal';
+  warningLevel: 'critical' | 'warning' | 'info';
+  coachingMessage: string;
+}
+
+/**
+ * Market Hot Context - Combined situational awareness
+ * This is what gets pushed to Redis for real-time coaching
+ */
+export interface MarketHotContext {
+  timestamp: string;
+
+  // Market Breadth (overall market health)
+  breadth: MarketBreadth | null;
+
+  // Symbol-specific order flow (for watched symbols)
+  orderFlow: Map<string, OrderFlow> | null;
+
+  // Economic calendar awareness
+  calendar: {
+    todayEvents: EnhancedEconomicEvent[];
+    nextEvent: EnhancedEconomicEvent | null;
+    hasHighImpactToday: boolean;
+    isEventImminent: boolean;
+    imminentEvent?: EnhancedEconomicEvent;
+  };
+
+  // Overall trading conditions
+  tradingConditions: {
+    status: 'green' | 'yellow' | 'red';
+    message: string;
+    restrictions: string[];
+  };
+
+  // Proactive warnings (to be surfaced immediately)
+  activeWarnings: ProactiveWarning[];
+}
+
+/**
+ * Proactive Warning - Triggers immediate coach intervention
+ */
+export interface ProactiveWarning {
+  id: string;
+  timestamp: string;
+  severity: 'critical' | 'warning' | 'info';
+  type: 'market_breadth' | 'economic_event' | 'volatility' | 'order_flow' | 'pattern';
+  title: string;
+  message: string;
+  coachStyle: 'somesh'; // Always Somesh voice
+  actionRequired: boolean;
+  suggestedAction?: string;
+  expiresAt?: string;
+}
+
 export interface LTPAnalysis {
   symbol: string;
   timestamp: string;
@@ -1839,6 +1999,179 @@ class MarketDataService {
       highImpactToday: todayCheck.hasEvent,
     };
   }
+
+  // ============================================
+  // Proactive Coaching Hot Context Methods
+  // ============================================
+
+  /**
+   * Get market breadth data from Redis (populated by market-worker)
+   * Returns real-time ADD, VOLD, TICK data for proactive coaching
+   */
+  async getMarketBreadth(): Promise<MarketBreadth | null> {
+    return getCacheValue<MarketBreadth>('context:breadth');
+  }
+
+  /**
+   * Get the full hot context from Redis
+   * Contains breadth, calendar, warnings - everything for proactive coaching
+   */
+  async getHotContext(): Promise<MarketHotContext | null> {
+    return getCacheValue<MarketHotContext>('context:hot');
+  }
+
+  /**
+   * Get active proactive warnings
+   * These are time-sensitive alerts that need immediate attention
+   */
+  async getActiveWarnings(): Promise<ProactiveWarning[]> {
+    const hotContext = await this.getHotContext();
+    return hotContext?.activeWarnings || [];
+  }
+
+  /**
+   * Get enhanced economic calendar with time-to-event calculations
+   */
+  async getEnhancedCalendar(): Promise<EnhancedEconomicEvent[]> {
+    const cached = await getCacheValue<EnhancedEconomicEvent[]>('context:calendar');
+    return cached || [];
+  }
+
+  /**
+   * Check if there's an imminent high-impact event
+   * Used by the intervention engine to block/warn trades
+   */
+  async checkImminentEvent(): Promise<{
+    isImminent: boolean;
+    event: EnhancedEconomicEvent | null;
+    minutesAway: number;
+  }> {
+    const hotContext = await this.getHotContext();
+
+    if (!hotContext?.calendar?.isEventImminent || !hotContext.calendar.imminentEvent) {
+      return { isImminent: false, event: null, minutesAway: -1 };
+    }
+
+    return {
+      isImminent: true,
+      event: hotContext.calendar.imminentEvent,
+      minutesAway: hotContext.calendar.imminentEvent.minutesUntilEvent,
+    };
+  }
+
+  /**
+   * Get current trading conditions based on breadth + calendar
+   * Returns green/yellow/red status for the intervention engine
+   */
+  async getTradingConditions(): Promise<{
+    status: 'green' | 'yellow' | 'red';
+    message: string;
+    restrictions: string[];
+    breadthBias: MarketBreadth['tradingBias'] | null;
+  }> {
+    const hotContext = await this.getHotContext();
+
+    if (!hotContext) {
+      return {
+        status: 'green',
+        message: 'Market data unavailable. Trade with normal caution.',
+        restrictions: [],
+        breadthBias: null,
+      };
+    }
+
+    return {
+      status: hotContext.tradingConditions.status,
+      message: hotContext.tradingConditions.message,
+      restrictions: hotContext.tradingConditions.restrictions,
+      breadthBias: hotContext.breadth?.tradingBias || null,
+    };
+  }
+
+  /**
+   * Should the user avoid going long based on market breadth?
+   * Used by intervention engine for "Don't fight the river" logic
+   */
+  async shouldAvoidLongs(): Promise<{
+    avoid: boolean;
+    reason: string | null;
+    severity: 'high' | 'medium' | 'low';
+  }> {
+    const breadth = await this.getMarketBreadth();
+
+    if (!breadth) {
+      return { avoid: false, reason: null, severity: 'low' };
+    }
+
+    // Strong bearish breadth = avoid longs
+    if (breadth.add.trend === 'strong_bearish') {
+      return {
+        avoid: true,
+        reason: `ADD is ${breadth.add.value}. The river is flowing DOWN hard. Don't swim upstream.`,
+        severity: 'high',
+      };
+    }
+
+    if (breadth.add.trend === 'bearish' && breadth.vold.trend === 'selling_pressure') {
+      return {
+        avoid: true,
+        reason: 'Bearish breadth with selling pressure. Favor shorts or stay flat.',
+        severity: 'medium',
+      };
+    }
+
+    if (breadth.tradingBias === 'favor_shorts') {
+      return {
+        avoid: true,
+        reason: breadth.coachingMessage || 'Market breadth favoring shorts.',
+        severity: 'medium',
+      };
+    }
+
+    return { avoid: false, reason: null, severity: 'low' };
+  }
+
+  /**
+   * Should the user avoid going short based on market breadth?
+   */
+  async shouldAvoidShorts(): Promise<{
+    avoid: boolean;
+    reason: string | null;
+    severity: 'high' | 'medium' | 'low';
+  }> {
+    const breadth = await this.getMarketBreadth();
+
+    if (!breadth) {
+      return { avoid: false, reason: null, severity: 'low' };
+    }
+
+    // Strong bullish breadth = avoid shorts
+    if (breadth.add.trend === 'strong_bullish') {
+      return {
+        avoid: true,
+        reason: `ADD is +${breadth.add.value}. Bulls are RIPPING. Don't fight it.`,
+        severity: 'high',
+      };
+    }
+
+    if (breadth.add.trend === 'bullish' && breadth.vold.trend === 'buying_pressure') {
+      return {
+        avoid: true,
+        reason: 'Bullish breadth with buying pressure. Favor longs or stay flat.',
+        severity: 'medium',
+      };
+    }
+
+    if (breadth.tradingBias === 'favor_longs') {
+      return {
+        avoid: true,
+        reason: breadth.coachingMessage || 'Market breadth favoring longs.',
+        severity: 'medium',
+      };
+    }
+
+    return { avoid: false, reason: null, severity: 'low' };
+  }
 }
 
 // Singleton instance
@@ -1946,6 +2279,39 @@ export async function getUpcomingEarnings(tickers: string[], daysAhead?: number)
 
 export async function getMarketContext() {
   return marketDataService.getMarketContext();
+}
+
+// Proactive Coaching Hot Context Exports
+export async function getMarketBreadth(): Promise<MarketBreadth | null> {
+  return marketDataService.getMarketBreadth();
+}
+
+export async function getHotContext(): Promise<MarketHotContext | null> {
+  return marketDataService.getHotContext();
+}
+
+export async function getActiveWarnings(): Promise<ProactiveWarning[]> {
+  return marketDataService.getActiveWarnings();
+}
+
+export async function getEnhancedCalendar(): Promise<EnhancedEconomicEvent[]> {
+  return marketDataService.getEnhancedCalendar();
+}
+
+export async function checkImminentEvent() {
+  return marketDataService.checkImminentEvent();
+}
+
+export async function getTradingConditions() {
+  return marketDataService.getTradingConditions();
+}
+
+export async function shouldAvoidLongs() {
+  return marketDataService.shouldAvoidLongs();
+}
+
+export async function shouldAvoidShorts() {
+  return marketDataService.shouldAvoidShorts();
 }
 
 export default marketDataService;
