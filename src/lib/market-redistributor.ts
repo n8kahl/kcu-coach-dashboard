@@ -397,9 +397,12 @@ export class MarketRedistributor {
 
       await this.ensureSubscriber();
 
-      if (this.subscriber && channelsToResubscribe.length > 0) {
+      // Note: TypeScript can't track that ensureSubscriber sets this.subscriber
+      // so we use a type assertion here. The runtime check handles the null case.
+      const subscriber = this.subscriber as Redis | null;
+      if (subscriber && channelsToResubscribe.length > 0) {
         try {
-          await this.subscriber.subscribe(...channelsToResubscribe);
+          await subscriber.subscribe(...channelsToResubscribe);
           for (const ch of channelsToResubscribe) {
             this.subscribedChannels.add(ch);
           }

@@ -198,7 +198,7 @@ export async function GET(request: NextRequest) {
 function sendMessage(
   controller: ReadableStreamDefaultController,
   encoder: TextEncoder,
-  data: Record<string, unknown>
+  data: StreamMessage | Record<string, unknown>
 ): void {
   const message = `data: ${JSON.stringify(data)}\n\n`;
   controller.enqueue(encoder.encode(message));
