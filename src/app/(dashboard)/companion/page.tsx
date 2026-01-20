@@ -384,9 +384,9 @@ export default function CompanionTerminal() {
     } catch (error) {
       console.error('Error fetching analysis:', error);
       showToast({
+        type: 'error',
         title: 'Analysis Failed',
-        description: 'Failed to load LTP analysis data. Please try again.',
-        variant: 'destructive',
+        message: 'Failed to load LTP analysis data. Please try again.',
       });
     } finally {
       setAnalysisLoading(false);

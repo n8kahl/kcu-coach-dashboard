@@ -30,15 +30,7 @@ import {
 } from 'lucide-react';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-
-// Import AI Context hook (optional - will be available when provider is mounted)
-let useAIContext: (() => { togglePanel: () => void; isOpen: boolean }) | null = null;
-try {
-  const aiModule = require('@/components/ai/AIContextProvider');
-  useAIContext = aiModule.useAIContext;
-} catch {
-  // AI module not available yet
-}
+import { useAIContextSafe } from '@/components/ai/AIContextProvider';
 
 // Logout handler
 async function handleLogout() {
@@ -97,15 +89,8 @@ export function Sidebar({ user }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
 
-  // Try to use AI context if available
-  let aiContext: { togglePanel: () => void; isOpen: boolean } | null = null;
-  try {
-    if (useAIContext) {
-      aiContext = useAIContext();
-    }
-  } catch {
-    // AI context not available (not wrapped in provider)
-  }
+  // Use AI context if available (safe hook returns null if not in provider)
+  const aiContext = useAIContextSafe();
 
   const toggleExpanded = (label: string) => {
     setExpandedItems((prev) =>
@@ -119,7 +104,8 @@ export function Sidebar({ user }: SidebarProps) {
 
   const renderNavItem = (item: NavItem) => {
     const Icon = item.icon;
-    const active = item.isAICoach ? aiContext?.isOpen : isActive(item.href);
+    const isAIOpen = aiContext?.panelState.panelState !== 'collapsed';
+    const active = item.isAICoach ? isAIOpen : isActive(item.href);
     const hasChildren = item.children && item.children.length > 0;
     const isExpanded = expandedItems.includes(item.label);
 
@@ -319,15 +305,9 @@ export function MobileSidebar({ user }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname();
 
-  // Try to use AI context if available
-  let aiContext: { togglePanel: () => void; isOpen: boolean } | null = null;
-  try {
-    if (useAIContext) {
-      aiContext = useAIContext();
-    }
-  } catch {
-    // AI context not available (not wrapped in provider)
-  }
+  // Use AI context if available (safe hook returns null if not in provider)
+  const aiContext = useAIContextSafe();
+  const isAIOpen = aiContext?.panelState.panelState !== 'collapsed';
 
   const isActive = (href: string) => pathname === href || pathname?.startsWith(href + '/');
 
@@ -382,7 +362,7 @@ export function MobileSidebar({ user }: SidebarProps) {
             <nav className="flex-1 py-4 overflow-y-auto">
               {userNavItems.map((item) => {
                 const Icon = item.icon;
-                const active = item.isAICoach ? aiContext?.isOpen : isActive(item.href);
+                const active = item.isAICoach ? isAIOpen : isActive(item.href);
 
                 // Special handling for AI Coach - render button instead of link
                 if (item.isAICoach) {

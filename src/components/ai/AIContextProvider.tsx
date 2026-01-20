@@ -546,15 +546,26 @@ export function AIContextProvider({ children, initialContext }: AIContextProvide
 }
 
 // =============================================================================
-// Hook
+// Hooks
 // =============================================================================
 
+/**
+ * Hook to access AI context - throws if used outside AIContextProvider
+ */
 export function useAIContext(): AIContextValue {
   const context = useContext(AIContextReact);
   if (!context) {
     throw new Error('useAIContext must be used within an AIContextProvider');
   }
   return context;
+}
+
+/**
+ * Safe hook that returns null instead of throwing when used outside provider.
+ * Use this in components that may render before or outside the AIContextProvider.
+ */
+export function useAIContextSafe(): AIContextValue | null {
+  return useContext(AIContextReact);
 }
 
 export default AIContextProvider;
