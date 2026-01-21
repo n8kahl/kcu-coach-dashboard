@@ -827,15 +827,12 @@ function ProfessionalChartInner(
 
       /**
        * Get visible price range.
+       * Note: lightweight-charts doesn't expose this directly, so we return null
+       * and let consumers calculate from visible data if needed.
        */
       getVisiblePriceRange: () => {
-        if (!candleSeriesRef.current) return null;
-        try {
-          const priceRange = candleSeriesRef.current.priceScale().getVisiblePriceRange();
-          if (priceRange) {
-            return { min: priceRange.from, max: priceRange.to };
-          }
-        } catch {}
+        // lightweight-charts IPriceScaleApi doesn't have getVisiblePriceRange
+        // Return null - consumers can calculate from visible candle data if needed
         return null;
       },
 
