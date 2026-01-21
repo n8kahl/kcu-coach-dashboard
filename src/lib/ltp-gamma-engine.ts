@@ -176,8 +176,8 @@ export function calculateLTP2Score(context: MarketContext): LTP2Score {
     }
   }
 
-  // Calculate total score (clamped 0-100)
-  breakdown.total = Math.max(0, Math.min(100,
+  // Calculate total score (clamped 0-90, max possible score is 90)
+  breakdown.total = Math.max(0, Math.min(90,
     breakdown.cloudScore +
     breakdown.vwapScore +
     breakdown.gammaWallScore +

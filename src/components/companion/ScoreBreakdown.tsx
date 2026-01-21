@@ -132,10 +132,10 @@ export function ScoreBreakdown({
         isPassing={breakdown.patienceScore >= 5}
         explanation={
           breakdown.patienceScore >= 8
-            ? 'Inside bar confirmation present'
+            ? 'Current candle is inside bar ✓'
             : breakdown.patienceScore >= 5
-            ? 'Some consolidation forming'
-            : 'No patience candle detected'
+            ? 'Consolidation forming'
+            : 'Current bar not inside (◆ = historical)'
         }
       />
 

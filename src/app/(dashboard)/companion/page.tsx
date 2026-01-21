@@ -269,6 +269,26 @@ export default function CompanionTerminal() {
     return watchlist.find(w => w.symbol === selectedSymbol)?.quote || null;
   }, [selectedSymbol, watchlist]);
 
+  // Calculate VWAP from chart data as fallback when API doesn't provide it
+  const chartCalculatedVwap = useMemo(() => {
+    if (chartData.length === 0) return 0;
+
+    let cumulativeTPV = 0;
+    let cumulativeVolume = 0;
+
+    for (const candle of chartData) {
+      const typicalPrice = (candle.high + candle.low + candle.close) / 3;
+      const volume = candle.volume || 1;
+      cumulativeTPV += typicalPrice * volume;
+      cumulativeVolume += volume;
+    }
+
+    return cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : 0;
+  }, [chartData]);
+
+  // Use chart VWAP as fallback when API doesn't provide
+  const effectiveVwap = currentQuote?.vwap || chartCalculatedVwap;
+
   // ============================================================================
   // SSE EVENT HANDLER - LIVE UPDATES
   // ============================================================================
@@ -611,7 +631,7 @@ export default function CompanionTerminal() {
         pageData.trendScore = ltp2Score?.breakdown?.cloudScore || ltpAnalysis?.trend?.trendScore || 0;
         pageData.currentPrice = currentQuote?.last_price || 0;
         pageData.gammaRegime = gammaData?.regime || null;
-        pageData.vwap = currentQuote?.vwap || 0;
+        pageData.vwap = effectiveVwap;
       }
 
       updatePageContext('companion', pageData);
@@ -624,6 +644,7 @@ export default function CompanionTerminal() {
     ltp2Score,
     gammaData,
     currentQuote,
+    effectiveVwap,
     watchlist,
     setAISelectedSymbol,
     updatePageContext,
@@ -643,7 +664,7 @@ export default function CompanionTerminal() {
     const closePrices = chartData.map(c => c.close);
     const ema8 = calculateEMA(closePrices, 8);
     const ema21 = calculateEMA(closePrices, 21);
-    const vwap = currentQuote?.vwap || currentPrice;
+    const vwap = effectiveVwap || currentPrice;
 
     // Check for patience candle (inside bar)
     const hasPatienceCandle = chartData.length >= 2 &&
@@ -691,7 +712,7 @@ export default function CompanionTerminal() {
       setFlashEffect('warning');
       setTimeout(() => setFlashEffect(null), 1500);
     }
-  }, [selectedSymbol, gammaData, chartData, currentQuote, someshVoice]);
+  }, [selectedSymbol, gammaData, chartData, currentQuote, effectiveVwap, someshVoice]);
 
   // Gamma Proximity & VWAP Cross Voice Triggers
   useEffect(() => {
@@ -884,16 +905,22 @@ export default function CompanionTerminal() {
             <ModeButton mode="trade" currentMode={mode} onClick={() => setMode('trade')} icon={<Target className="w-3.5 h-3.5" />} disabled={!activeTrade} />
           </div>
 
-          {selectedSymbol && currentQuote && (
+          {selectedSymbol && (
             <div className="flex items-center gap-2 px-3 py-1 bg-[var(--bg-tertiary)] rounded">
               <span className="font-bold text-[var(--text-primary)]">{selectedSymbol}</span>
-              <span className="font-mono text-sm text-[var(--text-primary)]">${currentQuote.last_price.toFixed(2)}</span>
-              <span className={cn(
-                'text-xs font-mono',
-                currentQuote.change_percent >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'
-              )}>
-                {currentQuote.change_percent >= 0 ? '+' : ''}{currentQuote.change_percent.toFixed(2)}%
-              </span>
+              {currentQuote ? (
+                <>
+                  <span className="font-mono text-sm text-[var(--text-primary)]">${currentQuote.last_price.toFixed(2)}</span>
+                  <span className={cn(
+                    'text-xs font-mono',
+                    currentQuote.change_percent >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'
+                  )}>
+                    {currentQuote.change_percent >= 0 ? '+' : ''}{currentQuote.change_percent.toFixed(2)}%
+                  </span>
+                </>
+              ) : (
+                <span className="text-xs text-[var(--text-tertiary)] animate-pulse">Loading...</span>
+              )}
             </div>
           )}
 
@@ -972,7 +999,7 @@ export default function CompanionTerminal() {
                 ltpAnalysis={ltpAnalysis}
                 gammaRegime={gammaData?.regime || null}
                 currentPrice={currentQuote?.last_price || 0}
-                vwap={currentQuote?.vwap || 0}
+                vwap={effectiveVwap}
                 isSpeaking={someshVoice.isSpeaking}
                 showScoreBreakdown={true}
                 callWall={gammaData?.callWall}
@@ -1125,7 +1152,7 @@ export default function CompanionTerminal() {
                 ltpAnalysis={ltpAnalysis}
                 gammaRegime={gammaData?.regime || null}
                 currentPrice={currentQuote?.last_price || 0}
-                vwap={currentQuote?.vwap || 0}
+                vwap={effectiveVwap}
                 isSpeaking={someshVoice.isSpeaking}
               />
             </div>
