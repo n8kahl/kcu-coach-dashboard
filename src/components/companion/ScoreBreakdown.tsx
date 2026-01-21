@@ -68,7 +68,9 @@ export function ScoreBreakdown({
         isPassing={breakdown.cloudScore > 0}
         explanation={
           breakdown.cloudScore >= 25
-            ? '8 EMA > 21 EMA (bullish trend)'
+            ? score.direction === 'bearish'
+              ? '8 EMA < 21 EMA (bearish trend)'
+              : '8 EMA > 21 EMA (bullish trend)'
             : breakdown.cloudScore >= 15
             ? 'EMA alignment forming'
             : 'No EMA cloud alignment'

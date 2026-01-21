@@ -231,7 +231,7 @@ function filterPatienceCandlesAtLevels(
   candles: Candle[],
   insideBarIndices: number[],
   levels: Level[],
-  proximityThreshold: number = 0.005 // 0.5% from level
+  proximityThreshold: number = 0.0025 // 0.25% from level (tightened to reduce clutter)
 ): number[] {
   if (levels.length === 0) return []; // No levels = no valid patience candles
 

@@ -289,6 +289,9 @@ export default function CompanionTerminal() {
   // Use chart VWAP as fallback when API doesn't provide
   const effectiveVwap = currentQuote?.vwap || chartCalculatedVwap;
 
+  // Use chart's last close as fallback when quote unavailable
+  const effectivePrice = currentQuote?.last_price || chartData[chartData.length - 1]?.close || 0;
+
   // ============================================================================
   // SSE EVENT HANDLER - LIVE UPDATES
   // ============================================================================
@@ -629,7 +632,7 @@ export default function CompanionTerminal() {
       if (selectedSymbol && (ltpAnalysis || ltp2Score)) {
         pageData.ltpGrade = ltp2Score?.grade || ltpAnalysis?.grade || null;
         pageData.trendScore = ltp2Score?.breakdown?.cloudScore || ltpAnalysis?.trend?.trendScore || 0;
-        pageData.currentPrice = currentQuote?.last_price || 0;
+        pageData.currentPrice = effectivePrice;
         pageData.gammaRegime = gammaData?.regime || null;
         pageData.vwap = effectiveVwap;
       }
@@ -644,6 +647,7 @@ export default function CompanionTerminal() {
     ltp2Score,
     gammaData,
     currentQuote,
+    effectivePrice,
     effectiveVwap,
     watchlist,
     setAISelectedSymbol,
@@ -998,7 +1002,7 @@ export default function CompanionTerminal() {
                 ltp2Score={ltp2Score}
                 ltpAnalysis={ltpAnalysis}
                 gammaRegime={gammaData?.regime || null}
-                currentPrice={currentQuote?.last_price || 0}
+                currentPrice={effectivePrice}
                 vwap={effectiveVwap}
                 isSpeaking={someshVoice.isSpeaking}
                 showScoreBreakdown={true}
@@ -1151,7 +1155,7 @@ export default function CompanionTerminal() {
                 ltp2Score={ltp2Score}
                 ltpAnalysis={ltpAnalysis}
                 gammaRegime={gammaData?.regime || null}
-                currentPrice={currentQuote?.last_price || 0}
+                currentPrice={effectivePrice}
                 vwap={effectiveVwap}
                 isSpeaking={someshVoice.isSpeaking}
               />
