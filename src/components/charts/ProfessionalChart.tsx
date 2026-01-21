@@ -804,7 +804,7 @@ function ProfessionalChartInner(
           }
 
           const color = getMassiveLevelColor(level.type);
-          const lineWidth = level.strength ? Math.max(1, Math.min(4, Math.floor(level.strength / 25))) : 2;
+          const lineWidth = (level.strength ? Math.max(1, Math.min(4, Math.floor(level.strength / 25))) : 2) as 1 | 2 | 3 | 4;
 
           try {
             series.applyOptions({
