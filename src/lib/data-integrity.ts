@@ -154,7 +154,8 @@ export function requiresLiveAPI(mode: DataMode): boolean {
 // =============================================================================
 
 export interface ModeAwareFetchOptions {
-  mode: DataMode;
+  /** Data mode - PRACTICE or COMPANION (named dataMode to avoid conflict with RequestInit.mode) */
+  dataMode: DataMode;
   /** If true, will throw instead of falling back when live API fails in COMPANION mode */
   strict?: boolean;
 }
@@ -166,12 +167,12 @@ export interface ModeAwareFetchOptions {
  * ```ts
  * // In COMPANION mode - fetches from live API only
  * const data = await modeAwareFetch('/api/market/quote?symbol=SPY', {
- *   mode: 'COMPANION',
+ *   dataMode: 'COMPANION',
  * });
  *
  * // In PRACTICE mode - can use any source
  * const scenario = await modeAwareFetch('/api/practice/scenarios/123', {
- *   mode: 'PRACTICE',
+ *   dataMode: 'PRACTICE',
  * });
  * ```
  */
@@ -179,15 +180,15 @@ export async function modeAwareFetch<T>(
   url: string,
   options: ModeAwareFetchOptions & RequestInit
 ): Promise<T> {
-  const { mode, strict = false, ...fetchOptions } = options;
-  const config = getModeConfig(mode);
+  const { dataMode, strict = false, ...fetchOptions } = options as ModeAwareFetchOptions & Record<string, unknown>;
+  const config = getModeConfig(dataMode);
 
   // Check for scenario access attempts in COMPANION mode
   if (url.includes('/practice/') || url.includes('/scenarios/')) {
     if (!config.allowScenarios) {
       throw new DataIntegrityError(
-        `Attempted to fetch practice/scenario data in ${mode} mode: ${url}`,
-        mode,
+        `Attempted to fetch practice/scenario data in ${dataMode} mode: ${url}`,
+        dataMode,
         'scenarios'
       );
     }
@@ -195,16 +196,16 @@ export async function modeAwareFetch<T>(
 
   // In COMPANION mode with strict=true, throw on any failure
   try {
-    const response = await fetch(url, fetchOptions);
+    const response = await fetch(url, fetchOptions as RequestInit);
 
     if (!response.ok) {
       const error = await response.text();
 
       // In strict COMPANION mode, we cannot fall back
-      if (mode === 'COMPANION' && strict) {
+      if (dataMode === 'COMPANION' && strict) {
         throw new DataIntegrityError(
           `Live API failed in COMPANION mode (strict): ${response.status} - ${error}`,
-          mode,
+          dataMode,
           'api'
         );
       }
@@ -219,10 +220,10 @@ export async function modeAwareFetch<T>(
     }
 
     // In strict COMPANION mode, don't allow fallbacks
-    if (mode === 'COMPANION' && strict) {
+    if (dataMode === 'COMPANION' && strict) {
       throw new DataIntegrityError(
         `Live API required in COMPANION mode but failed: ${error}`,
-        mode,
+        dataMode,
         'api'
       );
     }
