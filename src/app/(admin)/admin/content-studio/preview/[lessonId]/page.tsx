@@ -7,7 +7,8 @@ import { PageShell } from '@/components/layout/page-shell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { VideoPlayer, TranscriptPanel, LessonList } from '@/components/learn';
+import { TranscriptPanel, LessonList } from '@/components/learn';
+import { PreviewPlayer } from '@/components/admin/content/PreviewPlayer';
 import { motion } from 'framer-motion';
 import {
   Loader2,
@@ -302,15 +303,12 @@ export default function AdminPreviewPage() {
               animate={{ opacity: 1, y: 0 }}
             >
               {lesson.videoUrl || lesson.videoUid ? (
-                <VideoPlayer
-                  src={lesson.videoUrl || undefined}
-                  videoUid={lesson.videoUid || undefined}
-                  poster={lesson.thumbnailUrl || undefined}
-                  title={lesson.title}
-                  initialTime={0}
-                  onTimeUpdate={() => {}} // No tracking in preview
-                  minWatchPercent={lesson.minWatchPercent}
-                  allowSkip={true} // Always allow skip in preview
+                <PreviewPlayer
+                  videoUid={lesson.videoUid}
+                  videoUrl={lesson.videoUrl}
+                  videoStatus={lesson.videoStatus}
+                  videoDurationSeconds={lesson.videoDurationSeconds}
+                  thumbnailUrl={lesson.thumbnailUrl}
                 />
               ) : (
                 <Card className="aspect-video flex items-center justify-center bg-[var(--bg-tertiary)]">
