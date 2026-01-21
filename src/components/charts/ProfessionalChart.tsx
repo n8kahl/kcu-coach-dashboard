@@ -595,7 +595,7 @@ export const ProfessionalChart = memo(function ProfessionalChart({
         return;
       }
 
-      let color = COLORS.textMuted;
+      let color: string = COLORS.textMuted;
       if (gamma.type === 'call_wall') color = COLORS.callWall;
       else if (gamma.type === 'put_wall') color = COLORS.putWall;
       else if (gamma.type === 'zero_gamma') color = COLORS.zeroGamma;
