@@ -1013,3 +1013,88 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* =============================================================================
+ * COMPANION MODE - Professional Trading Cockpit
+ * Darker background (#0b0e11) reduces eye strain during extended trading sessions
+ * ============================================================================= */
+
+.companion-cockpit {
+  background-color: #0b0e11;
+}
+
+/* Companion chart area - deeper black for contrast */
+.companion-chart-bg {
+  background-color: #0b0e11;
+}
+
+/* Companion sidebar - slightly elevated for depth */
+.companion-sidebar-bg {
+  background-color: #131722;
+  border-left: 1px solid #2a2e39;
+}
+
+/* Companion header bar */
+.companion-header {
+  background-color: #131722;
+  border-bottom: 1px solid #2a2e39;
+}
+
+/* Companion candle countdown timer */
+.companion-countdown {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}
+
+/* Companion HUD card styling */
+.companion-hud-card {
+  background: rgba(13, 13, 13, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid #2a2e39;
+}
+
+/* Lightweight-charts container - prevent layout shift */
+.companion-chart-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.companion-chart-container > div {
+  position: absolute !important;
+  inset: 0 !important;
+}
+
+/* Price ticker styling for companion mode */
+.companion-price-ticker {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+.companion-price-ticker.positive {
+  color: #26a69a;
+}
+
+.companion-price-ticker.negative {
+  color: #ef5350;
+}
+
+/* Companion mode scrollbar - thinner and darker */
+.companion-cockpit ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.companion-cockpit ::-webkit-scrollbar-track {
+  background: #0b0e11;
+}
+
+.companion-cockpit ::-webkit-scrollbar-thumb {
+  background: #2a2e39;
+  border-radius: 0;
+}
+
+.companion-cockpit ::-webkit-scrollbar-thumb:hover {
+  background: #3a3e49;
+}

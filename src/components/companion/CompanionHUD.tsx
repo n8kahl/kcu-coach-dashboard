@@ -13,6 +13,7 @@ import { ChevronDown, Volume2, AlertTriangle } from 'lucide-react';
 import type { LTP2Score } from '@/lib/ltp-gamma-engine';
 import type { LTPAnalysis } from '@/lib/market-data';
 import { ScoreBreakdown } from './ScoreBreakdown';
+import { isValidNumber, isValidPrice, formatScore } from '@/lib/format-trade-data';
 
 // ============================================================================
 // PROPS
@@ -89,7 +90,7 @@ export function CompanionHUD({
     neutral: 'text-[var(--text-secondary)]',
   };
 
-  const aboveVwap = currentPrice > vwap;
+  const aboveVwap = isValidPrice(currentPrice) && isValidPrice(vwap) ? currentPrice > vwap : false;
   const gradeStyle = ltp2Score ? ltp2GradeStyles[ltp2Score.grade] : null;
 
   return (
@@ -132,14 +133,14 @@ export function CompanionHUD({
           <span
             className={cn(
               'text-lg font-black tabular-nums',
-              ltp2Score.score >= 75
+              isValidNumber(ltp2Score.score) && ltp2Score.score >= 75
                 ? 'text-[var(--success)]'
-                : ltp2Score.score >= 50
+                : isValidNumber(ltp2Score.score) && ltp2Score.score >= 50
                 ? 'text-[var(--warning)]'
                 : 'text-[var(--error)]'
             )}
           >
-            {ltp2Score.score}
+            {formatScore(ltp2Score.score)}
           </span>
         )}
 
@@ -240,7 +241,9 @@ interface ScoreBarProps {
 }
 
 function ScoreBar({ label, value, max = 100, color }: ScoreBarProps) {
-  const percentage = max > 0 ? (value / max) * 100 : 0;
+  const safeValue = isValidNumber(value) ? value : 0;
+  const safeMax = isValidNumber(max) && max > 0 ? max : 100;
+  const percentage = (safeValue / safeMax) * 100;
   return (
     <div className="flex items-center gap-2">
       <span className="w-12 text-[10px] font-bold text-[var(--text-tertiary)] truncate">
@@ -256,7 +259,7 @@ function ScoreBar({ label, value, max = 100, color }: ScoreBarProps) {
         />
       </div>
       <span className="w-8 text-[10px] font-mono text-right text-[var(--text-secondary)]">
-        {value}
+        {formatScore(value)}
       </span>
     </div>
   );

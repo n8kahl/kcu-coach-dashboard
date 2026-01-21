@@ -10,6 +10,7 @@
 import { cn } from '@/lib/utils';
 import { Check, X, AlertTriangle, TrendingUp, Activity, Target, Shield } from 'lucide-react';
 import type { LTP2Score } from '@/lib/ltp-gamma-engine';
+import { isValidNumber, isValidPrice, formatPercent, formatScore } from '@/lib/format-trade-data';
 
 // ============================================================================
 // TYPES
@@ -40,15 +41,17 @@ export function ScoreBreakdown({
 }: ScoreBreakdownProps) {
   const { breakdown } = score;
 
-  // Determine price position relative to VWAP
-  const aboveVwap = currentPrice > vwap;
-  const vwapDistance = vwap > 0 ? ((currentPrice - vwap) / vwap) * 100 : 0;
+  // Determine price position relative to VWAP with safe number checks
+  const aboveVwap = isValidPrice(currentPrice) && isValidPrice(vwap) ? currentPrice > vwap : false;
+  const vwapDistance = isValidPrice(currentPrice) && isValidPrice(vwap)
+    ? ((currentPrice - vwap) / vwap) * 100
+    : 0;
 
-  // Determine proximity to gamma walls
-  const callWallDistance = callWall && currentPrice > 0
+  // Determine proximity to gamma walls with safe number checks
+  const callWallDistance = isValidPrice(callWall) && isValidPrice(currentPrice)
     ? ((callWall - currentPrice) / currentPrice) * 100
     : null;
-  const putWallDistance = putWall && currentPrice > 0
+  const putWallDistance = isValidPrice(putWall) && isValidPrice(currentPrice)
     ? ((currentPrice - putWall) / currentPrice) * 100
     : null;
 
@@ -91,13 +94,13 @@ export function ScoreBreakdown({
         maxPoints={20}
         isPassing={breakdown.vwapScore > 0}
         explanation={
-          vwap > 0
+          isValidPrice(vwap) && isValidNumber(vwapDistance)
             ? score.direction === 'bullish'
               ? aboveVwap
-                ? `Price ${vwapDistance.toFixed(1)}% above VWAP (aligned)`
+                ? `Price ${Math.abs(vwapDistance).toFixed(1)}% above VWAP (aligned)`
                 : `Price ${Math.abs(vwapDistance).toFixed(1)}% below VWAP (not aligned)`
               : aboveVwap
-                ? `Price ${vwapDistance.toFixed(1)}% above VWAP (not aligned)`
+                ? `Price ${Math.abs(vwapDistance).toFixed(1)}% above VWAP (not aligned)`
                 : `Price ${Math.abs(vwapDistance).toFixed(1)}% below VWAP (aligned)`
             : breakdown.vwapScore > 0
               ? 'VWAP from most recent trading session'
@@ -165,9 +168,9 @@ export function ScoreBreakdown({
               </span>
             </div>
             <p className="text-[9px] text-[var(--error)]/80 mt-0.5 leading-tight">
-              {callWallDistance !== null && callWallDistance < 1.5
+              {isValidNumber(callWallDistance) && callWallDistance < 1.5
                 ? `Only ${callWallDistance.toFixed(1)}% from Call Wall`
-                : putWallDistance !== null && putWallDistance < 1.5
+                : isValidNumber(putWallDistance) && putWallDistance < 1.5
                 ? `Only ${putWallDistance.toFixed(1)}% from Put Wall`
                 : 'Approaching significant resistance'}
             </p>
@@ -181,14 +184,14 @@ export function ScoreBreakdown({
         <span
           className={cn(
             'text-sm font-black tabular-nums',
-            score.score >= 75
+            isValidNumber(score.score) && score.score >= 75
               ? 'text-[var(--success)]'
-              : score.score >= 50
+              : isValidNumber(score.score) && score.score >= 50
               ? 'text-[var(--warning)]'
               : 'text-[var(--error)]'
           )}
         >
-          {score.score}/90
+          {formatScore(score.score)}/90
         </span>
       </div>
     </div>
