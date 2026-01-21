@@ -312,6 +312,7 @@ function ProfessionalChartInner(
   const markersCache = useRef<SeriesMarker<Time>[]>([]);
   const lastUpdateTimestamp = useRef<number>(0);
 
+
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [isInitialized, setIsInitialized] = useState(false);
 
@@ -566,6 +567,98 @@ function ProfessionalChartInner(
   }, [dimensions]);
 
   // ==========================================================================
+  // Internal setData function - can be called directly or via ref
+  // ==========================================================================
+  const setDataInternal = useCallback((candles: ChartCandle[]) => {
+    if (!candleSeriesRef.current) return;
+
+    const validData = candles.filter(
+      (c) =>
+        isValidPrice(c.open) &&
+        isValidPrice(c.high) &&
+        isValidPrice(c.low) &&
+        isValidPrice(c.close) &&
+        isValidNumber(c.time) &&
+        c.time > 0
+    );
+
+    // Update cache
+    candleDataCache.current = validData;
+
+    if (validData.length === 0) {
+      try {
+        candleSeriesRef.current?.setData([]);
+        volumeSeriesRef.current?.setData([]);
+        ema8SeriesRef.current?.setData([]);
+        ema21SeriesRef.current?.setData([]);
+        vwapSeriesRef.current?.setData([]);
+      } catch {}
+      return;
+    }
+
+    // Candle data
+    const candleData: CandlestickData[] = validData.map((c) => ({
+      time: toChartTime(c.time),
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    }));
+
+    try {
+      candleSeriesRef.current.setData(candleData);
+    } catch (e) {
+      console.warn('[ProfessionalChart] Candle setData error:', e);
+    }
+
+    // Volume data
+    if (showVolume && volumeSeriesRef.current) {
+      const volData = validData.map((c) => ({
+        time: toChartTime(c.time),
+        value: isValidNumber(c.volume) ? c.volume : 0,
+        color: c.close >= c.open ? COLORS.volumeUp : COLORS.volumeDown,
+      }));
+      try {
+        volumeSeriesRef.current.setData(volData);
+      } catch {}
+    }
+
+    // Indicators
+    if (showIndicators && validData.length >= 21) {
+      const closes = validData.map((c) => c.close);
+
+      const ema8 = calculateEMA(closes, 8);
+      const ema8Data = validData
+        .map((c, i) => ({ time: toChartTime(c.time), value: ema8[i] }))
+        .filter((d): d is LineData => d.value !== null && isValidNumber(d.value));
+      try { ema8SeriesRef.current?.setData(ema8Data); } catch {}
+
+      const ema21 = calculateEMA(closes, 21);
+      const ema21Data = validData
+        .map((c, i) => ({ time: toChartTime(c.time), value: ema21[i] }))
+        .filter((d): d is LineData => d.value !== null && isValidNumber(d.value));
+      try { ema21SeriesRef.current?.setData(ema21Data); } catch {}
+
+      const vwap = calculateVWAP(validData);
+      const vwapData = validData
+        .map((c, i) => ({ time: toChartTime(c.time), value: vwap[i] }))
+        .filter((d): d is LineData => d.value !== null && isValidNumber(d.value));
+      try { vwapSeriesRef.current?.setData(vwapData); } catch {}
+    }
+
+    // Set visible range
+    if (chartRef.current && validData.length > 0) {
+      try {
+        const visibleBars = Math.min(200, validData.length);
+        chartRef.current.timeScale().setVisibleLogicalRange({
+          from: validData.length - visibleBars,
+          to: validData.length - 1,
+        });
+      } catch {}
+    }
+  }, [showVolume, showIndicators]);
+
+  // ==========================================================================
   // Imperative Handle - Exposed to WebSocket Provider
   // ==========================================================================
   useImperativeHandle(
@@ -669,94 +762,7 @@ function ProfessionalChartInner(
       /**
        * Set all candle data (for initial load or symbol change).
        */
-      setData: (candles: ChartCandle[]) => {
-        if (!candleSeriesRef.current) return;
-
-        const validData = candles.filter(
-          (c) =>
-            isValidPrice(c.open) &&
-            isValidPrice(c.high) &&
-            isValidPrice(c.low) &&
-            isValidPrice(c.close) &&
-            isValidNumber(c.time) &&
-            c.time > 0
-        );
-
-        // Update cache
-        candleDataCache.current = validData;
-
-        if (validData.length === 0) {
-          try {
-            candleSeriesRef.current?.setData([]);
-            volumeSeriesRef.current?.setData([]);
-            ema8SeriesRef.current?.setData([]);
-            ema21SeriesRef.current?.setData([]);
-            vwapSeriesRef.current?.setData([]);
-          } catch {}
-          return;
-        }
-
-        // Candle data
-        const candleData: CandlestickData[] = validData.map((c) => ({
-          time: toChartTime(c.time),
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-        }));
-
-        try {
-          candleSeriesRef.current.setData(candleData);
-        } catch (e) {
-          console.warn('[ProfessionalChart] Candle setData error:', e);
-        }
-
-        // Volume data
-        if (showVolume && volumeSeriesRef.current) {
-          const volData = validData.map((c) => ({
-            time: toChartTime(c.time),
-            value: isValidNumber(c.volume) ? c.volume : 0,
-            color: c.close >= c.open ? COLORS.volumeUp : COLORS.volumeDown,
-          }));
-          try {
-            volumeSeriesRef.current.setData(volData);
-          } catch {}
-        }
-
-        // Indicators
-        if (showIndicators && validData.length >= 21) {
-          const closes = validData.map((c) => c.close);
-
-          const ema8 = calculateEMA(closes, 8);
-          const ema8Data = validData
-            .map((c, i) => ({ time: toChartTime(c.time), value: ema8[i] }))
-            .filter((d): d is LineData => d.value !== null && isValidNumber(d.value));
-          try { ema8SeriesRef.current?.setData(ema8Data); } catch {}
-
-          const ema21 = calculateEMA(closes, 21);
-          const ema21Data = validData
-            .map((c, i) => ({ time: toChartTime(c.time), value: ema21[i] }))
-            .filter((d): d is LineData => d.value !== null && isValidNumber(d.value));
-          try { ema21SeriesRef.current?.setData(ema21Data); } catch {}
-
-          const vwap = calculateVWAP(validData);
-          const vwapData = validData
-            .map((c, i) => ({ time: toChartTime(c.time), value: vwap[i] }))
-            .filter((d): d is LineData => d.value !== null && isValidNumber(d.value));
-          try { vwapSeriesRef.current?.setData(vwapData); } catch {}
-        }
-
-        // Set visible range
-        if (chartRef.current && validData.length > 0) {
-          try {
-            const visibleBars = Math.min(200, validData.length);
-            chartRef.current.timeScale().setVisibleLogicalRange({
-              from: validData.length - visibleBars,
-              to: validData.length - 1,
-            });
-          } catch {}
-        }
-      },
+      setData: setDataInternal,
 
       /**
        * Add a marker (entry, exit, alert point).
@@ -867,15 +873,9 @@ function ProfessionalChartInner(
   useEffect(() => {
     if (!mountedRef.current || !isInitialized || initialData.length === 0) return;
 
-    // Use the imperative method for consistency
-    const handle = ref as React.RefObject<ProfessionalChartHandle>;
-    if (handle?.current?.setData) {
-      handle.current.setData(initialData);
-    } else {
-      // Fallback if ref not ready
-      candleDataCache.current = initialData;
-    }
-  }, [initialData, isInitialized, ref]);
+    // Call internal setData directly - works regardless of whether ref is passed
+    setDataInternal(initialData);
+  }, [initialData, isInitialized, setDataInternal]);
 
   // ==========================================================================
   // Update Legacy Levels
