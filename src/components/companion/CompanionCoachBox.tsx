@@ -39,6 +39,8 @@ export interface CompanionCoachBoxProps {
   // Mobile responsiveness
   isOverlay?: boolean;
   onClose?: () => void;
+  /** Sidebar mode: simplified layout, always expanded, no minimize button */
+  sidebarMode?: boolean;
 }
 
 // ============================================================================
@@ -55,7 +57,10 @@ export function CompanionCoachBox({
   className,
   isOverlay = false,
   onClose,
+  sidebarMode = false,
 }: CompanionCoachBoxProps) {
+  // In sidebar mode, always treat as expanded
+  const isExpanded = sidebarMode || expanded;
   const borderColor =
     alertType === 'entry'
       ? 'border-[var(--success)]'
@@ -74,8 +79,8 @@ export function CompanionCoachBox({
       ? 'shadow-[0_0_20px_rgba(239,68,68,0.3)]'
       : '';
 
-  // Collapsed state - shows as a floating button
-  if (!expanded && !isOverlay) {
+  // Collapsed state - shows as a floating button (not in sidebar mode)
+  if (!isExpanded && !isOverlay && !sidebarMode) {
     return (
       <button
         onClick={onToggle}
@@ -155,7 +160,7 @@ export function CompanionCoachBox({
             >
               <X className="w-4 h-4" />
             </button>
-          ) : (
+          ) : !sidebarMode && (
             <button
               onClick={onToggle}
               className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"

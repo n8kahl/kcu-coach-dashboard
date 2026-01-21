@@ -224,6 +224,94 @@ function detectInsideBars(candles: Candle[]): number[] {
 }
 
 /**
+ * KCU Rule: Patience candles only matter at key levels
+ * Filter inside bars to only show those within proximity of a key level
+ */
+function filterPatienceCandlesAtLevels(
+  candles: Candle[],
+  insideBarIndices: number[],
+  levels: Level[],
+  proximityThreshold: number = 0.005 // 0.5% from level
+): number[] {
+  if (levels.length === 0) return []; // No levels = no valid patience candles
+
+  return insideBarIndices.filter((idx) => {
+    const candle = candles[idx];
+    const candleMidpoint = (candle.high + candle.low) / 2;
+
+    // Check if candle is near any key level
+    return levels.some((level) => {
+      const distance = Math.abs(candleMidpoint - level.price) / level.price;
+      return distance <= proximityThreshold;
+    });
+  });
+}
+
+// Session boundary colors
+const SESSION_COLORS = {
+  marketOpen: '#22c55e',   // Green for market open
+  marketClose: '#ef4444',  // Red for market close
+};
+
+interface SessionMarker {
+  index: number;
+  type: 'open' | 'close';
+}
+
+/**
+ * Detect session boundaries (market open 9:30 AM ET, market close 4:00 PM ET)
+ * Returns indices of candles at session boundaries
+ */
+function detectSessionBoundaries(candles: Candle[]): SessionMarker[] {
+  const markers: SessionMarker[] = [];
+  const seenDates = new Map<string, { open: boolean; close: boolean }>();
+
+  candles.forEach((candle, i) => {
+    const time = typeof candle.time === 'number'
+      ? candle.time >= 1e12 ? candle.time : candle.time * 1000
+      : new Date(candle.time).getTime();
+
+    const date = new Date(time);
+
+    // Get time in Eastern timezone
+    const etTime = date.toLocaleTimeString('en-US', {
+      timeZone: 'America/New_York',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+
+    // Get date string for deduplication (one marker per day per type)
+    const dateStr = date.toLocaleDateString('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+
+    if (!seenDates.has(dateStr)) {
+      seenDates.set(dateStr, { open: false, close: false });
+    }
+
+    const seen = seenDates.get(dateStr)!;
+
+    // Market Open at 9:30 AM ET (mark first candle at or after 9:30)
+    if (!seen.open && etTime >= '09:30' && etTime < '10:00') {
+      markers.push({ index: i, type: 'open' });
+      seen.open = true;
+    }
+
+    // Market Close at 4:00 PM ET (mark first candle at or after 16:00)
+    if (!seen.close && etTime >= '16:00' && etTime < '16:30') {
+      markers.push({ index: i, type: 'close' });
+      seen.close = true;
+    }
+  });
+
+  return markers;
+}
+
+/**
  * Safely set data on a series. Filters invalid points and wraps in try-catch.
  */
 function safeSetData(
@@ -411,8 +499,8 @@ export const KCUChart = memo(function KCUChart({
       });
       sma200SeriesRef.current = chart.addLineSeries({
         color: CHART_COLORS.sma200,
-        lineWidth: 1,
-        lineStyle: LineStyle.Dotted,
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
         priceLineVisible: false,
         lastValueVisible: false,
       });
@@ -639,32 +727,59 @@ export const KCUChart = memo(function KCUChart({
       }
     }
 
-    // Patience candle markers
-    if (showPatienceCandles && candleSeriesRef.current) {
-      const indices = detectInsideBars(validData);
-      const markers = indices
-        .map((i) => {
+    // Markers: patience candles + session boundaries
+    if (candleSeriesRef.current) {
+      const allMarkers: SeriesMarker<Time>[] = [];
+
+      // Patience candle markers - KCU Rule: Only show at key levels
+      if (showPatienceCandles) {
+        const allInsideBars = detectInsideBars(validData);
+        // Filter to only show patience candles near key levels (per KCU methodology)
+        const patienceIndices = filterPatienceCandlesAtLevels(validData, allInsideBars, levels);
+        patienceIndices.forEach((i) => {
           const t = toChartTime(validData[i].time);
-          if (!t) return null;
-          return {
+          if (t) {
+            allMarkers.push({
+              time: t,
+              position: 'aboveBar' as const,
+              color: CHART_COLORS.patienceMarker,
+              shape: 'arrowDown' as const,
+              text: '◆',
+              size: 1,
+            });
+          }
+        });
+      }
+
+      // Session boundary markers (market open/close)
+      const sessionMarkers = detectSessionBoundaries(validData);
+      sessionMarkers.forEach((marker) => {
+        const t = toChartTime(validData[marker.index].time);
+        if (t) {
+          allMarkers.push({
             time: t,
-            position: 'aboveBar' as const,
-            color: CHART_COLORS.patienceMarker,
-            shape: 'arrowDown' as const,
-            text: '◆',
-            size: 1,
-          };
-        })
-        .filter((m) => m !== null) as SeriesMarker<Time>[];
+            position: 'belowBar' as const,
+            color: marker.type === 'open' ? SESSION_COLORS.marketOpen : SESSION_COLORS.marketClose,
+            shape: 'square' as const,
+            text: marker.type === 'open' ? 'OPEN' : 'CLOSE',
+            size: 0.5,
+          });
+        }
+      });
+
+      // Sort markers by time to ensure proper rendering
+      allMarkers.sort((a, b) => (a.time as number) - (b.time as number));
+
       try {
-        candleSeriesRef.current.setMarkers(markers);
+        candleSeriesRef.current.setMarkers(allMarkers);
       } catch { /* ignore */ }
     }
 
     // Fit content and set visible range to last ~100 bars for better scaling
     if (chartRef.current && validData.length > 0) {
       try {
-        const visibleBars = Math.min(100, validData.length);
+        // Show 200 bars (~2.5 trading days of 5-min data) for better SMA 200 visibility
+        const visibleBars = Math.min(200, validData.length);
         chartRef.current.timeScale().setVisibleLogicalRange({
           from: validData.length - visibleBars,
           to: validData.length - 1,
@@ -676,7 +791,7 @@ export const KCUChart = memo(function KCUChart({
         } catch { /* ignore */ }
       }
     }
-  }, [data, mode, replayIndex, isInitialized, showVolume, showIndicators, showPatienceCandles]);
+  }, [data, mode, replayIndex, isInitialized, showVolume, showIndicators, showPatienceCandles, levels]);
 
   // ==========================================================================
   // Level Lines - REUSE POOL, DON'T CREATE/REMOVE
@@ -857,11 +972,19 @@ export const KCUChart = memo(function KCUChart({
             <span className="text-white">VWAP</span>
           </span>
           {showPatienceCandles && (
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1" title="Patience candles at key levels (KCU Rule)">
               <span className="text-[#fbbf24]">◆</span>
-              <span className="text-[#fbbf24]">Patience</span>
+              <span className="text-[#fbbf24]">Patience @Level</span>
             </span>
           )}
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 bg-[#22c55e] rounded-sm"></span>
+            <span className="text-[#22c55e]">Open</span>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 bg-[#ef4444] rounded-sm"></span>
+            <span className="text-[#ef4444]">Close</span>
+          </span>
         </div>
       )}
 

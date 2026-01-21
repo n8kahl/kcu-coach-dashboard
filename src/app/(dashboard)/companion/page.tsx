@@ -203,6 +203,37 @@ export default function CompanionTerminal() {
   const [chartLoading, setChartLoading] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
 
+  // Timeframe state (2-min vs 5-min per KCU rules)
+  type ChartTimeframe = '2min' | '5min';
+  const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('5min');
+
+  // KCU Rule: Use 2-min during first 60 minutes after market open, 5-min otherwise
+  const getRecommendedTimeframe = useCallback((): ChartTimeframe => {
+    const now = new Date();
+    const etTime = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(now);
+
+    const [hours, minutes] = etTime.split(':').map(Number);
+    const minutesSinceOpen = (hours - 9) * 60 + (minutes - 30);
+
+    // First 60 minutes after market open (9:30-10:30 AM ET): use 2-min for faster entries
+    if (minutesSinceOpen >= 0 && minutesSinceOpen < 60) {
+      return '2min';
+    }
+    // Rest of day: use 5-min for more stability
+    return '5min';
+  }, []);
+
+  // Set recommended timeframe on mount and when market session changes
+  useEffect(() => {
+    const recommended = getRecommendedTimeframe();
+    setChartTimeframe(recommended);
+  }, [getRecommendedTimeframe]);
+
   // UI state
   const [coachBoxExpanded, setCoachBoxExpanded] = useState(true);
   // NOTE: Watchlist expanded state is now managed internally by CompanionWatchlist component
@@ -307,11 +338,12 @@ export default function CompanionTerminal() {
 
   // NOTE: fetchWatchlist, fetchSetups, and fetchMarketStatus are now handled by useCompanionData hook
 
-  const fetchChartData = async (symbol: string) => {
+  const fetchChartData = async (symbol: string, timeframe: ChartTimeframe = chartTimeframe) => {
     setChartLoading(true);
     setChartError(null);
+    const multiplier = timeframe === '2min' ? 2 : 5;
     try {
-      const res = await fetch(`/api/market/bars?symbol=${symbol}&timespan=minute&multiplier=5&limit=500`);
+      const res = await fetch(`/api/market/bars?symbol=${symbol}&timespan=minute&multiplier=${multiplier}&limit=500`);
       if (res.ok) {
         const data = await res.json();
         if (data.bars && data.bars.length > 0) {
@@ -397,6 +429,13 @@ export default function CompanionTerminal() {
         }
         if (data.levels?.sma200 != null && isFinite(data.levels.sma200) && data.levels.sma200 > 0) {
           levels.push({ price: data.levels.sma200, label: 'SMA 200', type: 'custom', color: '#f97316', lineStyle: 'dotted' });
+        }
+        // Premarket High/Low (PMH/PML)
+        if (data.levels?.pmh != null && isFinite(data.levels.pmh) && data.levels.pmh > 0) {
+          levels.push({ price: data.levels.pmh, label: 'PMH', type: 'resistance', color: '#ec4899', lineStyle: 'dashed' });
+        }
+        if (data.levels?.pml != null && isFinite(data.levels.pml) && data.levels.pml > 0) {
+          levels.push({ price: data.levels.pml, label: 'PML', type: 'support', color: '#ec4899', lineStyle: 'dashed' });
         }
 
         setChartLevels(levels);
@@ -533,7 +572,7 @@ export default function CompanionTerminal() {
   useEffect(() => {
     if (selectedSymbol) {
       fetchLTPAnalysis(selectedSymbol);
-      fetchChartData(selectedSymbol);
+      fetchChartData(selectedSymbol, chartTimeframe);
     } else {
       setLtpAnalysis(null);
       setGammaData(null);
@@ -544,7 +583,8 @@ export default function CompanionTerminal() {
       setChartError(null);
       setChartLoading(false);
     }
-  }, [selectedSymbol]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSymbol, chartTimeframe]);
 
   useEffect(() => {
     if (selectedSymbol && ltpAnalysis) {
@@ -741,12 +781,12 @@ export default function CompanionTerminal() {
       // Refresh symbol-specific data if selected
       if (selectedSymbol) {
         await fetchLTPAnalysis(selectedSymbol);
-        await fetchChartData(selectedSymbol);
+        await fetchChartData(selectedSymbol, chartTimeframe);
       }
     } catch (error) {
       console.error('Error refreshing:', error);
     }
-  }, [refreshData, selectedSymbol]);
+  }, [refreshData, selectedSymbol, chartTimeframe]);
 
   // ============================================================================
   // COMPUTED VALUES
@@ -856,6 +896,39 @@ export default function CompanionTerminal() {
               </span>
             </div>
           )}
+
+          {/* Timeframe Selector - KCU Rules: 2-min first hour, 5-min rest of day */}
+          <div className="flex items-center gap-1 bg-[var(--bg-tertiary)] p-0.5 rounded">
+            <button
+              onClick={() => setChartTimeframe('2min')}
+              className={cn(
+                'px-2 py-1 text-xs font-semibold rounded transition-colors',
+                chartTimeframe === '2min'
+                  ? 'bg-[var(--accent-primary)] text-[#0d0d0d]'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              )}
+              title="2-minute chart - Recommended during first hour after market open"
+            >
+              2m
+            </button>
+            <button
+              onClick={() => setChartTimeframe('5min')}
+              className={cn(
+                'px-2 py-1 text-xs font-semibold rounded transition-colors',
+                chartTimeframe === '5min'
+                  ? 'bg-[var(--accent-primary)] text-[#0d0d0d]'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              )}
+              title="5-minute chart - Recommended after first hour"
+            >
+              5m
+            </button>
+            {getRecommendedTimeframe() === chartTimeframe && (
+              <span className="text-[9px] text-[var(--accent-primary)] ml-1" title="KCU-recommended timeframe for current session">
+                ★
+              </span>
+            )}
+          </div>
         </div>
 
         {/* RIGHT: Actions + Status */}
@@ -887,20 +960,71 @@ export default function CompanionTerminal() {
         </div>
       </div>
 
-      {/* MAIN CONTENT - CHART + OVERLAYS */}
-      <div className="flex-1 relative overflow-hidden min-h-[400px]">
-        {/* FLASH EFFECTS */}
-        {flashEffect && (
-          <div className={cn(
-            'absolute inset-0 z-50 pointer-events-none transition-opacity duration-300',
-            flashEffect === 'sniper' && 'animate-pulse bg-[var(--success)]/20',
-            flashEffect === 'warning' && 'animate-pulse bg-[var(--error)]/20',
-            flashEffect === 'gamma' && 'animate-pulse bg-[#00ffff]/15',
-          )} />
-        )}
+      {/* MAIN CONTENT - SIDEBAR + CHART */}
+      <div className="flex-1 flex overflow-hidden min-h-[400px]">
+        {/* LEFT SIDEBAR - Desktop Only */}
+        <div className="hidden lg:flex flex-col w-80 min-w-80 border-r border-[var(--border-primary)] bg-[var(--bg-secondary)] overflow-hidden">
+          {/* LTP2 SCORE PANEL - Always show score breakdown */}
+          <div className="p-3 border-b border-[var(--border-primary)] shrink-0">
+            {selectedSymbol && (ltp2Score || ltpAnalysis) ? (
+              <CompanionHUD
+                ltp2Score={ltp2Score}
+                ltpAnalysis={ltpAnalysis}
+                gammaRegime={gammaData?.regime || null}
+                currentPrice={currentQuote?.last_price || 0}
+                vwap={currentQuote?.vwap || 0}
+                isSpeaking={someshVoice.isSpeaking}
+                showScoreBreakdown={true}
+                callWall={gammaData?.callWall}
+                putWall={gammaData?.putWall}
+              />
+            ) : (
+              <div className="text-center py-4">
+                <Gauge className="w-6 h-6 mx-auto mb-2 text-[var(--text-tertiary)]" />
+                <p className="text-xs text-[var(--text-tertiary)]">Select a symbol for LTP analysis</p>
+              </div>
+            )}
+          </div>
 
-        {/* CHART AREA (Full Screen) */}
-        <div className="absolute inset-0 z-0">
+          {/* WATCHLIST PANEL - Scrollable */}
+          <div className="flex-1 p-3 border-b border-[var(--border-primary)] min-h-0 overflow-y-auto">
+            <CompanionWatchlist
+              watchlist={watchlist}
+              setups={setups}
+              selectedSymbol={selectedSymbol}
+              onSelectSymbol={setSelectedSymbol}
+              onAddSymbol={addSymbol}
+              onRemoveSymbol={removeSymbol}
+              loading={loading}
+            />
+          </div>
+
+          {/* COACH BOX - Bottom of sidebar */}
+          <div className="p-3 max-h-48 overflow-y-auto shrink-0">
+            <CompanionCoachBox
+              messages={coachingMessages}
+              expanded={true}
+              onToggle={() => {}}
+              alertType={lastAlertType}
+              selectedSymbol={selectedSymbol}
+              mode={mode}
+              sidebarMode={true}
+            />
+          </div>
+        </div>
+
+        {/* CHART AREA - Takes remaining width */}
+        <div className="flex-1 relative overflow-hidden min-w-0 bg-[#0d0d0d]">
+          {/* FLASH EFFECTS - Scoped to chart area only */}
+          {flashEffect && (
+            <div className={cn(
+              'absolute inset-0 z-10 pointer-events-none transition-opacity duration-300',
+              flashEffect === 'sniper' && 'animate-pulse bg-[var(--success)]/20',
+              flashEffect === 'warning' && 'animate-pulse bg-[var(--error)]/20',
+              flashEffect === 'gamma' && 'animate-pulse bg-[#00ffff]/15',
+            )} />
+          )}
+
           {selectedSymbol ? (
             <>
               {/* Show chart when we have data */}
@@ -921,7 +1045,7 @@ export default function CompanionTerminal() {
 
               {/* Loading state */}
               {chartLoading && (
-                <div className="w-full h-full flex items-center justify-center bg-[#0d0d0d]">
+                <div className="w-full h-full flex items-center justify-center">
                   <div className="text-center">
                     <RefreshCw className="w-8 h-8 mx-auto mb-3 text-[var(--accent-primary)] animate-spin" />
                     <p className="text-[var(--text-secondary)] mb-1">Loading chart for {selectedSymbol}...</p>
@@ -932,7 +1056,7 @@ export default function CompanionTerminal() {
 
               {/* Error state */}
               {chartError && !chartLoading && chartData.length === 0 && (
-                <div className="w-full h-full flex items-center justify-center bg-[#0d0d0d]">
+                <div className="w-full h-full flex items-center justify-center">
                   <div className="text-center max-w-md px-4">
                     <div className="w-16 h-16 mx-auto mb-4 rounded-lg bg-[var(--error)]/10 flex items-center justify-center">
                       <AlertTriangle className="w-8 h-8 text-[var(--error)]" />
@@ -940,7 +1064,7 @@ export default function CompanionTerminal() {
                     <p className="text-[var(--text-primary)] font-semibold mb-2">{selectedSymbol}</p>
                     <p className="text-[var(--text-secondary)] mb-3">{chartError}</p>
                     <button
-                      onClick={() => fetchChartData(selectedSymbol)}
+                      onClick={() => fetchChartData(selectedSymbol, chartTimeframe)}
                       className="px-4 py-2 bg-[var(--accent-primary)] text-[#0d0d0d] text-sm font-semibold hover:bg-[var(--accent-primary-hover)] transition-colors"
                     >
                       Retry
@@ -951,7 +1075,7 @@ export default function CompanionTerminal() {
 
               {/* No data but no error (edge case) */}
               {!chartLoading && !chartError && chartData.length === 0 && (
-                <div className="w-full h-full flex items-center justify-center bg-[#0d0d0d]">
+                <div className="w-full h-full flex items-center justify-center">
                   <div className="text-center">
                     <RefreshCw className="w-8 h-8 mx-auto mb-3 text-[var(--accent-primary)] animate-spin" />
                     <p className="text-[var(--text-secondary)] mb-1">Initializing chart for {selectedSymbol}...</p>
@@ -960,61 +1084,16 @@ export default function CompanionTerminal() {
               )}
             </>
           ) : (
-            <div className="w-full h-full flex items-center justify-center bg-[#0d0d0d]">
+            <div className="w-full h-full flex items-center justify-center">
               <div className="text-center">
                 <div className="w-16 h-16 mx-auto mb-4 rounded-lg bg-[var(--bg-tertiary)] flex items-center justify-center">
                   <Crosshair className="w-8 h-8 text-[var(--text-tertiary)]" />
                 </div>
                 <p className="text-[var(--text-secondary)] mb-1">Select a symbol to view chart</p>
-                <p className="text-xs text-[var(--text-tertiary)]">Use the watchlist on the left</p>
+                <p className="text-xs text-[var(--text-tertiary)]">Use the sidebar on the left</p>
               </div>
             </div>
           )}
-        </div>
-
-        {/* LEFT PANEL CONTAINER - Desktop Only */}
-        <div className="hidden lg:flex absolute top-4 left-4 z-10 flex-col gap-3 max-h-[calc(100%-2rem)] pointer-events-none">
-          {/* LTP 2.0 SCORE HUD */}
-          {selectedSymbol && (ltp2Score || ltpAnalysis) && (
-            <div className="pointer-events-auto">
-              <CompanionHUD
-                ltp2Score={ltp2Score}
-                ltpAnalysis={ltpAnalysis}
-                gammaRegime={gammaData?.regime || null}
-                currentPrice={currentQuote?.last_price || 0}
-                vwap={currentQuote?.vwap || 0}
-                isSpeaking={someshVoice.isSpeaking}
-              />
-            </div>
-          )}
-
-          {/* WATCHLIST PANEL - Desktop (self-expanding) */}
-          <div className="pointer-events-auto transition-all duration-300">
-            <CompanionWatchlist
-              watchlist={watchlist}
-              setups={setups}
-              selectedSymbol={selectedSymbol}
-              onSelectSymbol={setSelectedSymbol}
-              onAddSymbol={addSymbol}
-              onRemoveSymbol={removeSymbol}
-              loading={loading}
-            />
-          </div>
-        </div>
-
-        {/* COACH BOX - Desktop (Bottom Right, offset to avoid AICommandCenter) */}
-        <div className={cn(
-          'hidden lg:block absolute bottom-20 right-4 z-10 transition-all duration-300',
-          coachBoxExpanded ? 'w-80 max-h-[50vh]' : 'w-12'
-        )}>
-          <CompanionCoachBox
-            messages={coachingMessages}
-            expanded={coachBoxExpanded}
-            onToggle={() => setCoachBoxExpanded(!coachBoxExpanded)}
-            alertType={lastAlertType}
-            selectedSymbol={selectedSymbol}
-            mode={mode}
-          />
         </div>
 
         {/* MOBILE TOGGLE BUTTONS - Fixed Bottom Bar */}

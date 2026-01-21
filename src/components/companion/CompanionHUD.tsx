@@ -4,7 +4,7 @@
  * CompanionHUD
  *
  * Displays the LTP 2.0 Score HUD with grade, breakdown bars, and recommendations.
- * Extracted from the monolithic companion page for better modularity.
+ * Supports sidebar mode with always-visible score breakdown.
  */
 
 import { useState } from 'react';
@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { ChevronDown, Volume2, AlertTriangle } from 'lucide-react';
 import type { LTP2Score } from '@/lib/ltp-gamma-engine';
 import type { LTPAnalysis } from '@/lib/market-data';
+import { ScoreBreakdown } from './ScoreBreakdown';
 
 // ============================================================================
 // PROPS
@@ -25,6 +26,12 @@ export interface CompanionHUDProps {
   vwap: number;
   isSpeaking?: boolean;
   className?: string;
+  /** When true, always show the score breakdown (for sidebar mode) */
+  showScoreBreakdown?: boolean;
+  /** Call wall price for penalty explanation */
+  callWall?: number;
+  /** Put wall price for penalty explanation */
+  putWall?: number;
 }
 
 // ============================================================================
@@ -39,8 +46,14 @@ export function CompanionHUD({
   vwap,
   isSpeaking = false,
   className,
+  showScoreBreakdown = false,
+  callWall,
+  putWall,
 }: CompanionHUDProps) {
   const [expanded, setExpanded] = useState(false);
+
+  // In sidebar mode, always show breakdown
+  const shouldShowBreakdown = showScoreBreakdown || expanded;
 
   // LTP 2.0 grade colors and badges
   const ltp2GradeStyles: Record<
@@ -84,7 +97,7 @@ export function CompanionHUD({
       className={cn(
         'bg-[#0d0d0d]/95 backdrop-blur border rounded-lg overflow-hidden transition-all duration-300',
         gradeStyle ? gradeStyle.border : 'border-[var(--border-primary)]',
-        expanded ? 'w-52' : 'w-auto',
+        shouldShowBreakdown ? 'w-full' : 'w-auto',
         className
       )}
     >
@@ -161,52 +174,25 @@ export function CompanionHUD({
         </div>
       </button>
 
-      {/* Expanded Details */}
-      {expanded && ltp2Score && (
-        <div className="px-3 pb-3 border-t border-[var(--border-primary)]">
-          {/* Score Breakdown - Compact Bars */}
-          <div className="space-y-1 py-2">
-            <ScoreBar
-              label="Cloud"
-              value={ltp2Score.breakdown.cloudScore}
-              max={25}
-              color="var(--accent-primary)"
-            />
-            <ScoreBar
-              label="VWAP"
-              value={ltp2Score.breakdown.vwapScore}
-              max={20}
-              color="var(--success)"
-            />
-            <ScoreBar
-              label="Gamma"
-              value={
-                ltp2Score.breakdown.gammaWallScore +
-                ltp2Score.breakdown.gammaRegimeScore
-              }
-              max={35}
-              color="#00ffff"
-            />
-            <ScoreBar
-              label="Patience"
-              value={ltp2Score.breakdown.patienceScore}
-              max={10}
-              color="var(--warning)"
-            />
-            {ltp2Score.breakdown.resistancePenalty < 0 && (
-              <ScoreBar
-                label="Penalty"
-                value={Math.abs(ltp2Score.breakdown.resistancePenalty)}
-                max={20}
-                color="var(--error)"
-              />
-            )}
-          </div>
+      {/* Expanded Details - Uses ScoreBreakdown component */}
+      {shouldShowBreakdown && ltp2Score && (
+        <div className="px-3 pb-3 border-t border-[var(--border-primary)] pt-2">
+          {/* Detailed Score Breakdown with Explanations */}
+          <ScoreBreakdown
+            score={ltp2Score}
+            currentPrice={currentPrice}
+            vwap={vwap}
+            gammaRegime={gammaRegime}
+            callWall={callWall}
+            putWall={putWall}
+          />
 
           {/* Recommendation */}
-          <p className="text-[10px] text-[var(--text-secondary)] leading-relaxed">
-            {ltp2Score.recommendation}
-          </p>
+          <div className="mt-3 pt-2 border-t border-[var(--border-primary)]">
+            <p className="text-[10px] text-[var(--text-secondary)] leading-relaxed">
+              {ltp2Score.recommendation}
+            </p>
+          </div>
 
           {/* Warning */}
           {ltp2Score.warnings.length > 0 && (
@@ -219,7 +205,7 @@ export function CompanionHUD({
       )}
 
       {/* Expanded Legacy LTP (fallback) */}
-      {expanded && !ltp2Score && ltpAnalysis && (
+      {shouldShowBreakdown && !ltp2Score && ltpAnalysis && (
         <div className="px-3 pb-3 space-y-1">
           <ScoreBar
             label="Level"

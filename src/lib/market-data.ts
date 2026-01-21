@@ -204,7 +204,7 @@ export interface RSIResult {
 }
 
 export interface KeyLevel {
-  type: 'support' | 'resistance' | 'pdh' | 'pdl' | 'vwap' | 'orb_high' | 'orb_low' | 'ema9' | 'ema21' | 'sma200';
+  type: 'support' | 'resistance' | 'pdh' | 'pdl' | 'vwap' | 'orb_high' | 'orb_low' | 'ema9' | 'ema21' | 'sma200' | 'pmh' | 'pml';
   price: number;
   strength: number;
   distance?: number;
@@ -457,6 +457,8 @@ export interface LTPAnalysis {
     ema9: number | null;
     ema21: number | null;
     sma200: number | null;
+    pmh: number | null;   // Premarket High
+    pml: number | null;   // Premarket Low
     priceVsSma200: 'above' | 'below' | 'at' | null;
     pricePosition: 'above_vwap' | 'below_vwap' | 'at_vwap';
     levelProximity: 'at_level' | 'near_level' | 'between_levels';
@@ -1718,6 +1720,35 @@ class MarketDataService {
           }
         }
 
+        // Get PMH/PML (Premarket High/Low)
+        try {
+          const premarketBars = await this.getPremarketBars(symbol);
+          if (premarketBars.length > 0) {
+            const pmh = Math.max(...premarketBars.map(b => b.high));
+            const pml = Math.min(...premarketBars.map(b => b.low));
+
+            if (pmh > 0) {
+              levels.push({
+                type: 'pmh',
+                price: pmh,
+                strength: 75,
+                distance: ((currentPrice - pmh) / currentPrice) * 100,
+              });
+            }
+            if (pml > 0) {
+              levels.push({
+                type: 'pml',
+                price: pml,
+                strength: 75,
+                distance: ((currentPrice - pml) / currentPrice) * 100,
+              });
+            }
+          }
+        } catch (err) {
+          // Premarket data may not be available, continue without it
+          console.warn(`[Market Data] Failed to fetch premarket for ${symbol}:`, err);
+        }
+
         // Sort by distance from current price
         levels.sort((a, b) => Math.abs(a.distance || 0) - Math.abs(b.distance || 0));
 
@@ -2010,6 +2041,8 @@ class MarketDataService {
         const ema9 = keyLevels.find(l => l.type === 'ema9')?.price || null;
         const ema21 = keyLevels.find(l => l.type === 'ema21')?.price || null;
         const sma200 = keyLevels.find(l => l.type === 'sma200')?.price || null;
+        const pmh = keyLevels.find(l => l.type === 'pmh')?.price || null;
+        const pml = keyLevels.find(l => l.type === 'pml')?.price || null;
 
         // Price position relative to SMA200 (major trend indicator)
         const threshold200 = currentPrice * 0.002; // 0.2% threshold
@@ -2113,6 +2146,8 @@ class MarketDataService {
             ema9,
             ema21,
             sma200,
+            pmh,
+            pml,
             priceVsSma200,
             pricePosition,
             levelProximity,
