@@ -14,6 +14,15 @@ export type {
   FVGZone,
 } from './KCUChart';
 
+// Professional Chart - High-performance canvas-based chart for Companion Mode
+export { ProfessionalChart } from './ProfessionalChart';
+export type {
+  ProfessionalChartProps,
+  ChartCandle,
+  ChartLevel,
+  GammaLevel as ProfessionalGammaLevel,
+} from './ProfessionalChart';
+
 // TradingView Widgets - External embeds for market overview
 export {
   TradingViewWidget,
