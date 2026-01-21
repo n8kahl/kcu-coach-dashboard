@@ -432,7 +432,7 @@ export default function CourseAnalyticsPage() {
                                   size="sm"
                                   variant={
                                     lesson.averageWatchPercent >= 70 ? 'success' :
-                                    lesson.averageWatchPercent >= 40 ? 'warning' : 'default'
+                                    lesson.averageWatchPercent >= 40 ? 'gold' : 'default'
                                   }
                                 />
                               </div>
