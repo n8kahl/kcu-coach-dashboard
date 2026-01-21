@@ -10,8 +10,9 @@
  * - Manual refresh capability
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { WatchlistSymbol, DetectedSetup } from '@/components/companion';
+import type { PriceUpdateEvent } from '@/lib/broadcast';
 
 // ============================================================================
 // TYPES
@@ -53,6 +54,10 @@ export interface UseCompanionDataReturn extends CompanionDataState {
   refetchWatchlist: () => Promise<void>;
   /** Check if polling is active */
   isPolling: boolean;
+  /** Handler for real-time price updates from SSE */
+  handlePriceUpdate: (update: PriceUpdateEvent) => void;
+  /** Real-time prices map (symbol → latest price data) */
+  realtimePrices: Map<string, PriceUpdateEvent>;
 }
 
 // ============================================================================
@@ -80,6 +85,42 @@ export function useCompanionData(
     error: null,
     lastUpdated: null,
   });
+
+  // Real-time price state - updated via SSE price_update events
+  const [realtimePrices, setRealtimePrices] = useState<Map<string, PriceUpdateEvent>>(
+    () => new Map()
+  );
+
+  // Handler for real-time price updates from SSE stream
+  const handlePriceUpdate = useCallback((update: PriceUpdateEvent) => {
+    setRealtimePrices((prev) => {
+      const next = new Map(prev);
+      next.set(update.symbol, update);
+      return next;
+    });
+  }, []);
+
+  // Merge real-time prices into watchlist for up-to-date display
+  const enrichedWatchlist = useMemo((): WatchlistSymbol[] => {
+    return state.watchlist.map((item) => {
+      const rtPrice = realtimePrices.get(item.symbol);
+      // Only update if we have real-time data AND the item has a quote
+      if (rtPrice && item.quote) {
+        return {
+          ...item,
+          quote: {
+            ...item.quote,
+            last_price: rtPrice.price,
+            change_percent: rtPrice.changePercent,
+            volume: rtPrice.volume,
+            // Use real-time VWAP if available, otherwise keep existing
+            vwap: rtPrice.vwap ?? item.quote.vwap,
+          },
+        };
+      }
+      return item;
+    });
+  }, [state.watchlist, realtimePrices]);
 
   // Refs for visibility tracking
   const isVisibleRef = useRef(true);
@@ -267,9 +308,14 @@ export function useCompanionData(
 
   return {
     ...state,
+    // Override watchlist with real-time enriched version
+    watchlist: enrichedWatchlist,
     refresh,
     refetchWatchlist,
     isPolling: autoPolling && isVisibleRef.current,
+    // Real-time price handling
+    handlePriceUpdate,
+    realtimePrices,
   };
 }
 

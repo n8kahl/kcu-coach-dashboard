@@ -239,6 +239,24 @@ export interface LevelApproachEvent {
   distancePercent: number;
 }
 
+export interface CoachingUpdateEvent {
+  symbol: string;
+  eventType: 'level_approach' | 'level_cross' | 'vwap_cross' | 'gamma_flip' |
+             'r_milestone' | 'patience_forming' | 'patience_break';
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  message: {
+    type: 'guidance' | 'warning' | 'opportunity';
+    content: string;
+    emoji?: string;
+  };
+  context: {
+    currentPrice: number;
+    relevantLevel?: number;
+    direction?: 'bullish' | 'bearish';
+  };
+  timestamp: string;
+}
+
 // ============================================
 // Helper Functions for Specific Event Types
 // ============================================
@@ -265,6 +283,10 @@ export function broadcastPriceUpdate(userId: string, update: PriceUpdateEvent): 
 
 export function broadcastLevelApproach(userId: string, approach: LevelApproachEvent): Promise<boolean> {
   return broadcastToUser(userId, 'level_approach', approach);
+}
+
+export function broadcastCoachingUpdate(userId: string, event: CoachingUpdateEvent): Promise<boolean> {
+  return broadcastToUser(userId, 'coaching_update', event);
 }
 
 // ============================================

@@ -46,6 +46,7 @@ import {
   calculateEMA,
   type LTP2Score,
   type MarketContext,
+  type ScoreHysteresisState,
 } from '@/lib/ltp-gamma-engine';
 import { useSomeshVoice, type VoiceTrigger } from '@/hooks/useSomeshVoice';
 import {
@@ -243,6 +244,14 @@ export default function CompanionTerminal() {
   // LTP 2.0 state
   const [ltp2Score, setLtp2Score] = useState<LTP2Score | null>(null);
   const [flashEffect, setFlashEffect] = useState<'sniper' | 'warning' | 'gamma' | null>(null);
+
+  // Score hysteresis - use ref to avoid infinite loops in effect
+  const scoreHistoryRef = useRef<ScoreHysteresisState>({
+    previousGrade: null,
+    previousScores: [],
+    candlesAtGrade: 0,
+  });
+
   const prevGammaStateRef = useRef<{ nearCallWall: boolean; nearPutWall: boolean; crossedZeroGamma: boolean }>({
     nearCallWall: false,
     nearPutWall: false,
@@ -668,7 +677,20 @@ export default function CompanionTerminal() {
     updatePageContext,
   ]);
 
-  // LTP 2.0 Score Calculation Effect
+  // Reset score history when symbol changes
+  const prevSymbolRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedSymbol !== prevSymbolRef.current) {
+      scoreHistoryRef.current = {
+        previousGrade: null,
+        previousScores: [],
+        candlesAtGrade: 0,
+      };
+      prevSymbolRef.current = selectedSymbol;
+    }
+  }, [selectedSymbol]);
+
+  // LTP 2.0 Score Calculation Effect with Hysteresis
   useEffect(() => {
     if (!selectedSymbol || !gammaData || chartData.length < 21) {
       setLtp2Score(null);
@@ -715,20 +737,39 @@ export default function CompanionTerminal() {
       hasPatienceCandle ? { detected: true, direction: patienceDirection! } : undefined
     );
 
-    // Calculate LTP 2.0 score
-    const newScore = calculateLTP2Score(marketContext);
+    // Calculate LTP 2.0 score WITH HYSTERESIS for stability
+    const currentHistory = scoreHistoryRef.current;
+    const newScore = calculateLTP2Score(marketContext, currentHistory);
     setLtp2Score(newScore);
 
-    // Trigger voice alerts based on score
-    someshVoice.checkScore(newScore);
+    // Update score history ref for next calculation
+    scoreHistoryRef.current = {
+      previousGrade: newScore.grade,
+      previousScores: [...currentHistory.previousScores.slice(-9), newScore.score],
+      candlesAtGrade: newScore.grade === currentHistory.previousGrade
+        ? currentHistory.candlesAtGrade + 1
+        : 1,
+    };
 
-    // Check for flash effects
-    if (newScore.grade === 'Sniper') {
-      setFlashEffect('sniper');
-      setTimeout(() => setFlashEffect(null), 2000);
-    } else if (newScore.grade === 'Dumb Shit' && newScore.score < 30) {
-      setFlashEffect('warning');
-      setTimeout(() => setFlashEffect(null), 1500);
+    // Only trigger voice alerts on STABLE grade changes (2+ candles at grade)
+    // This prevents false alerts from single-tick oscillation
+    const isStableGrade = newScore.stability?.candlesAtGrade
+      ? newScore.stability.candlesAtGrade >= 2
+      : true;
+
+    if (isStableGrade) {
+      someshVoice.checkScore(newScore);
+    }
+
+    // Check for flash effects - only on stable changes
+    if (isStableGrade) {
+      if (newScore.grade === 'Sniper' && !newScore.stability?.gradeLocked) {
+        setFlashEffect('sniper');
+        setTimeout(() => setFlashEffect(null), 2000);
+      } else if (newScore.grade === 'Dumb Shit' && newScore.score < 30) {
+        setFlashEffect('warning');
+        setTimeout(() => setFlashEffect(null), 1500);
+      }
     }
   }, [selectedSymbol, gammaData, chartData, currentQuote, effectiveVwap, someshVoice]);
 

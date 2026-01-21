@@ -11,7 +11,8 @@ export type CompanionEvent =
   | { type: 'admin_alert'; data: AdminAlertEvent }
   | { type: 'companion_message'; data: CompanionMessageEvent }
   | { type: 'price_update'; data: PriceUpdateEvent }
-  | { type: 'level_approach'; data: LevelApproachEvent };
+  | { type: 'level_approach'; data: LevelApproachEvent }
+  | { type: 'coaching_update'; data: CoachingUpdateEvent };
 
 interface SetupEvent {
   id: string;
@@ -65,11 +66,32 @@ interface LevelApproachEvent {
   distancePercent: number;
 }
 
+interface CoachingUpdateEvent {
+  symbol: string;
+  eventType: 'level_approach' | 'level_cross' | 'vwap_cross' | 'gamma_flip' |
+             'r_milestone' | 'patience_forming' | 'patience_break';
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  message: {
+    type: 'guidance' | 'warning' | 'opportunity';
+    content: string;
+    emoji?: string;
+  };
+  context: {
+    currentPrice: number;
+    relevantLevel?: number;
+    direction?: 'bullish' | 'bearish';
+  };
+  timestamp: string;
+}
+
 interface UseCompanionStreamOptions {
   onEvent?: (event: CompanionEvent) => void;
   onSetupReady?: (setup: SetupEvent) => void;
   onAdminAlert?: (alert: AdminAlertEvent) => void;
   onCompanionMessage?: (message: CompanionMessageEvent) => void;
+  onPriceUpdate?: (update: PriceUpdateEvent) => void;
+  onLevelApproach?: (approach: LevelApproachEvent) => void;
+  onCoachingUpdate?: (update: CoachingUpdateEvent) => void;
   autoReconnect?: boolean;
   reconnectInterval?: number;
 }
@@ -80,6 +102,9 @@ export function useCompanionStream(options: UseCompanionStreamOptions = {}) {
     onSetupReady,
     onAdminAlert,
     onCompanionMessage,
+    onPriceUpdate,
+    onLevelApproach,
+    onCoachingUpdate,
     autoReconnect = true,
     reconnectInterval = 5000
   } = options;
@@ -172,19 +197,29 @@ export function useCompanionStream(options: UseCompanionStreamOptions = {}) {
     });
 
     eventSource.addEventListener('price_update', (e) => {
-      const data = JSON.parse(e.data);
+      const data = JSON.parse(e.data) as PriceUpdateEvent;
       const event: CompanionEvent = { type: 'price_update', data };
       setLastEvent(event);
       onEvent?.(event);
+      onPriceUpdate?.(data);
     });
 
     eventSource.addEventListener('level_approach', (e) => {
-      const data = JSON.parse(e.data);
+      const data = JSON.parse(e.data) as LevelApproachEvent;
       const event: CompanionEvent = { type: 'level_approach', data };
       setLastEvent(event);
       onEvent?.(event);
+      onLevelApproach?.(data);
     });
-  }, [onEvent, onSetupReady, onAdminAlert, onCompanionMessage, autoReconnect, reconnectInterval]);
+
+    eventSource.addEventListener('coaching_update', (e) => {
+      const data = JSON.parse(e.data) as CoachingUpdateEvent;
+      const event: CompanionEvent = { type: 'coaching_update', data };
+      setLastEvent(event);
+      onEvent?.(event);
+      onCoachingUpdate?.(data);
+    });
+  }, [onEvent, onSetupReady, onAdminAlert, onCompanionMessage, onPriceUpdate, onLevelApproach, onCoachingUpdate, autoReconnect, reconnectInterval]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {

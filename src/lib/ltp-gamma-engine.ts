@@ -3,6 +3,13 @@
  *
  * Enhanced scoring system that combines traditional LTP (Level, Trend, Patience)
  * with institutional Gamma exposure data for better trade setups.
+ *
+ * v2.1: Graduated scoring + hysteresis for stability
+ * - Distance-based VWAP scoring (no binary flips)
+ * - Graduated gamma wall penalties
+ * - EMA cloud buffer zone to prevent oscillation
+ * - Score hysteresis requiring sustained moves to change grade
+ * - Enhanced patience candle detection at key levels
  */
 
 export interface MarketContext {
@@ -42,6 +49,24 @@ export interface LTP2Score {
   breakdown: ScoreBreakdown;
   warnings: string[];
   recommendation: string;
+  /** Stability information for hysteresis */
+  stability?: {
+    /** Whether grade is being held due to hysteresis */
+    gradeLocked: boolean;
+    /** Raw score before smoothing */
+    rawScore: number;
+    /** Number of candles at current grade */
+    candlesAtGrade: number;
+    /** Trend strength indicator */
+    cloudStrength: 'strong' | 'moderate' | 'weak' | 'neutral';
+  };
+}
+
+/** State for score hysteresis - pass previous state to get stable grades */
+export interface ScoreHysteresisState {
+  previousGrade: LTP2Score['grade'] | null;
+  previousScores: number[];
+  candlesAtGrade: number;
 }
 
 export interface ScoreBreakdown {
@@ -75,10 +100,245 @@ const GRADE_THRESHOLDS = {
   DECENT: 50,
 } as const;
 
+// Hysteresis buffer - points required to cross grade boundary
+const HYSTERESIS_BUFFER = 5;
+
+// ============================================================================
+// GRADUATED SCORING HELPER FUNCTIONS
+// ============================================================================
+
 /**
- * Calculate LTP 2.0 Score for bullish setups
+ * Calculate VWAP score with graduated distance-based scoring
+ * Prevents binary flips when price oscillates around VWAP
  */
-export function calculateLTP2Score(context: MarketContext): LTP2Score {
+function calculateVwapScore(
+  currentPrice: number,
+  vwap: number,
+  direction: 'bullish' | 'bearish' | 'neutral'
+): { score: number; distancePercent: number } {
+  if (vwap <= 0) return { score: 0, distancePercent: 0 };
+
+  const maxScore = WEIGHTS.ABOVE_VWAP; // 20 points max
+  const distancePercent = ((currentPrice - vwap) / vwap) * 100;
+  const absDistance = Math.abs(distancePercent);
+
+  // Determine if price is on the "right" side for the direction
+  const isAligned = direction === 'bullish'
+    ? distancePercent > 0
+    : direction === 'bearish'
+    ? distancePercent < 0
+    : true; // neutral accepts either
+
+  if (!isAligned) {
+    // Wrong side - give small partial credit if very close (within 0.1%)
+    if (absDistance <= 0.1) {
+      return { score: Math.round(maxScore * 0.25), distancePercent };
+    }
+    return { score: 0, distancePercent };
+  }
+
+  // Right side - graduated scoring based on distance
+  if (absDistance >= 0.5) return { score: maxScore, distancePercent };      // 20 pts: Strong (≥0.5%)
+  if (absDistance >= 0.3) return { score: Math.round(maxScore * 0.9), distancePercent }; // 18 pts
+  if (absDistance >= 0.15) return { score: Math.round(maxScore * 0.75), distancePercent }; // 15 pts
+  if (absDistance >= 0.05) return { score: Math.round(maxScore * 0.6), distancePercent }; // 12 pts
+  return { score: Math.round(maxScore * 0.5), distancePercent }; // 10 pts: Right side but very close
+}
+
+/**
+ * Calculate gamma wall penalty with graduated distance-based scoring
+ * Prevents sudden -20 penalty when approaching wall
+ */
+function calculateGammaWallPenalty(
+  currentPrice: number,
+  opposingWall: number,
+  direction: 'bullish' | 'bearish'
+): { penalty: number; distancePercent: number } {
+  if (opposingWall <= 0 || currentPrice <= 0) {
+    return { penalty: 0, distancePercent: 100 };
+  }
+
+  // For bullish, we're worried about call wall (resistance above)
+  // For bearish, we're worried about put wall (support below)
+  const distancePercent = direction === 'bullish'
+    ? ((opposingWall - currentPrice) / currentPrice) * 100
+    : ((currentPrice - opposingWall) / currentPrice) * 100;
+
+  // Graduated penalty based on distance
+  if (distancePercent >= 2.0) return { penalty: 0, distancePercent };    // No penalty
+  if (distancePercent >= 1.5) return { penalty: -5, distancePercent };   // Light warning
+  if (distancePercent >= 1.0) return { penalty: -10, distancePercent };  // Moderate
+  if (distancePercent >= 0.5) return { penalty: -15, distancePercent };  // Strong warning
+  return { penalty: -20, distancePercent };                               // At the wall
+}
+
+/**
+ * Calculate EMA cloud score with buffer zone to prevent oscillation
+ * Neutral zone prevents rapid grade changes when EMAs are close
+ */
+function calculateCloudScore(
+  ema8: number,
+  ema21: number
+): { score: number; strength: 'strong' | 'moderate' | 'weak' | 'neutral'; direction: 'bullish' | 'bearish' | 'neutral' } {
+  if (ema21 <= 0) return { score: 0, strength: 'neutral', direction: 'neutral' };
+
+  const maxScore = WEIGHTS.BULLISH_CLOUD; // 25 points max
+  const spreadPercent = ((ema8 - ema21) / ema21) * 100;
+  const absSpread = Math.abs(spreadPercent);
+
+  // Neutral zone - EMAs within 0.1% are considered "crossed" / indeterminate
+  if (absSpread < 0.1) {
+    return { score: Math.round(maxScore * 0.3), strength: 'neutral', direction: 'neutral' };
+  }
+
+  const direction: 'bullish' | 'bearish' = spreadPercent > 0 ? 'bullish' : 'bearish';
+
+  // Graduated based on spread size
+  if (absSpread >= 0.5) return { score: maxScore, strength: 'strong', direction };      // 25 pts
+  if (absSpread >= 0.3) return { score: Math.round(maxScore * 0.85), strength: 'moderate', direction }; // ~21 pts
+  if (absSpread >= 0.15) return { score: Math.round(maxScore * 0.7), strength: 'weak', direction }; // ~18 pts
+  return { score: Math.round(maxScore * 0.5), strength: 'weak', direction }; // ~12 pts
+}
+
+/**
+ * Apply hysteresis to prevent rapid grade oscillation
+ * Requires sustained score movement to change grade
+ */
+function applyHysteresis(
+  rawScore: number,
+  hysteresisState: ScoreHysteresisState | undefined
+): {
+  smoothedScore: number;
+  effectiveGrade: LTP2Score['grade'];
+  gradeLocked: boolean;
+  candlesAtGrade: number;
+} {
+  if (!hysteresisState || hysteresisState.previousGrade === null) {
+    // No previous state - use standard thresholds
+    const effectiveGrade: LTP2Score['grade'] =
+      rawScore >= GRADE_THRESHOLDS.SNIPER ? 'Sniper' :
+      rawScore >= GRADE_THRESHOLDS.DECENT ? 'Decent' : 'Dumb Shit';
+    return { smoothedScore: rawScore, effectiveGrade, gradeLocked: false, candlesAtGrade: 1 };
+  }
+
+  const { previousGrade, previousScores, candlesAtGrade } = hysteresisState;
+
+  // Average recent scores for smoothing (last 3 + current)
+  const recentScores = [...previousScores.slice(-3), rawScore];
+  const smoothedScore = Math.round(
+    recentScores.reduce((a, b) => a + b, 0) / recentScores.length
+  );
+
+  let effectiveGrade: LTP2Score['grade'];
+  let gradeLocked = false;
+
+  // Apply hysteresis based on previous grade
+  if (previousGrade === 'Sniper') {
+    // Harder to lose Sniper - need to drop below threshold minus buffer
+    if (smoothedScore >= GRADE_THRESHOLDS.SNIPER - HYSTERESIS_BUFFER) {
+      effectiveGrade = 'Sniper';
+      gradeLocked = smoothedScore < GRADE_THRESHOLDS.SNIPER;
+    } else if (smoothedScore >= GRADE_THRESHOLDS.DECENT) {
+      effectiveGrade = 'Decent';
+    } else {
+      effectiveGrade = 'Dumb Shit';
+    }
+  } else if (previousGrade === 'Decent') {
+    // Need clear break above Sniper threshold to upgrade
+    if (smoothedScore >= GRADE_THRESHOLDS.SNIPER) {
+      effectiveGrade = 'Sniper';
+    } else if (smoothedScore >= GRADE_THRESHOLDS.DECENT - HYSTERESIS_BUFFER) {
+      effectiveGrade = 'Decent';
+      gradeLocked = smoothedScore < GRADE_THRESHOLDS.DECENT;
+    } else {
+      effectiveGrade = 'Dumb Shit';
+    }
+  } else {
+    // Dumb Shit - standard thresholds to escape
+    effectiveGrade =
+      smoothedScore >= GRADE_THRESHOLDS.SNIPER ? 'Sniper' :
+      smoothedScore >= GRADE_THRESHOLDS.DECENT ? 'Decent' : 'Dumb Shit';
+  }
+
+  const newCandlesAtGrade = effectiveGrade === previousGrade ? candlesAtGrade + 1 : 1;
+
+  return { smoothedScore, effectiveGrade, gradeLocked, candlesAtGrade: newCandlesAtGrade };
+}
+
+/**
+ * Enhanced patience candle detection with quality and level proximity
+ */
+export interface PatienceCandleResult {
+  isPatienceCandle: boolean;
+  direction: 'bullish' | 'bearish' | null;
+  quality: 'high' | 'medium' | 'low';
+  atLevel: boolean;
+  score: number;
+}
+
+function detectEnhancedPatienceCandle(
+  prevHigh: number,
+  prevLow: number,
+  currHigh: number,
+  currLow: number,
+  currClose: number,
+  currOpen: number,
+  keyLevels: { vwap?: number; putWall?: number; callWall?: number }
+): PatienceCandleResult {
+  const isInsideBar = currHigh < prevHigh && currLow > prevLow;
+  const maxScore = WEIGHTS.PATIENCE_CANDLE; // 10 points
+
+  if (!isInsideBar) {
+    return { isPatienceCandle: false, direction: null, quality: 'low', atLevel: false, score: 0 };
+  }
+
+  // Direction based on close vs open
+  const direction: 'bullish' | 'bearish' = currClose > currOpen ? 'bullish' : 'bearish';
+
+  // Quality based on body size and compression
+  const bodySize = Math.abs(currClose - currOpen);
+  const range = currHigh - currLow;
+  const prevRange = prevHigh - prevLow;
+  const bodyRatio = range > 0 ? bodySize / range : 0;
+  const compression = prevRange > 0 ? range / prevRange : 1;
+
+  let quality: 'high' | 'medium' | 'low';
+  if (bodyRatio < 0.35 && compression < 0.5) {
+    quality = 'high';
+  } else if (bodyRatio < 0.5 && compression < 0.7) {
+    quality = 'medium';
+  } else {
+    quality = 'low';
+  }
+
+  // Check if at a key level (within 0.3%)
+  const midPrice = (currHigh + currLow) / 2;
+  const levels = [keyLevels.vwap, keyLevels.putWall, keyLevels.callWall].filter(
+    (l): l is number => l !== undefined && l > 0
+  );
+  const atLevel = levels.some(level => Math.abs((midPrice - level) / level) <= 0.003);
+
+  // Calculate score with quality and level multipliers
+  const qualityMultiplier = quality === 'high' ? 1.0 : quality === 'medium' ? 0.7 : 0.4;
+  const levelMultiplier = atLevel ? 1.0 : 0.5; // Half points if not at a key level
+  const score = Math.round(maxScore * qualityMultiplier * levelMultiplier);
+
+  return { isPatienceCandle: true, direction, quality, atLevel, score };
+}
+
+// ============================================================================
+// MAIN SCORING FUNCTION
+// ============================================================================
+
+/**
+ * Calculate LTP 2.0 Score with graduated scoring and optional hysteresis
+ * @param context Market data context
+ * @param hysteresisState Optional previous state for score smoothing
+ */
+export function calculateLTP2Score(
+  context: MarketContext,
+  hysteresisState?: ScoreHysteresisState
+): LTP2Score {
   const breakdown: ScoreBreakdown = {
     cloudScore: 0,
     vwapScore: 0,
@@ -90,94 +350,114 @@ export function calculateLTP2Score(context: MarketContext): LTP2Score {
   };
 
   const warnings: string[] = [];
-  let direction: 'bullish' | 'bearish' | 'neutral' = 'neutral';
 
-  // Determine trend direction from EMA cloud
-  const isBullishCloud = context.ema8 > context.ema21;
-  const isBearishCloud = context.ema8 < context.ema21;
+  // --- GRADUATED CLOUD SCORING ---
+  // Uses buffer zone to prevent oscillation when EMAs are close
+  const cloudResult = calculateCloudScore(context.ema8, context.ema21);
+  breakdown.cloudScore = cloudResult.score;
+  const direction = cloudResult.direction;
+  const cloudStrength = cloudResult.strength;
 
-  if (isBullishCloud) {
-    direction = 'bullish';
-  } else if (isBearishCloud) {
-    direction = 'bearish';
-  }
+  // --- GRADUATED VWAP SCORING ---
+  // Distance-based scoring prevents binary flip on single ticks
+  const vwapResult = calculateVwapScore(context.currentPrice, context.vwap, direction);
+  breakdown.vwapScore = vwapResult.score;
 
-  // --- BULLISH SCORING ---
+  // --- GAMMA WALL POSITION SCORING ---
+  // For bullish: above put wall = good, for bearish: below call wall = good
   if (direction === 'bullish' || direction === 'neutral') {
-    // +25: Bullish Cloud (8 EMA > 21 EMA)
-    if (isBullishCloud) {
-      breakdown.cloudScore = WEIGHTS.BULLISH_CLOUD;
-    }
-
-    // +20: Price > VWAP
-    if (context.currentPrice > context.vwap) {
-      breakdown.vwapScore = WEIGHTS.ABOVE_VWAP;
-    }
-
-    // +20: Price > Put Wall (holding above support)
     if (context.currentPrice > context.putWall) {
       breakdown.gammaWallScore = WEIGHTS.ABOVE_PUT_WALL;
     } else {
       warnings.push('Price below Put Wall support');
     }
+  } else {
+    if (context.currentPrice < context.callWall) {
+      breakdown.gammaWallScore = WEIGHTS.BELOW_CALL_WALL;
+    }
+  }
 
-    // +15: Positive Gamma Regime
+  // --- GAMMA REGIME SCORING ---
+  if (direction === 'bullish' || direction === 'neutral') {
     if (context.gammaExposure > 0) {
       breakdown.gammaRegimeScore = WEIGHTS.POSITIVE_GAMMA;
     } else {
       warnings.push('Negative gamma regime - expect volatility');
     }
-
-    // +10: Patience Candle detected
-    if (context.hasPatienceCandle && context.patienceDirection === 'bullish') {
-      breakdown.patienceScore = WEIGHTS.PATIENCE_CANDLE;
-    }
-
-    // -20: Approaching Call Wall resistance (within 1%)
-    const callWallProximity = context.callWall * 0.99;
-    if (context.currentPrice > callWallProximity) {
-      breakdown.resistancePenalty = WEIGHTS.RESISTANCE_PENALTY;
-      warnings.push('Approaching Call Wall resistance - watch for rejection');
-    }
-  }
-
-  // --- BEARISH SCORING ---
-  if (direction === 'bearish') {
-    // +25: Bearish Cloud (8 EMA < 21 EMA)
-    if (isBearishCloud) {
-      breakdown.cloudScore = WEIGHTS.BEARISH_CLOUD;
-    }
-
-    // +20: Price < VWAP
-    if (context.currentPrice < context.vwap) {
-      breakdown.vwapScore = WEIGHTS.BELOW_VWAP;
-    }
-
-    // +20: Price < Call Wall (below resistance)
-    if (context.currentPrice < context.callWall) {
-      breakdown.gammaWallScore = WEIGHTS.BELOW_CALL_WALL;
-    }
-
-    // +15: Negative Gamma Regime (more volatility = better for shorts)
+  } else {
+    // Bearish - negative gamma is actually preferred
     if (context.gammaExposure < 0) {
       breakdown.gammaRegimeScore = WEIGHTS.NEGATIVE_GAMMA;
     }
+  }
 
-    // +10: Patience Candle detected (bearish)
-    if (context.hasPatienceCandle && context.patienceDirection === 'bearish') {
-      breakdown.patienceScore = WEIGHTS.PATIENCE_CANDLE;
+  // --- ENHANCED PATIENCE CANDLE SCORING ---
+  // Only gives full points for quality inside bars AT key levels
+  if (context.previousHigh !== undefined && context.previousLow !== undefined &&
+      context.currentHigh !== undefined && context.currentLow !== undefined) {
+    const patienceResult = detectEnhancedPatienceCandle(
+      context.previousHigh,
+      context.previousLow,
+      context.currentHigh,
+      context.currentLow,
+      context.currentPrice, // close
+      context.previousClose, // open approximation (use current open if available)
+      {
+        vwap: context.vwap,
+        putWall: context.putWall,
+        callWall: context.callWall,
+      }
+    );
+
+    // Only count if direction matches
+    if (patienceResult.isPatienceCandle) {
+      if (direction === 'neutral' ||
+          (direction === 'bullish' && patienceResult.direction === 'bullish') ||
+          (direction === 'bearish' && patienceResult.direction === 'bearish')) {
+        breakdown.patienceScore = patienceResult.score;
+      }
     }
-
-    // -20: Approaching Put Wall support (within 1%)
-    const putWallProximity = context.putWall * 1.01;
-    if (context.currentPrice < putWallProximity) {
-      breakdown.resistancePenalty = WEIGHTS.SUPPORT_PENALTY;
-      warnings.push('Approaching Put Wall support - watch for bounce');
+  } else if (context.hasPatienceCandle) {
+    // Fallback to simple patience flag
+    if (direction === 'neutral' ||
+        (direction === 'bullish' && context.patienceDirection === 'bullish') ||
+        (direction === 'bearish' && context.patienceDirection === 'bearish')) {
+      breakdown.patienceScore = WEIGHTS.PATIENCE_CANDLE;
     }
   }
 
-  // Calculate total score (clamped 0-90, max possible score is 90)
-  breakdown.total = Math.max(0, Math.min(90,
+  // --- GRADUATED RESISTANCE PENALTY ---
+  // Graduated penalty based on distance to opposing wall
+  if (direction === 'bullish' || direction === 'neutral') {
+    const penaltyResult = calculateGammaWallPenalty(
+      context.currentPrice,
+      context.callWall,
+      'bullish'
+    );
+    breakdown.resistancePenalty = penaltyResult.penalty;
+    if (penaltyResult.penalty < 0) {
+      const severity = penaltyResult.penalty <= -15 ? 'watch for rejection' :
+                       penaltyResult.penalty <= -10 ? 'approaching resistance' :
+                       'nearing Call Wall';
+      warnings.push(`${penaltyResult.distancePercent.toFixed(1)}% from Call Wall - ${severity}`);
+    }
+  } else {
+    const penaltyResult = calculateGammaWallPenalty(
+      context.currentPrice,
+      context.putWall,
+      'bearish'
+    );
+    breakdown.resistancePenalty = penaltyResult.penalty;
+    if (penaltyResult.penalty < 0) {
+      const severity = penaltyResult.penalty <= -15 ? 'watch for bounce' :
+                       penaltyResult.penalty <= -10 ? 'approaching support' :
+                       'nearing Put Wall';
+      warnings.push(`${penaltyResult.distancePercent.toFixed(1)}% from Put Wall - ${severity}`);
+    }
+  }
+
+  // Calculate raw total score (clamped 0-90)
+  const rawTotal = Math.max(0, Math.min(90,
     breakdown.cloudScore +
     breakdown.vwapScore +
     breakdown.gammaWallScore +
@@ -185,29 +465,45 @@ export function calculateLTP2Score(context: MarketContext): LTP2Score {
     breakdown.patienceScore +
     breakdown.resistancePenalty
   ));
+  breakdown.total = rawTotal;
 
-  // Determine grade
-  let grade: LTP2Score['grade'];
-  if (breakdown.total >= GRADE_THRESHOLDS.SNIPER) {
-    grade = 'Sniper';
-  } else if (breakdown.total >= GRADE_THRESHOLDS.DECENT) {
-    grade = 'Decent';
-  } else {
-    grade = 'Dumb Shit';
+  // --- APPLY HYSTERESIS ---
+  // Smooths score and applies grade stickiness
+  const hysteresisResult = applyHysteresis(rawTotal, hysteresisState);
+  const grade = hysteresisResult.effectiveGrade;
+  const smoothedScore = hysteresisResult.smoothedScore;
+
+  // Update total with smoothed score (if hysteresis is active)
+  if (hysteresisState) {
+    breakdown.total = smoothedScore;
   }
 
   // Generate recommendation
   const recommendation = generateRecommendation(breakdown, direction, warnings);
 
-  // Calculate confidence (how many factors are aligned)
-  let alignedFactors = 0;
-  let totalFactors = 5;
-  if (breakdown.cloudScore > 0) alignedFactors++;
-  if (breakdown.vwapScore > 0) alignedFactors++;
-  if (breakdown.gammaWallScore > 0) alignedFactors++;
-  if (breakdown.gammaRegimeScore > 0) alignedFactors++;
-  if (breakdown.patienceScore > 0) alignedFactors++;
-  const confidence = Math.round((alignedFactors / totalFactors) * 100);
+  // Calculate confidence with weighted scoring
+  // Higher confidence = more factors aligned AND stronger alignment
+  let confidenceScore = 0;
+  const maxConfidence = 100;
+
+  // Cloud strength contributes 0-30%
+  if (cloudStrength === 'strong') confidenceScore += 30;
+  else if (cloudStrength === 'moderate') confidenceScore += 20;
+  else if (cloudStrength === 'weak') confidenceScore += 10;
+
+  // VWAP alignment contributes 0-25%
+  confidenceScore += Math.round((breakdown.vwapScore / WEIGHTS.ABOVE_VWAP) * 25);
+
+  // Gamma wall position contributes 0-20%
+  confidenceScore += Math.round((breakdown.gammaWallScore / WEIGHTS.ABOVE_PUT_WALL) * 20);
+
+  // Gamma regime contributes 0-15%
+  confidenceScore += Math.round((breakdown.gammaRegimeScore / WEIGHTS.POSITIVE_GAMMA) * 15);
+
+  // Patience contributes 0-10%
+  confidenceScore += Math.round((breakdown.patienceScore / WEIGHTS.PATIENCE_CANDLE) * 10);
+
+  const confidence = Math.min(maxConfidence, confidenceScore);
 
   return {
     score: breakdown.total,
@@ -217,6 +513,12 @@ export function calculateLTP2Score(context: MarketContext): LTP2Score {
     breakdown,
     warnings,
     recommendation,
+    stability: {
+      gradeLocked: hysteresisResult.gradeLocked,
+      rawScore: rawTotal,
+      candlesAtGrade: hysteresisResult.candlesAtGrade,
+      cloudStrength,
+    },
   };
 }
 
@@ -346,5 +648,5 @@ export function createMarketContext(
   };
 }
 
-// Export grade thresholds for external use
-export { GRADE_THRESHOLDS, WEIGHTS };
+// Export grade thresholds and hysteresis config for external use
+export { GRADE_THRESHOLDS, WEIGHTS, HYSTERESIS_BUFFER };
