@@ -69,10 +69,16 @@ export function ScoreBreakdown({
         explanation={
           breakdown.cloudScore >= 25
             ? score.direction === 'bearish'
-              ? '8 EMA < 21 EMA (bearish trend)'
-              : '8 EMA > 21 EMA (bullish trend)'
-            : breakdown.cloudScore >= 15
-            ? 'EMA alignment forming'
+              ? '8 EMA < 21 EMA (strong bearish)'
+              : '8 EMA > 21 EMA (strong bullish)'
+            : breakdown.cloudScore >= 21
+            ? score.direction === 'bearish'
+              ? '8 EMA < 21 EMA (moderate bearish)'
+              : '8 EMA > 21 EMA (moderate bullish)'
+            : breakdown.cloudScore >= 12
+            ? 'EMAs converging - weak trend'
+            : breakdown.cloudScore > 0
+            ? 'EMAs crossed - neutral zone'
             : 'No EMA cloud alignment'
         }
       />
@@ -86,10 +92,16 @@ export function ScoreBreakdown({
         isPassing={breakdown.vwapScore > 0}
         explanation={
           vwap > 0
-            ? aboveVwap
-              ? `Price ${vwapDistance.toFixed(1)}% above VWAP`
-              : `Price ${Math.abs(vwapDistance).toFixed(1)}% below VWAP`
-            : 'VWAP data unavailable'
+            ? score.direction === 'bullish'
+              ? aboveVwap
+                ? `Price ${vwapDistance.toFixed(1)}% above VWAP (aligned)`
+                : `Price ${Math.abs(vwapDistance).toFixed(1)}% below VWAP (not aligned)`
+              : aboveVwap
+                ? `Price ${vwapDistance.toFixed(1)}% above VWAP (not aligned)`
+                : `Price ${Math.abs(vwapDistance).toFixed(1)}% below VWAP (aligned)`
+            : breakdown.vwapScore > 0
+              ? 'VWAP from most recent trading session'
+              : 'VWAP data unavailable'
         }
       />
 

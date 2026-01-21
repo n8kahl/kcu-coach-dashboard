@@ -164,6 +164,7 @@ export default function CompanionTerminal() {
     isRefreshing: refreshing,
     refresh: refreshData,
     refetchWatchlist,
+    handlePriceUpdate,
   } = useCompanionData({
     pollInterval: 30000,
     autoPolling: true,
@@ -279,26 +280,41 @@ export default function CompanionTerminal() {
   }, [selectedSymbol, watchlist]);
 
   // Calculate VWAP from chart data as fallback when API doesn't provide it
-  // IMPORTANT: VWAP is intraday only - must filter to today's bars
+  // Uses the most recent trading day's VWAP (handles markets-closed state)
   const chartCalculatedVwap = useMemo(() => {
     if (chartData.length === 0) return 0;
 
     // Get today's date in Eastern Time
     const todayET = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
 
-    // Filter to only today's bars
+    // First try today's bars (intraday VWAP)
     const todayBars = chartData.filter(candle => {
       const candleDate = new Date(Number(candle.time) * 1000);
       const candleDateET = candleDate.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
       return candleDateET === todayET;
     });
 
-    if (todayBars.length === 0) return 0;
+    // If no today bars (markets closed), use the most recent trading day's bars
+    let barsToUse = todayBars;
+    if (todayBars.length === 0 && chartData.length > 0) {
+      // Find the most recent trading day in the data
+      const lastCandle = chartData[chartData.length - 1];
+      const lastCandleDate = new Date(Number(lastCandle.time) * 1000);
+      const lastDayET = lastCandleDate.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+
+      barsToUse = chartData.filter(candle => {
+        const candleDate = new Date(Number(candle.time) * 1000);
+        const candleDateET = candleDate.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+        return candleDateET === lastDayET;
+      });
+    }
+
+    if (barsToUse.length === 0) return 0;
 
     let cumulativeTPV = 0;
     let cumulativeVolume = 0;
 
-    for (const candle of todayBars) {
+    for (const candle of barsToUse) {
       const typicalPrice = (candle.high + candle.low + candle.close) / 3;
       const volume = candle.volume || 1;
       cumulativeTPV += typicalPrice * volume;
@@ -330,10 +346,10 @@ export default function CompanionTerminal() {
         setTimeout(() => setLastAlertType(null), 2000);
       }
     } else if (event.type === 'price_update') {
-      // Price updates are handled by the hook's polling
-      // Here we only update the chart for the selected symbol
+      // Update watchlist with real-time prices
+      handlePriceUpdate(event.data);
 
-      // If this is the selected symbol, add to chart data
+      // If this is the selected symbol, also update the chart data
       if (event.data.symbol === selectedSymbol) {
         // Validate price data before updating chart
         const price = event.data.price;
@@ -371,7 +387,7 @@ export default function CompanionTerminal() {
         });
       }
     }
-  }, [selectedSymbol, refreshData]);
+  }, [selectedSymbol, refreshData, handlePriceUpdate]);
 
   const { connected: streamConnected, error: streamError } = useCompanionStream({
     onEvent: handleStreamEvent,

@@ -788,11 +788,12 @@ export const KCUChart = memo(function KCUChart({
       } catch { /* ignore */ }
     }
 
-    // Fit content and set visible range to last ~100 bars for better scaling
+    // Fit content and set visible range for optimal multi-day visibility
     if (chartRef.current && validData.length > 0) {
       try {
-        // Show 200 bars (~2.5 trading days of 5-min data) for better SMA 200 visibility
-        const visibleBars = Math.min(200, validData.length);
+        // Show 400 bars (~5 trading days of 5-min data, ~3+ days of 2-min data)
+        // This provides better context for SMA 200 and multi-day levels
+        const visibleBars = Math.min(400, validData.length);
         chartRef.current.timeScale().setVisibleLogicalRange({
           from: validData.length - visibleBars,
           to: validData.length - 1,
