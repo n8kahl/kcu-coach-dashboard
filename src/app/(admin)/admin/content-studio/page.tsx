@@ -67,11 +67,24 @@ import {
   Youtube,
   Scissors,
   MoreVertical,
+  Search,
+  AlertTriangle,
+  AlertCircle,
+  ExternalLink,
+  Clock,
+  Lock,
+  Unlock,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { LibraryManager, VideoPickerModal, type LibraryVideo } from '@/components/admin/content/library-manager';
 import { PreviewPlayer } from '@/components/admin/content/PreviewPlayer';
 import { CourseGrid } from '@/components/admin/content/studio/CourseGrid';
 import { VideoContentStudio } from '@/components/social';
+import { useUnsavedChanges, useAutoSave } from '@/hooks/useUnsavedChanges';
+import { useContentValidation, validateLessonLocally } from '@/hooks/useContentValidation';
+import { useRouter } from 'next/navigation';
 
 // ============================================
 // Types
@@ -1152,6 +1165,65 @@ function ModuleEditorModal({
               <span className="text-sm text-[var(--text-primary)]">Quiz Required</span>
             </label>
           </div>
+
+          {/* Advanced Unlock Settings */}
+          <div className="pt-4 border-t border-[var(--border-secondary)]">
+            <h4 className="text-sm font-medium text-[var(--text-secondary)] mb-3 flex items-center gap-2">
+              <Lock className="w-4 h-4" />
+              Unlock Settings
+            </h4>
+
+            <div className="space-y-4">
+              {/* Unlock After Days (Drip Content) */}
+              <div>
+                <label className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
+                  Unlock After Days (Drip Content)
+                </label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min="0"
+                    value={formData.unlockAfterDays || ''}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      unlockAfterDays: e.target.value ? parseInt(e.target.value) : null
+                    })}
+                    placeholder="0"
+                    className="w-24"
+                  />
+                  <span className="text-sm text-[var(--text-tertiary)]">
+                    days after enrollment
+                  </span>
+                </div>
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                  Leave empty for immediate access. Set a number to delay unlock.
+                </p>
+              </div>
+
+              {/* Min Quiz Score */}
+              {formData.requiresQuizPass && (
+                <div>
+                  <label className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
+                    Minimum Quiz Score to Pass
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={formData.minQuizScore || 70}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        minQuizScore: parseInt(e.target.value) || 70
+                      })}
+                      className="w-24"
+                    />
+                    <span className="text-sm text-[var(--text-tertiary)]">%</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="flex gap-2 p-4 border-t border-[var(--border-primary)]">
@@ -1179,6 +1251,7 @@ function ModuleEditorModal({
 
 export default function ContentStudioPage() {
   const { showToast } = useToast();
+  const router = useRouter();
 
   // Page Mode: 'courses', 'library', or 'repurpose'
   const [pageMode, setPageMode] = useState<'courses' | 'library' | 'repurpose'>('courses');
@@ -1210,6 +1283,27 @@ export default function ContentStudioPage() {
   // Delete Confirmation State
   const [deleteModuleConfirm, setDeleteModuleConfirm] = useState<{ id: string; title: string } | null>(null);
   const [deleteLessonConfirm, setDeleteLessonConfirm] = useState<{ id: string; title: string } | null>(null);
+
+  // NEW: Search State
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // NEW: Validation State
+  const { validate, isValidating, lastResult: validationResult } = useContentValidation();
+  const [showValidationPanel, setShowValidationPanel] = useState(false);
+
+  // NEW: Bulk Publish State
+  const [bulkPublishing, setBulkPublishing] = useState(false);
+
+  // NEW: Unsaved Changes - track original lesson state
+  const [originalLesson, setOriginalLesson] = useState<CourseLesson | null>(null);
+  const unsavedChanges = useUnsavedChanges({
+    enabled: !!editedLesson,
+    message: 'You have unsaved changes. Are you sure you want to leave?',
+  });
+
+  // Track if lesson has changed from original
+  const hasUnsavedChanges = editedLesson && originalLesson &&
+    JSON.stringify(editedLesson) !== JSON.stringify(originalLesson);
 
   // DnD Sensors
   const sensors = useSensors(
@@ -1297,18 +1391,71 @@ export default function ContentStudioPage() {
     return items;
   }, [modules]);
 
+  // NEW: Filtered Tree Items for Search
+  const filteredTreeItems = useMemo((): TreeItem[] => {
+    if (!searchQuery.trim()) return treeItems;
+
+    const query = searchQuery.toLowerCase();
+    const matchingItems: TreeItem[] = [];
+    const matchingModuleIds = new Set<string>();
+
+    // Find matching lessons
+    treeItems.forEach((item) => {
+      if (item.type === 'lesson') {
+        const lesson = item.data as CourseLesson;
+        if (
+          lesson.title.toLowerCase().includes(query) ||
+          lesson.description?.toLowerCase().includes(query) ||
+          lesson.lessonNumber.toLowerCase().includes(query)
+        ) {
+          matchingItems.push(item);
+          if (item.parentId) matchingModuleIds.add(item.parentId);
+        }
+      } else if (item.type === 'module') {
+        const module = item.data as ModuleWithLessons;
+        if (
+          module.title.toLowerCase().includes(query) ||
+          module.description?.toLowerCase().includes(query) ||
+          module.moduleNumber.toLowerCase().includes(query)
+        ) {
+          matchingModuleIds.add(item.id);
+        }
+      }
+    });
+
+    // Include matching modules and their lessons
+    return treeItems.filter((item) => {
+      if (item.type === 'module') {
+        return matchingModuleIds.has(item.id);
+      }
+      // Include lesson if it matches or its module matches
+      return matchingItems.some(m => m.id === item.id) ||
+        (item.parentId && matchingModuleIds.has(item.parentId));
+    });
+  }, [treeItems, searchQuery]);
+
   // ============================================
   // Selection Handling
   // ============================================
 
   const handleSelectItem = (item: TreeItem) => {
+    // Check for unsaved changes before switching
+    if (hasUnsavedChanges) {
+      const confirmed = window.confirm('You have unsaved changes. Discard them?');
+      if (!confirmed) return;
+    }
+
     setSelectedItem(item);
 
     if (item.type === 'lesson') {
-      setEditedLesson(item.data as CourseLesson);
+      const lesson = item.data as CourseLesson;
+      setEditedLesson(lesson);
+      setOriginalLesson(JSON.parse(JSON.stringify(lesson))); // Deep copy for comparison
       setEditorTab('video');
+      unsavedChanges.markClean();
     } else {
       setEditedLesson(null);
+      setOriginalLesson(null);
     }
   };
 
@@ -1318,6 +1465,80 @@ export default function ContentStudioPage() {
         m.id === moduleId ? { ...m, isExpanded: !m.isExpanded } : m
       )
     );
+  };
+
+  // ============================================
+  // NEW: Preview, Validation & Bulk Publish Handlers
+  // ============================================
+
+  const handlePreviewLesson = (lessonId: string) => {
+    router.push(`/admin/content-studio/preview/${lessonId}`);
+  };
+
+  const handleValidateContent = async (type: 'course' | 'module' | 'lesson', id: string) => {
+    const result = await validate(type, id);
+    setShowValidationPanel(true);
+
+    if (result.canPublish) {
+      showToast({
+        type: 'success',
+        title: 'Validation Passed',
+        message: `Content is ready to publish${result.summary.warnings > 0 ? ` (${result.summary.warnings} warning${result.summary.warnings > 1 ? 's' : ''})` : ''}`,
+      });
+    } else {
+      showToast({
+        type: 'error',
+        title: 'Validation Failed',
+        message: `${result.summary.errors} error${result.summary.errors > 1 ? 's' : ''} must be fixed before publishing`,
+      });
+    }
+
+    return result;
+  };
+
+  const handleBulkPublish = async (action: 'publish' | 'unpublish', cascade: boolean = true) => {
+    if (!selectedCourse) return;
+
+    setBulkPublishing(true);
+    try {
+      const response = await fetch('/api/admin/content/bulk-publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          type: 'course',
+          id: selectedCourse.id,
+          cascade,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        showToast({
+          type: 'success',
+          title: `Course ${action === 'publish' ? 'Published' : 'Unpublished'}`,
+          message: `${result.affected.modules} modules, ${result.affected.lessons} lessons affected`,
+        });
+        // Refresh data
+        await fetchCourses();
+        await fetchModules();
+      } else {
+        const error = await response.json();
+        showToast({
+          type: 'error',
+          title: 'Operation Failed',
+          message: error.error || 'Failed to update publish status',
+        });
+      }
+    } catch (error) {
+      showToast({
+        type: 'error',
+        title: 'Operation Failed',
+        message: 'Network error occurred',
+      });
+    } finally {
+      setBulkPublishing(false);
+    }
   };
 
   // ============================================
@@ -1572,6 +1793,9 @@ export default function ContentStudioPage() {
           title: 'Saved',
           message: 'Lesson updated successfully',
         });
+        // Update original lesson to clear unsaved changes tracking
+        setOriginalLesson(JSON.parse(JSON.stringify(editedLesson)));
+        unsavedChanges.markClean();
         fetchModules();
       } else {
         throw new Error('Failed to save');
@@ -1892,7 +2116,7 @@ export default function ContentStudioPage() {
               {/* Left Pane - Tree View */}
               <div className="col-span-4">
                 <Card className="h-full">
-                  <CardHeader>
+                  <CardHeader className="space-y-3">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-base">Content Structure</CardTitle>
                       <Button
@@ -1907,6 +2131,74 @@ export default function ContentStudioPage() {
                         Add Module
                       </Button>
                     </div>
+
+                    {/* Search Input */}
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)]" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search modules & lessons..."
+                        className="w-full pl-9 pr-8 py-2 text-sm bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-lg text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-primary)]"
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Bulk Actions */}
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleBulkPublish('publish')}
+                        disabled={bulkPublishing}
+                        className="flex-1"
+                      >
+                        {bulkPublishing ? (
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-3 h-3 mr-1" />
+                        )}
+                        Publish All
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleBulkPublish('unpublish')}
+                        disabled={bulkPublishing}
+                        className="flex-1"
+                      >
+                        <EyeOff className="w-3 h-3 mr-1" />
+                        Unpublish All
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => selectedCourse && handleValidateContent('course', selectedCourse.id)}
+                        disabled={isValidating}
+                        title="Validate course"
+                      >
+                        {isValidating ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4" />
+                        )}
+                      </Button>
+                    </div>
+
+                    {/* Search Results Count */}
+                    {searchQuery && (
+                      <div className="text-xs text-[var(--text-tertiary)]">
+                        Found {filteredTreeItems.filter(i => i.type === 'lesson').length} lesson(s) in {filteredTreeItems.filter(i => i.type === 'module').length} module(s)
+                      </div>
+                    )}
                   </CardHeader>
                   <CardContent className="p-2">
                     {loading ? (
@@ -1927,11 +2219,11 @@ export default function ContentStudioPage() {
                         onDragEnd={handleDragEnd}
                       >
                         <SortableContext
-                          items={treeItems.map((i) => i.id)}
+                          items={filteredTreeItems.map((i) => i.id)}
                           strategy={verticalListSortingStrategy}
                         >
                           <div className="space-y-0.5">
-                            {treeItems.map((item) => (
+                            {filteredTreeItems.map((item) => (
                               <SortableTreeItem
                                 key={item.id}
                                 item={item}
@@ -2055,16 +2347,57 @@ export default function ContentStudioPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
+                            {/* Unsaved Changes Indicator */}
+                            {hasUnsavedChanges && (
+                              <Badge variant="warning" size="sm">
+                                <AlertCircle className="w-3 h-3 mr-1" />
+                                Unsaved
+                              </Badge>
+                            )}
+
+                            {/* Preview Button */}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              icon={<ExternalLink className="w-4 h-4" />}
+                              onClick={() => handlePreviewLesson(editedLesson.id)}
+                              title="Preview as learner"
+                            >
+                              Preview
+                            </Button>
+
+                            {/* Validate Button */}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              icon={isValidating ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertTriangle className="w-4 h-4" />}
+                              onClick={() => handleValidateContent('lesson', editedLesson.id)}
+                              disabled={isValidating}
+                              title="Validate before publishing"
+                            >
+                              Validate
+                            </Button>
+
+                            {/* Publish Toggle */}
                             <Button
                               variant={editedLesson.isPublished ? 'success' : 'secondary'}
                               size="sm"
                               icon={editedLesson.isPublished ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                              onClick={() =>
-                                setEditedLesson({ ...editedLesson, isPublished: !editedLesson.isPublished })
-                              }
+                              onClick={async () => {
+                                // Validate before publishing
+                                if (!editedLesson.isPublished) {
+                                  const result = await handleValidateContent('lesson', editedLesson.id);
+                                  if (!result.canPublish) {
+                                    return; // Don't publish if validation fails
+                                  }
+                                }
+                                setEditedLesson({ ...editedLesson, isPublished: !editedLesson.isPublished });
+                              }}
                             >
                               {editedLesson.isPublished ? 'Published' : 'Draft'}
                             </Button>
+
+                            {/* Save Button */}
                             <Button
                               variant="primary"
                               size="sm"
@@ -2072,7 +2405,7 @@ export default function ContentStudioPage() {
                               onClick={handleSaveLesson}
                               disabled={saving}
                             >
-                              Save
+                              {hasUnsavedChanges ? 'Save*' : 'Save'}
                             </Button>
                           </div>
                         </div>
