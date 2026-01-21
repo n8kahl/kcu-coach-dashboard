@@ -1692,10 +1692,23 @@ class MarketDataService {
         }
 
         // Get ORB levels from intraday data
+        // CRITICAL: ORB = Opening Range Breakout = first 30 min AFTER market open (9:30-10:00 AM ET)
         const intradayBars = await this.getIntradayBars(symbol, 1);
         if (intradayBars.length > 0) {
-          // First 15 minutes (15 one-minute bars)
-          const orbBars = intradayBars.slice(0, 15);
+          // Filter to bars within 9:30-10:00 AM ET only (30-min ORB per KCU rules)
+          const orbBars = intradayBars.filter(bar => {
+            const barTime = new Date(bar.t);
+            const etTime = barTime.toLocaleTimeString('en-US', {
+              timeZone: 'America/New_York',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            });
+            const [hours, minutes] = etTime.split(':').map(Number);
+            // 9:30 AM to 10:00 AM ET
+            return hours === 9 && minutes >= 30;
+          });
+
           if (orbBars.length > 0) {
             const orbHigh = Math.max(...orbBars.map((b) => b.high));
             const orbLow = Math.min(...orbBars.map((b) => b.low));

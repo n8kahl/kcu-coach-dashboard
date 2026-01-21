@@ -158,15 +158,30 @@ export async function GET() {
       }
     }
 
-    // Combine data
-    const symbols = allSymbols.map((item: { symbol: string; is_shared: boolean }, index: number) => ({
-      id: `${currentWatchlist.id}-${index}`,
-      symbol: item.symbol,
-      is_shared: item.is_shared,
-      added_at: new Date().toISOString(),
-      levels: levels?.filter(l => l.symbol === item.symbol) || [],
-      quote: marketData?.find(m => m.symbol === item.symbol) || null
-    }));
+    // Combine data - normalize quote field names for frontend consistency
+    const symbols = allSymbols.map((item: { symbol: string; is_shared: boolean }, index: number) => {
+      const rawQuote = marketData?.find(m => m.symbol === item.symbol);
+      // Normalize quote fields: API may return 'price'/'changePercent' but frontend expects 'last_price'/'change_percent'
+      const quote = rawQuote ? {
+        last_price: rawQuote.price ?? rawQuote.last_price ?? 0,
+        change_percent: rawQuote.changePercent ?? rawQuote.change_percent ?? 0,
+        change: rawQuote.change ?? 0,
+        vwap: rawQuote.vwap ?? 0,
+        volume: rawQuote.volume ?? 0,
+        high: rawQuote.high ?? 0,
+        low: rawQuote.low ?? 0,
+        open: rawQuote.open ?? 0,
+      } : null;
+
+      return {
+        id: `${currentWatchlist.id}-${index}`,
+        symbol: item.symbol,
+        is_shared: item.is_shared,
+        added_at: new Date().toISOString(),
+        levels: levels?.filter(l => l.symbol === item.symbol) || [],
+        quote,
+      };
+    });
 
     return NextResponse.json({
       watchlist_id: currentWatchlist.id,

@@ -270,13 +270,26 @@ export default function CompanionTerminal() {
   }, [selectedSymbol, watchlist]);
 
   // Calculate VWAP from chart data as fallback when API doesn't provide it
+  // IMPORTANT: VWAP is intraday only - must filter to today's bars
   const chartCalculatedVwap = useMemo(() => {
     if (chartData.length === 0) return 0;
+
+    // Get today's date in Eastern Time
+    const todayET = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+
+    // Filter to only today's bars
+    const todayBars = chartData.filter(candle => {
+      const candleDate = new Date(Number(candle.time) * 1000);
+      const candleDateET = candleDate.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+      return candleDateET === todayET;
+    });
+
+    if (todayBars.length === 0) return 0;
 
     let cumulativeTPV = 0;
     let cumulativeVolume = 0;
 
-    for (const candle of chartData) {
+    for (const candle of todayBars) {
       const typicalPrice = (candle.high + candle.low + candle.close) / 3;
       const volume = candle.volume || 1;
       cumulativeTPV += typicalPrice * volume;
@@ -366,7 +379,8 @@ export default function CompanionTerminal() {
     setChartError(null);
     const multiplier = timeframe === '2min' ? 2 : 5;
     try {
-      const res = await fetch(`/api/market/bars?symbol=${symbol}&timespan=minute&multiplier=${multiplier}&limit=500`);
+      // Fetch 1200 bars for ~3+ trading days of context (1200 * 5min = 6000min = ~15 days at 5-min)
+      const res = await fetch(`/api/market/bars?symbol=${symbol}&timespan=minute&multiplier=${multiplier}&limit=1200`);
       if (res.ok) {
         const data = await res.json();
         if (data.bars && data.bars.length > 0) {
@@ -996,7 +1010,7 @@ export default function CompanionTerminal() {
         {/* LEFT SIDEBAR - Desktop Only */}
         <div className="hidden lg:flex flex-col w-80 min-w-80 border-r border-[var(--border-primary)] bg-[var(--bg-secondary)] overflow-hidden">
           {/* LTP2 SCORE PANEL - Always show score breakdown */}
-          <div className="p-3 border-b border-[var(--border-primary)] shrink-0">
+          <div className="p-3 border-b border-[var(--border-primary)] shrink-0 overflow-y-auto max-h-[35vh]">
             {selectedSymbol && (ltp2Score || ltpAnalysis) ? (
               <CompanionHUD
                 ltp2Score={ltp2Score}
@@ -1030,8 +1044,8 @@ export default function CompanionTerminal() {
             />
           </div>
 
-          {/* COACH BOX - Bottom of sidebar */}
-          <div className="p-3 max-h-48 overflow-y-auto shrink-0">
+          {/* COACH BOX - Bottom of sidebar, flex to share space with watchlist */}
+          <div className="p-3 flex-1 min-h-0 overflow-y-auto">
             <CompanionCoachBox
               messages={coachingMessages}
               expanded={true}
@@ -1249,8 +1263,8 @@ export default function CompanionTerminal() {
         )}
       </div>
 
-      {/* SESSION REPORT */}
-      <CompanionSessionReport sessionId={sessionId} />
+      {/* SESSION REPORT - Removed to maximize chart space during active trading */}
+      {/* <CompanionSessionReport sessionId={sessionId} /> */}
     </div>
   );
 }

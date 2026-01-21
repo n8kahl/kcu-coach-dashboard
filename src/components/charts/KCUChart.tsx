@@ -196,12 +196,25 @@ function calculateVWAP(candles: Candle[]): (number | null)[] {
   const vwap: (number | null)[] = [];
   let cumulativeTPV = 0;
   let cumulativeVolume = 0;
+  let lastTradingDate: string | null = null;
 
   for (const candle of candles) {
     if (!isValidPrice(candle.high) || !isValidPrice(candle.low) || !isValidPrice(candle.close)) {
       vwap.push(null);
       continue;
     }
+
+    // Get trading date in Eastern Time - VWAP resets at market open each day
+    const candleDate = new Date(Number(candle.time) * 1000);
+    const etDate = candleDate.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+
+    // Reset cumulative values at new trading day
+    if (lastTradingDate !== null && etDate !== lastTradingDate) {
+      cumulativeTPV = 0;
+      cumulativeVolume = 0;
+    }
+    lastTradingDate = etDate;
+
     const typicalPrice = (candle.high + candle.low + candle.close) / 3;
     const volume = isValidNumber(candle.volume) && candle.volume > 0 ? candle.volume : 1;
     cumulativeTPV += typicalPrice * volume;
