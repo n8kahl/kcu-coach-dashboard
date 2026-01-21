@@ -3,18 +3,32 @@
 /**
  * ProfessionalChart.tsx
  *
- * High-performance Canvas-based trading chart for the Companion Mode.
+ * High-performance Canvas-based trading chart for Companion Mode.
  * Built on TradingView's lightweight-charts library for hardware-accelerated rendering.
+ *
+ * ARCHITECTURE:
+ * - Uses forwardRef + useImperativeHandle to expose imperative methods
+ * - WebSocket providers can call updateCandle() without causing React re-renders
+ * - Massive Levels are drawn as infinite rays extending to the right
+ * - ResizeObserver handles responsive sizing
  *
  * Key Features:
  * - Canvas rendering (GPU accelerated)
- * - Optimized for real-time streaming data
+ * - Imperative updateCandle() for sub-100ms latency updates
+ * - Massive Levels with infinite right extension
  * - Magnet crosshair mode
  * - Auto-scaling with right offset for future price action
- * - Memoized to prevent unnecessary re-renders
  */
 
-import { useEffect, useRef, useState, useCallback, memo } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  memo,
+  forwardRef,
+  useImperativeHandle,
+} from 'react';
 import {
   createChart,
   IChartApi,
@@ -26,6 +40,7 @@ import {
   LineStyle,
   ColorType,
   SeriesMarker,
+  UTCTimestamp,
 } from 'lightweight-charts';
 import { isValidNumber, isValidPrice } from '@/lib/format-trade-data';
 
@@ -49,19 +64,61 @@ export interface ChartLevel {
   lineStyle?: 'solid' | 'dashed' | 'dotted';
 }
 
+/**
+ * MassiveLevel - Support/Resistance rays that extend infinitely to the right.
+ * These are key institutional levels from AI analysis.
+ */
+export interface MassiveLevel {
+  id: string;
+  price: number;
+  label: string;
+  type: 'support' | 'resistance' | 'pivot' | 'vwap' | 'gamma';
+  strength?: number; // 0-100, for visual weight
+  source?: string; // e.g., 'AI', 'Gamma', 'Previous Day'
+}
+
 export interface GammaLevel {
   price: number;
   type: 'call_wall' | 'put_wall' | 'zero_gamma' | 'max_pain';
   label?: string;
 }
 
+/**
+ * Imperative handle exposed via ref.
+ * WebSocket providers use these methods for efficient updates without React re-renders.
+ */
+export interface ProfessionalChartHandle {
+  /** Update or create the last candle (for real-time ticks) */
+  updateCandle: (candle: ChartCandle) => void;
+  /** Add a new completed candle */
+  addCandle: (candle: ChartCandle) => void;
+  /** Set all candle data (for initial load) */
+  setData: (candles: ChartCandle[]) => void;
+  /** Add a marker to the chart (entry, exit, alert) */
+  addMarker: (marker: SeriesMarker<Time>) => void;
+  /** Clear all markers */
+  clearMarkers: () => void;
+  /** Update massive levels (infinite rays) */
+  setMassiveLevels: (levels: MassiveLevel[]) => void;
+  /** Get current visible price range */
+  getVisiblePriceRange: () => { min: number; max: number } | null;
+  /** Scroll to latest candle */
+  scrollToRealtime: () => void;
+  /** Get the underlying chart API (advanced use) */
+  getChartApi: () => IChartApi | null;
+  /** Get latency metrics */
+  getLatencyMs: () => number;
+}
+
 export interface ProfessionalChartProps {
-  /** Candle data array */
-  data: ChartCandle[];
+  /** Initial candle data array */
+  data?: ChartCandle[];
   /** Symbol being displayed */
   symbol?: string;
-  /** Key levels (PDH, PDL, VWAP, etc.) */
+  /** Key levels (PDH, PDL, VWAP, etc.) - legacy, prefer massiveLevels */
   levels?: ChartLevel[];
+  /** Massive Levels - infinite rays from AI analysis */
+  massiveLevels?: MassiveLevel[];
   /** Gamma levels from options flow */
   gammaLevels?: GammaLevel[];
   /** Chart height (defaults to 100%) */
@@ -72,6 +129,8 @@ export interface ProfessionalChartProps {
   showIndicators?: boolean;
   /** Callback when crosshair moves */
   onCrosshairMove?: (price: number | null, time: Time | null) => void;
+  /** Callback when price updates (for latency tracking) */
+  onPriceUpdate?: (price: number, latencyMs: number) => void;
   /** Additional CSS classes */
   className?: string;
 }
@@ -112,12 +171,20 @@ const COLORS = {
   // Levels
   support: '#26a69a',
   resistance: '#ef5350',
+  pivot: '#ffeb3b',
 
   // Gamma
   callWall: '#ef5350',
   putWall: '#26a69a',
   zeroGamma: '#ffeb3b',
   maxPain: '#ab47bc',
+
+  // Massive Levels by type
+  massiveSupport: '#26a69a',
+  massiveResistance: '#ef5350',
+  massivePivot: '#ffd700',
+  massiveVwap: '#ab47bc',
+  massiveGamma: '#00bcd4',
 } as const;
 
 // =============================================================================
@@ -125,9 +192,13 @@ const COLORS = {
 // =============================================================================
 
 function toChartTime(timestamp: number): Time {
-  // Ensure timestamp is in seconds for lightweight-charts
   const timeInSeconds = timestamp > 1e12 ? Math.floor(timestamp / 1000) : timestamp;
   return timeInSeconds as Time;
+}
+
+function getFarFutureTime(): Time {
+  // 10 years from now - effectively infinite for trading purposes
+  return (Math.floor(Date.now() / 1000) + 315360000) as Time;
 }
 
 function calculateEMA(data: number[], period: number): (number | null)[] {
@@ -169,7 +240,6 @@ function calculateVWAP(candles: ChartCandle[]): (number | null)[] {
     const candleDate = new Date(candle.time * 1000);
     const etDate = candleDate.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
 
-    // Reset at new trading day
     if (lastTradingDate !== null && etDate !== lastTradingDate) {
       cumulativeTPV = 0;
       cumulativeVolume = 0;
@@ -185,25 +255,42 @@ function calculateVWAP(candles: ChartCandle[]): (number | null)[] {
   return vwap;
 }
 
-// Series pool size
+function getMassiveLevelColor(type: MassiveLevel['type']): string {
+  switch (type) {
+    case 'support': return COLORS.massiveSupport;
+    case 'resistance': return COLORS.massiveResistance;
+    case 'pivot': return COLORS.massivePivot;
+    case 'vwap': return COLORS.massiveVwap;
+    case 'gamma': return COLORS.massiveGamma;
+    default: return COLORS.text;
+  }
+}
+
+// Series pool sizes
 const MAX_LEVEL_SERIES = 15;
 const MAX_GAMMA_SERIES = 5;
+const MAX_MASSIVE_LEVEL_SERIES = 20;
 
 // =============================================================================
-// Main Component (Memoized for Performance)
+// Main Component
 // =============================================================================
 
-export const ProfessionalChart = memo(function ProfessionalChart({
-  data,
-  symbol,
-  levels = [],
-  gammaLevels = [],
-  height = '100%',
-  showVolume = true,
-  showIndicators = true,
-  onCrosshairMove,
-  className = '',
-}: ProfessionalChartProps) {
+function ProfessionalChartInner(
+  {
+    data: initialData = [],
+    symbol,
+    levels = [],
+    massiveLevels = [],
+    gammaLevels = [],
+    height = '100%',
+    showVolume = true,
+    showIndicators = true,
+    onCrosshairMove,
+    onPriceUpdate,
+    className = '',
+  }: ProfessionalChartProps,
+  ref: React.ForwardedRef<ProfessionalChartHandle>
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const mountedRef = useRef(true);
@@ -218,6 +305,12 @@ export const ProfessionalChart = memo(function ProfessionalChart({
   // Pre-allocated series pools
   const levelSeriesPool = useRef<ISeriesApi<'Line'>[]>([]);
   const gammaSeriesPool = useRef<ISeriesApi<'Line'>[]>([]);
+  const massiveLevelSeriesPool = useRef<ISeriesApi<'Line'>[]>([]);
+
+  // Data cache for efficient updates
+  const candleDataCache = useRef<ChartCandle[]>([]);
+  const markersCache = useRef<SeriesMarker<Time>[]>([]);
+  const lastUpdateTimestamp = useRef<number>(0);
 
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [isInitialized, setIsInitialized] = useState(false);
@@ -230,7 +323,9 @@ export const ProfessionalChart = memo(function ProfessionalChart({
     };
   }, []);
 
-  // Resize observer
+  // ==========================================================================
+  // Resize Observer
+  // ==========================================================================
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -295,7 +390,7 @@ export const ProfessionalChart = memo(function ProfessionalChart({
         borderColor: COLORS.gridLines,
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 12, // 12 bars of empty space for future price visualization
+        rightOffset: 12,
         barSpacing: 8,
         minBarSpacing: 4,
         tickMarkFormatter: (time: number) => {
@@ -370,7 +465,7 @@ export const ProfessionalChart = memo(function ProfessionalChart({
       });
     }
 
-    // Pre-create level series pool
+    // Pre-create legacy level series pool
     const levelPool: ISeriesApi<'Line'>[] = [];
     for (let i = 0; i < MAX_LEVEL_SERIES; i++) {
       const series = chart.addLineSeries({
@@ -400,6 +495,22 @@ export const ProfessionalChart = memo(function ProfessionalChart({
     }
     gammaSeriesPool.current = gammaPool;
 
+    // Pre-create MASSIVE LEVEL series pool (infinite rays)
+    const massivePool: ISeriesApi<'Line'>[] = [];
+    for (let i = 0; i < MAX_MASSIVE_LEVEL_SERIES; i++) {
+      const series = chart.addLineSeries({
+        color: '#6b7280',
+        lineWidth: 2,
+        priceLineVisible: true, // Show price on right axis
+        lastValueVisible: true,
+        crosshairMarkerVisible: true,
+        lineStyle: LineStyle.Solid,
+      });
+      series.setData([]);
+      massivePool.push(series);
+    }
+    massiveLevelSeriesPool.current = massivePool;
+
     // Crosshair move handler
     if (onCrosshairMove) {
       chart.subscribeCrosshairMove((param) => {
@@ -419,6 +530,7 @@ export const ProfessionalChart = memo(function ProfessionalChart({
       try {
         levelSeriesPool.current.forEach((s) => { try { s.setData([]); } catch {} });
         gammaSeriesPool.current.forEach((s) => { try { s.setData([]); } catch {} });
+        massiveLevelSeriesPool.current.forEach((s) => { try { s.setData([]); } catch {} });
         candleSeriesRef.current?.setData([]);
         volumeSeriesRef.current?.setData([]);
         ema8SeriesRef.current?.setData([]);
@@ -433,6 +545,7 @@ export const ProfessionalChart = memo(function ProfessionalChart({
       vwapSeriesRef.current = null;
       levelSeriesPool.current = [];
       gammaSeriesPool.current = [];
+      massiveLevelSeriesPool.current = [];
 
       setIsInitialized(false);
       try { chart.remove(); } catch {}
@@ -441,107 +554,342 @@ export const ProfessionalChart = memo(function ProfessionalChart({
   }, [dimensions.width, dimensions.height, showVolume, showIndicators]);
 
   // ==========================================================================
-  // Update Chart Data
+  // Update Dimensions on Resize
   // ==========================================================================
   useEffect(() => {
-    if (!mountedRef.current || !isInitialized || !candleSeriesRef.current) return;
-
-    // Filter valid candles
-    const validData = data.filter(
-      (c) =>
-        isValidPrice(c.open) &&
-        isValidPrice(c.high) &&
-        isValidPrice(c.low) &&
-        isValidPrice(c.close) &&
-        isValidNumber(c.time) &&
-        c.time > 0
-    );
-
-    if (validData.length === 0) {
-      try {
-        candleSeriesRef.current?.setData([]);
-        volumeSeriesRef.current?.setData([]);
-        ema8SeriesRef.current?.setData([]);
-        ema21SeriesRef.current?.setData([]);
-        vwapSeriesRef.current?.setData([]);
-      } catch {}
-      return;
+    if (chartRef.current && dimensions.width > 0 && dimensions.height > 0) {
+      chartRef.current.applyOptions({
+        width: dimensions.width,
+        height: dimensions.height,
+      });
     }
+  }, [dimensions]);
 
-    // Candle data
-    const candleData: CandlestickData[] = validData.map((c) => ({
-      time: toChartTime(c.time),
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
+  // ==========================================================================
+  // Imperative Handle - Exposed to WebSocket Provider
+  // ==========================================================================
+  useImperativeHandle(
+    ref,
+    () => ({
+      /**
+       * Update or create the last candle efficiently.
+       * Called on every tick from WebSocket - MUST be fast.
+       */
+      updateCandle: (candle: ChartCandle) => {
+        if (!candleSeriesRef.current || !isValidPrice(candle.close)) return;
 
-    try {
-      candleSeriesRef.current.setData(candleData);
-    } catch (e) {
-      console.warn('[ProfessionalChart] Candle setData error:', e);
-    }
+        const startTime = performance.now();
+        const time = toChartTime(candle.time);
 
-    // Volume data
-    if (showVolume && volumeSeriesRef.current) {
-      const volData = validData.map((c) => ({
-        time: toChartTime(c.time),
-        value: isValidNumber(c.volume) ? c.volume : 0,
-        color: c.close >= c.open ? COLORS.volumeUp : COLORS.volumeDown,
-      }));
-      try {
-        volumeSeriesRef.current.setData(volData);
-      } catch {}
-    }
+        try {
+          // Update candlestick
+          candleSeriesRef.current.update({
+            time,
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+          });
 
-    // Indicators
-    if (showIndicators && validData.length >= 21) {
-      const closes = validData.map((c) => c.close);
+          // Update volume
+          if (volumeSeriesRef.current && isValidNumber(candle.volume)) {
+            volumeSeriesRef.current.update({
+              time,
+              value: candle.volume,
+              color: candle.close >= candle.open ? COLORS.volumeUp : COLORS.volumeDown,
+            });
+          }
 
-      // EMA 8
-      const ema8 = calculateEMA(closes, 8);
-      const ema8Data = validData
-        .map((c, i) => ({ time: toChartTime(c.time), value: ema8[i] }))
-        .filter((d): d is LineData => d.value !== null && isValidNumber(d.value));
-      try { ema8SeriesRef.current?.setData(ema8Data); } catch {}
+          // Track latency
+          const latencyMs = performance.now() - startTime;
+          lastUpdateTimestamp.current = Date.now();
 
-      // EMA 21
-      const ema21 = calculateEMA(closes, 21);
-      const ema21Data = validData
-        .map((c, i) => ({ time: toChartTime(c.time), value: ema21[i] }))
-        .filter((d): d is LineData => d.value !== null && isValidNumber(d.value));
-      try { ema21SeriesRef.current?.setData(ema21Data); } catch {}
+          // Notify listener
+          if (onPriceUpdate) {
+            onPriceUpdate(candle.close, latencyMs);
+          }
+        } catch (e) {
+          // Silent fail for real-time updates
+        }
+      },
 
-      // VWAP
-      const vwap = calculateVWAP(validData);
-      const vwapData = validData
-        .map((c, i) => ({ time: toChartTime(c.time), value: vwap[i] }))
-        .filter((d): d is LineData => d.value !== null && isValidNumber(d.value));
-      try { vwapSeriesRef.current?.setData(vwapData); } catch {}
-    }
+      /**
+       * Add a new completed candle to the chart.
+       */
+      addCandle: (candle: ChartCandle) => {
+        if (!candleSeriesRef.current || !isValidPrice(candle.close)) return;
 
-    // Set visible range
-    if (chartRef.current && validData.length > 0) {
-      try {
-        const visibleBars = Math.min(200, validData.length);
-        chartRef.current.timeScale().setVisibleLogicalRange({
-          from: validData.length - visibleBars,
-          to: validData.length - 1,
+        const time = toChartTime(candle.time);
+
+        try {
+          candleSeriesRef.current.update({
+            time,
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+          });
+
+          if (volumeSeriesRef.current && isValidNumber(candle.volume)) {
+            volumeSeriesRef.current.update({
+              time,
+              value: candle.volume,
+              color: candle.close >= candle.open ? COLORS.volumeUp : COLORS.volumeDown,
+            });
+          }
+
+          // Update cache
+          candleDataCache.current.push(candle);
+
+          // Update indicators (only for new candles)
+          if (showIndicators && candleDataCache.current.length >= 21) {
+            const closes = candleDataCache.current.map((c) => c.close);
+            const len = candleDataCache.current.length;
+
+            // Just update the latest point for EMAs
+            const ema8 = calculateEMA(closes, 8);
+            const ema21 = calculateEMA(closes, 21);
+            const vwap = calculateVWAP(candleDataCache.current);
+
+            if (ema8[len - 1] !== null) {
+              ema8SeriesRef.current?.update({ time, value: ema8[len - 1]! });
+            }
+            if (ema21[len - 1] !== null) {
+              ema21SeriesRef.current?.update({ time, value: ema21[len - 1]! });
+            }
+            if (vwap[len - 1] !== null) {
+              vwapSeriesRef.current?.update({ time, value: vwap[len - 1]! });
+            }
+          }
+        } catch (e) {
+          console.warn('[ProfessionalChart] addCandle error:', e);
+        }
+      },
+
+      /**
+       * Set all candle data (for initial load or symbol change).
+       */
+      setData: (candles: ChartCandle[]) => {
+        if (!candleSeriesRef.current) return;
+
+        const validData = candles.filter(
+          (c) =>
+            isValidPrice(c.open) &&
+            isValidPrice(c.high) &&
+            isValidPrice(c.low) &&
+            isValidPrice(c.close) &&
+            isValidNumber(c.time) &&
+            c.time > 0
+        );
+
+        // Update cache
+        candleDataCache.current = validData;
+
+        if (validData.length === 0) {
+          try {
+            candleSeriesRef.current?.setData([]);
+            volumeSeriesRef.current?.setData([]);
+            ema8SeriesRef.current?.setData([]);
+            ema21SeriesRef.current?.setData([]);
+            vwapSeriesRef.current?.setData([]);
+          } catch {}
+          return;
+        }
+
+        // Candle data
+        const candleData: CandlestickData[] = validData.map((c) => ({
+          time: toChartTime(c.time),
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        }));
+
+        try {
+          candleSeriesRef.current.setData(candleData);
+        } catch (e) {
+          console.warn('[ProfessionalChart] Candle setData error:', e);
+        }
+
+        // Volume data
+        if (showVolume && volumeSeriesRef.current) {
+          const volData = validData.map((c) => ({
+            time: toChartTime(c.time),
+            value: isValidNumber(c.volume) ? c.volume : 0,
+            color: c.close >= c.open ? COLORS.volumeUp : COLORS.volumeDown,
+          }));
+          try {
+            volumeSeriesRef.current.setData(volData);
+          } catch {}
+        }
+
+        // Indicators
+        if (showIndicators && validData.length >= 21) {
+          const closes = validData.map((c) => c.close);
+
+          const ema8 = calculateEMA(closes, 8);
+          const ema8Data = validData
+            .map((c, i) => ({ time: toChartTime(c.time), value: ema8[i] }))
+            .filter((d): d is LineData => d.value !== null && isValidNumber(d.value));
+          try { ema8SeriesRef.current?.setData(ema8Data); } catch {}
+
+          const ema21 = calculateEMA(closes, 21);
+          const ema21Data = validData
+            .map((c, i) => ({ time: toChartTime(c.time), value: ema21[i] }))
+            .filter((d): d is LineData => d.value !== null && isValidNumber(d.value));
+          try { ema21SeriesRef.current?.setData(ema21Data); } catch {}
+
+          const vwap = calculateVWAP(validData);
+          const vwapData = validData
+            .map((c, i) => ({ time: toChartTime(c.time), value: vwap[i] }))
+            .filter((d): d is LineData => d.value !== null && isValidNumber(d.value));
+          try { vwapSeriesRef.current?.setData(vwapData); } catch {}
+        }
+
+        // Set visible range
+        if (chartRef.current && validData.length > 0) {
+          try {
+            const visibleBars = Math.min(200, validData.length);
+            chartRef.current.timeScale().setVisibleLogicalRange({
+              from: validData.length - visibleBars,
+              to: validData.length - 1,
+            });
+          } catch {}
+        }
+      },
+
+      /**
+       * Add a marker (entry, exit, alert point).
+       */
+      addMarker: (marker: SeriesMarker<Time>) => {
+        if (!candleSeriesRef.current) return;
+        markersCache.current.push(marker);
+        try {
+          candleSeriesRef.current.setMarkers(markersCache.current);
+        } catch {}
+      },
+
+      /**
+       * Clear all markers.
+       */
+      clearMarkers: () => {
+        markersCache.current = [];
+        try {
+          candleSeriesRef.current?.setMarkers([]);
+        } catch {}
+      },
+
+      /**
+       * Set Massive Levels - infinite rays extending to the right.
+       * These are AI-detected support/resistance levels.
+       */
+      setMassiveLevels: (newLevels: MassiveLevel[]) => {
+        const pool = massiveLevelSeriesPool.current;
+        if (pool.length === 0 || candleDataCache.current.length === 0) return;
+
+        const startTime = candleDataCache.current.length > 0
+          ? toChartTime(candleDataCache.current[0].time)
+          : toChartTime(Date.now() / 1000);
+        const farFuture = getFarFutureTime();
+
+        const validLevels = newLevels
+          .filter((l) => isValidPrice(l.price))
+          .slice(0, MAX_MASSIVE_LEVEL_SERIES);
+
+        pool.forEach((series, i) => {
+          const level = validLevels[i];
+          if (!level) {
+            try { series.setData([]); } catch {}
+            return;
+          }
+
+          const color = getMassiveLevelColor(level.type);
+          const lineWidth = level.strength ? Math.max(1, Math.min(4, Math.floor(level.strength / 25))) : 2;
+
+          try {
+            series.applyOptions({
+              color,
+              lineWidth,
+              lineStyle: level.type === 'vwap' ? LineStyle.Dashed : LineStyle.Solid,
+              title: level.label,
+              priceLineVisible: true,
+              lastValueVisible: true,
+            });
+
+            // Draw from first candle to infinite future (effectively infinite ray)
+            series.setData([
+              { time: startTime, value: level.price },
+              { time: farFuture, value: level.price },
+            ]);
+          } catch {}
         });
-      } catch {}
-    }
-  }, [data, isInitialized, showVolume, showIndicators]);
+      },
+
+      /**
+       * Get visible price range.
+       */
+      getVisiblePriceRange: () => {
+        if (!candleSeriesRef.current) return null;
+        try {
+          const priceRange = candleSeriesRef.current.priceScale().getVisiblePriceRange();
+          if (priceRange) {
+            return { min: priceRange.from, max: priceRange.to };
+          }
+        } catch {}
+        return null;
+      },
+
+      /**
+       * Scroll to show latest candle.
+       */
+      scrollToRealtime: () => {
+        try {
+          chartRef.current?.timeScale().scrollToRealTime();
+        } catch {}
+      },
+
+      /**
+       * Get underlying chart API for advanced use.
+       */
+      getChartApi: () => chartRef.current,
+
+      /**
+       * Get time since last update (for latency tracking).
+       */
+      getLatencyMs: () => {
+        if (lastUpdateTimestamp.current === 0) return 0;
+        return Date.now() - lastUpdateTimestamp.current;
+      },
+    }),
+    [showVolume, showIndicators, onPriceUpdate]
+  );
 
   // ==========================================================================
-  // Update Level Lines
+  // Initial Data Load
   // ==========================================================================
   useEffect(() => {
-    if (!mountedRef.current || !isInitialized || data.length === 0) return;
+    if (!mountedRef.current || !isInitialized || initialData.length === 0) return;
+
+    // Use the imperative method for consistency
+    const handle = ref as React.RefObject<ProfessionalChartHandle>;
+    if (handle?.current?.setData) {
+      handle.current.setData(initialData);
+    } else {
+      // Fallback if ref not ready
+      candleDataCache.current = initialData;
+    }
+  }, [initialData, isInitialized, ref]);
+
+  // ==========================================================================
+  // Update Legacy Levels
+  // ==========================================================================
+  useEffect(() => {
+    if (!mountedRef.current || !isInitialized || candleDataCache.current.length === 0) return;
 
     const pool = levelSeriesPool.current;
     if (pool.length === 0) return;
 
+    const data = candleDataCache.current;
     const startTime = toChartTime(data[0].time);
     const endTime = toChartTime(data[data.length - 1].time);
 
@@ -572,17 +920,18 @@ export const ProfessionalChart = memo(function ProfessionalChart({
         ]);
       } catch {}
     });
-  }, [levels, data, isInitialized]);
+  }, [levels, isInitialized]);
 
   // ==========================================================================
   // Update Gamma Levels
   // ==========================================================================
   useEffect(() => {
-    if (!mountedRef.current || !isInitialized || data.length === 0) return;
+    if (!mountedRef.current || !isInitialized || candleDataCache.current.length === 0) return;
 
     const pool = gammaSeriesPool.current;
     if (pool.length === 0) return;
 
+    const data = candleDataCache.current;
     const startTime = toChartTime(data[0].time);
     const endTime = toChartTime(data[data.length - 1].time);
 
@@ -615,19 +964,19 @@ export const ProfessionalChart = memo(function ProfessionalChart({
         ]);
       } catch {}
     });
-  }, [gammaLevels, data, isInitialized]);
+  }, [gammaLevels, isInitialized]);
 
   // ==========================================================================
-  // Update dimensions
+  // Update Massive Levels from props
   // ==========================================================================
   useEffect(() => {
-    if (chartRef.current && dimensions.width > 0 && dimensions.height > 0) {
-      chartRef.current.applyOptions({
-        width: dimensions.width,
-        height: dimensions.height,
-      });
+    if (!mountedRef.current || !isInitialized || massiveLevels.length === 0) return;
+
+    const handle = ref as React.RefObject<ProfessionalChartHandle>;
+    if (handle?.current?.setMassiveLevels) {
+      handle.current.setMassiveLevels(massiveLevels);
     }
-  }, [dimensions]);
+  }, [massiveLevels, isInitialized, ref]);
 
   // ==========================================================================
   // Render
@@ -643,12 +992,12 @@ export const ProfessionalChart = memo(function ProfessionalChart({
       }}
     >
       {/* Loading state */}
-      {(!isInitialized || data.length === 0) && (
+      {(!isInitialized || (initialData.length === 0 && candleDataCache.current.length === 0)) && (
         <div className="absolute inset-0 flex items-center justify-center bg-[#0b0e11]">
           <div className="text-center">
             <div className="w-8 h-8 border-2 border-[#26a69a] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
             <p className="text-sm text-[#787b86] font-mono">
-              {data.length === 0 ? 'Waiting for data...' : 'Initializing chart...'}
+              {initialData.length === 0 ? 'Waiting for data...' : 'Initializing chart...'}
             </p>
             {symbol && <p className="text-xs text-[#787b86] mt-1">{symbol}</p>}
           </div>
@@ -681,6 +1030,9 @@ export const ProfessionalChart = memo(function ProfessionalChart({
       )}
     </div>
   );
-});
+}
+
+// Wrap with forwardRef and memo
+export const ProfessionalChart = memo(forwardRef(ProfessionalChartInner));
 
 export default ProfessionalChart;
