@@ -1,5 +1,12 @@
 'use client';
 
+/**
+ * useCompanionStream
+ *
+ * SSE hook for real-time companion mode updates.
+ * Uses refs for callbacks to prevent stale closures when symbol changes.
+ */
+
 import { useEffect, useState, useCallback, useRef } from 'react';
 
 export type CompanionEvent =
@@ -85,6 +92,8 @@ interface CoachingUpdateEvent {
 }
 
 interface UseCompanionStreamOptions {
+  /** Optional symbol filter - only pass events for this symbol to callbacks */
+  symbol?: string | null;
   onEvent?: (event: CompanionEvent) => void;
   onSetupReady?: (setup: SetupEvent) => void;
   onAdminAlert?: (alert: AdminAlertEvent) => void;
@@ -96,15 +105,13 @@ interface UseCompanionStreamOptions {
   reconnectInterval?: number;
 }
 
+/**
+ * Main SSE stream hook with stable callbacks via refs.
+ * This prevents reconnecting when callbacks change (e.g., when symbol changes).
+ */
 export function useCompanionStream(options: UseCompanionStreamOptions = {}) {
   const {
-    onEvent,
-    onSetupReady,
-    onAdminAlert,
-    onCompanionMessage,
-    onPriceUpdate,
-    onLevelApproach,
-    onCoachingUpdate,
+    symbol,
     autoReconnect = true,
     reconnectInterval = 5000
   } = options;
@@ -115,8 +122,49 @@ export function useCompanionStream(options: UseCompanionStreamOptions = {}) {
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const mountedRef = useRef(true);
+
+  // Store callbacks in refs to avoid stale closures
+  // This allows the SSE connection to stay open while callbacks update
+  const callbackRefs = useRef({
+    onEvent: options.onEvent,
+    onSetupReady: options.onSetupReady,
+    onAdminAlert: options.onAdminAlert,
+    onCompanionMessage: options.onCompanionMessage,
+    onPriceUpdate: options.onPriceUpdate,
+    onLevelApproach: options.onLevelApproach,
+    onCoachingUpdate: options.onCoachingUpdate,
+    symbol: symbol,
+  });
+
+  // Update refs when callbacks/symbol change (no reconnect needed)
+  useEffect(() => {
+    callbackRefs.current = {
+      onEvent: options.onEvent,
+      onSetupReady: options.onSetupReady,
+      onAdminAlert: options.onAdminAlert,
+      onCompanionMessage: options.onCompanionMessage,
+      onPriceUpdate: options.onPriceUpdate,
+      onLevelApproach: options.onLevelApproach,
+      onCoachingUpdate: options.onCoachingUpdate,
+      symbol: symbol,
+    };
+  }, [options.onEvent, options.onSetupReady, options.onAdminAlert, options.onCompanionMessage, options.onPriceUpdate, options.onLevelApproach, options.onCoachingUpdate, symbol]);
+
+  // Helper to check if event matches current symbol filter
+  const shouldProcessEvent = useCallback((eventSymbol?: string): boolean => {
+    const currentSymbol = callbackRefs.current.symbol;
+    // If no symbol filter, process all events
+    if (!currentSymbol) return true;
+    // If event has a symbol, check if it matches
+    if (eventSymbol) return eventSymbol === currentSymbol;
+    // Events without symbols (like connected) always pass
+    return true;
+  }, []);
 
   const connect = useCallback(() => {
+    if (!mountedRef.current) return;
+
     // Clean up existing connection
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -127,99 +175,144 @@ export function useCompanionStream(options: UseCompanionStreamOptions = {}) {
     eventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
-      setConnected(true);
-      setError(null);
-    };
-
-    eventSource.onerror = (e) => {
-      setConnected(false);
-      setError('Connection lost');
-
-      // Auto reconnect
-      if (autoReconnect && !reconnectTimeoutRef.current) {
-        reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectTimeoutRef.current = null;
-          connect();
-        }, reconnectInterval);
+      if (mountedRef.current) {
+        setConnected(true);
+        setError(null);
       }
     };
 
-    // Handle different event types
+    eventSource.onerror = () => {
+      if (mountedRef.current) {
+        setConnected(false);
+        setError('Connection lost');
+
+        // Auto reconnect
+        if (autoReconnect && !reconnectTimeoutRef.current) {
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectTimeoutRef.current = null;
+            connect();
+          }, reconnectInterval);
+        }
+      }
+    };
+
+    // Handle different event types - always read from refs for latest callbacks
     eventSource.addEventListener('connected', (e) => {
-      const data = JSON.parse(e.data);
-      const event: CompanionEvent = { type: 'connected', data };
-      setLastEvent(event);
-      onEvent?.(event);
+      try {
+        const data = JSON.parse(e.data);
+        const event: CompanionEvent = { type: 'connected', data };
+        if (mountedRef.current) {
+          setLastEvent(event);
+          callbackRefs.current.onEvent?.(event);
+        }
+      } catch {}
     });
 
-    eventSource.addEventListener('heartbeat', (e) => {
-      const data = JSON.parse(e.data);
-      const event: CompanionEvent = { type: 'heartbeat', data };
-      // Don't trigger onEvent for heartbeats to avoid noise
+    eventSource.addEventListener('heartbeat', () => {
+      // Heartbeats are silent - no callback trigger
     });
 
     eventSource.addEventListener('setup_forming', (e) => {
-      const data = JSON.parse(e.data);
-      const event: CompanionEvent = { type: 'setup_forming', data };
-      setLastEvent(event);
-      onEvent?.(event);
+      try {
+        const data = JSON.parse(e.data);
+        if (!shouldProcessEvent(data.symbol)) return;
+        const event: CompanionEvent = { type: 'setup_forming', data };
+        if (mountedRef.current) {
+          setLastEvent(event);
+          callbackRefs.current.onEvent?.(event);
+        }
+      } catch {}
     });
 
     eventSource.addEventListener('setup_ready', (e) => {
-      const data = JSON.parse(e.data);
-      const event: CompanionEvent = { type: 'setup_ready', data };
-      setLastEvent(event);
-      onEvent?.(event);
-      onSetupReady?.(data);
+      try {
+        const data = JSON.parse(e.data);
+        if (!shouldProcessEvent(data.symbol)) return;
+        const event: CompanionEvent = { type: 'setup_ready', data };
+        if (mountedRef.current) {
+          setLastEvent(event);
+          callbackRefs.current.onEvent?.(event);
+          callbackRefs.current.onSetupReady?.(data);
+        }
+      } catch {}
     });
 
     eventSource.addEventListener('setup_triggered', (e) => {
-      const data = JSON.parse(e.data);
-      const event: CompanionEvent = { type: 'setup_triggered', data };
-      setLastEvent(event);
-      onEvent?.(event);
+      try {
+        const data = JSON.parse(e.data);
+        if (!shouldProcessEvent(data.symbol)) return;
+        const event: CompanionEvent = { type: 'setup_triggered', data };
+        if (mountedRef.current) {
+          setLastEvent(event);
+          callbackRefs.current.onEvent?.(event);
+        }
+      } catch {}
     });
 
     eventSource.addEventListener('admin_alert', (e) => {
-      const data = JSON.parse(e.data);
-      const event: CompanionEvent = { type: 'admin_alert', data };
-      setLastEvent(event);
-      onEvent?.(event);
-      onAdminAlert?.(data);
+      try {
+        const data = JSON.parse(e.data);
+        // Admin alerts always pass through (important for all symbols)
+        const event: CompanionEvent = { type: 'admin_alert', data };
+        if (mountedRef.current) {
+          setLastEvent(event);
+          callbackRefs.current.onEvent?.(event);
+          callbackRefs.current.onAdminAlert?.(data);
+        }
+      } catch {}
     });
 
     eventSource.addEventListener('companion_message', (e) => {
-      const data = JSON.parse(e.data);
-      const event: CompanionEvent = { type: 'companion_message', data };
-      setLastEvent(event);
-      onEvent?.(event);
-      onCompanionMessage?.(data);
+      try {
+        const data = JSON.parse(e.data);
+        const event: CompanionEvent = { type: 'companion_message', data };
+        if (mountedRef.current) {
+          setLastEvent(event);
+          callbackRefs.current.onEvent?.(event);
+          callbackRefs.current.onCompanionMessage?.(data);
+        }
+      } catch {}
     });
 
     eventSource.addEventListener('price_update', (e) => {
-      const data = JSON.parse(e.data) as PriceUpdateEvent;
-      const event: CompanionEvent = { type: 'price_update', data };
-      setLastEvent(event);
-      onEvent?.(event);
-      onPriceUpdate?.(data);
+      try {
+        const data = JSON.parse(e.data) as PriceUpdateEvent;
+        if (!shouldProcessEvent(data.symbol)) return;
+        const event: CompanionEvent = { type: 'price_update', data };
+        if (mountedRef.current) {
+          setLastEvent(event);
+          callbackRefs.current.onEvent?.(event);
+          callbackRefs.current.onPriceUpdate?.(data);
+        }
+      } catch {}
     });
 
     eventSource.addEventListener('level_approach', (e) => {
-      const data = JSON.parse(e.data) as LevelApproachEvent;
-      const event: CompanionEvent = { type: 'level_approach', data };
-      setLastEvent(event);
-      onEvent?.(event);
-      onLevelApproach?.(data);
+      try {
+        const data = JSON.parse(e.data) as LevelApproachEvent;
+        if (!shouldProcessEvent(data.symbol)) return;
+        const event: CompanionEvent = { type: 'level_approach', data };
+        if (mountedRef.current) {
+          setLastEvent(event);
+          callbackRefs.current.onEvent?.(event);
+          callbackRefs.current.onLevelApproach?.(data);
+        }
+      } catch {}
     });
 
     eventSource.addEventListener('coaching_update', (e) => {
-      const data = JSON.parse(e.data) as CoachingUpdateEvent;
-      const event: CompanionEvent = { type: 'coaching_update', data };
-      setLastEvent(event);
-      onEvent?.(event);
-      onCoachingUpdate?.(data);
+      try {
+        const data = JSON.parse(e.data) as CoachingUpdateEvent;
+        if (!shouldProcessEvent(data.symbol)) return;
+        const event: CompanionEvent = { type: 'coaching_update', data };
+        if (mountedRef.current) {
+          setLastEvent(event);
+          callbackRefs.current.onEvent?.(event);
+          callbackRefs.current.onCoachingUpdate?.(data);
+        }
+      } catch {}
     });
-  }, [onEvent, onSetupReady, onAdminAlert, onCompanionMessage, onPriceUpdate, onLevelApproach, onCoachingUpdate, autoReconnect, reconnectInterval]);
+  }, [autoReconnect, reconnectInterval, shouldProcessEvent]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -232,14 +325,18 @@ export function useCompanionStream(options: UseCompanionStreamOptions = {}) {
       eventSourceRef.current = null;
     }
 
-    setConnected(false);
+    if (mountedRef.current) {
+      setConnected(false);
+    }
   }, []);
 
-  // Connect on mount
+  // Connect on mount, disconnect on unmount
   useEffect(() => {
+    mountedRef.current = true;
     connect();
 
     return () => {
+      mountedRef.current = false;
       disconnect();
     };
   }, [connect, disconnect]);
@@ -279,64 +376,68 @@ export function useAdminAlerts(callback?: (alert: AdminAlertEvent) => void) {
 function playNotificationSound(alertType: string) {
   if (typeof window === 'undefined') return;
 
-  // Create audio context
-  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-  const oscillator = audioContext.createOscillator();
-  const gainNode = audioContext.createGain();
+  try {
+    // Create audio context
+    const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
 
-  oscillator.connect(gainNode);
-  gainNode.connect(audioContext.destination);
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
 
-  // Different sounds for different alert types
-  switch (alertType) {
-    case 'entering':
-      oscillator.frequency.value = 880; // A5
-      oscillator.type = 'sine';
-      break;
-    case 'take_profit':
-      oscillator.frequency.value = 1047; // C6
-      oscillator.type = 'sine';
-      break;
-    case 'stopped_out':
-      oscillator.frequency.value = 440; // A4
-      oscillator.type = 'sawtooth';
-      break;
-    default:
-      oscillator.frequency.value = 660; // E5
-      oscillator.type = 'sine';
-  }
+    // Different sounds for different alert types
+    switch (alertType) {
+      case 'entering':
+        oscillator.frequency.value = 880; // A5
+        oscillator.type = 'sine';
+        break;
+      case 'take_profit':
+        oscillator.frequency.value = 1047; // C6
+        oscillator.type = 'sine';
+        break;
+      case 'stopped_out':
+        oscillator.frequency.value = 440; // A4
+        oscillator.type = 'sawtooth';
+        break;
+      default:
+        oscillator.frequency.value = 660; // E5
+        oscillator.type = 'sine';
+    }
 
-  gainNode.gain.value = 0.1;
+    gainNode.gain.value = 0.1;
 
-  oscillator.start();
-  setTimeout(() => {
-    oscillator.stop();
-    audioContext.close();
-  }, 200);
+    oscillator.start();
+    setTimeout(() => {
+      oscillator.stop();
+      audioContext.close();
+    }, 200);
+  } catch {}
 }
 
 // Helper to show browser notification
 async function showBrowserNotification(alert: AdminAlertEvent) {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
 
-  if (Notification.permission === 'granted') {
-    const emoji = {
-      loading: '👀',
-      entering: '🎯',
-      adding: '➕',
-      take_profit: '💰',
-      exiting: '🚪',
-      stopped_out: '🚫',
-      update: '📝'
-    }[alert.alertType] || '📢';
+  try {
+    if (Notification.permission === 'granted') {
+      const emoji = {
+        loading: '👀',
+        entering: '🎯',
+        adding: '➕',
+        take_profit: '💰',
+        exiting: '🚪',
+        stopped_out: '🚫',
+        update: '📝'
+      }[alert.alertType] || '📢';
 
-    new Notification(`${emoji} KCU Alert: ${alert.symbol}`, {
-      body: `${alert.alertType.replace('_', ' ').toUpperCase()} - ${alert.direction}`,
-      icon: '/kcu-icon.png',
-      tag: alert.id,
-      requireInteraction: alert.alertType === 'entering' || alert.alertType === 'stopped_out'
-    });
-  } else if (Notification.permission !== 'denied') {
-    await Notification.requestPermission();
-  }
+      new Notification(`${emoji} KCU Alert: ${alert.symbol}`, {
+        body: `${alert.alertType.replace('_', ' ').toUpperCase()} - ${alert.direction}`,
+        icon: '/kcu-icon.png',
+        tag: alert.id,
+        requireInteraction: alert.alertType === 'entering' || alert.alertType === 'stopped_out'
+      });
+    } else if (Notification.permission !== 'denied') {
+      await Notification.requestPermission();
+    }
+  } catch {}
 }

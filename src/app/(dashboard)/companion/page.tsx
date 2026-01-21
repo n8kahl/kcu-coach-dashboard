@@ -347,6 +347,7 @@ export default function CompanionTerminal() {
   // SSE Event Handler
   // ==========================================================================
 
+  // Stream event handler - symbol filtering is done in the hook via `symbol` param
   const handleStreamEvent = useCallback(
     (event: CompanionEvent) => {
       if (event.type === 'setup_forming' || event.type === 'setup_ready') {
@@ -356,46 +357,50 @@ export default function CompanionTerminal() {
           setTimeout(() => setLastAlertType(null), 2000);
         }
       } else if (event.type === 'price_update') {
+        // Always update the watchlist prices (for all symbols)
         handlePriceUpdate(event.data);
 
-        if (event.data.symbol === selectedSymbol) {
-          const price = event.data.price;
-          if (!isValidPrice(price)) return;
+        // For chart updates, the hook already filtered for selectedSymbol
+        const price = event.data.price;
+        if (!isValidPrice(price)) return;
 
-          const now = Math.floor(Date.now() / 1000);
-          const newCandle: ChartCandle = {
-            time: now,
-            open: price,
-            high: price,
-            low: price,
-            close: price,
-            volume: event.data.volume || 0,
-          };
+        const now = Math.floor(Date.now() / 1000);
+        const newCandle: ChartCandle = {
+          time: now,
+          open: price,
+          high: price,
+          low: price,
+          close: price,
+          volume: event.data.volume || 0,
+        };
 
-          setChartData((prev) => {
-            if (prev.length > 0) {
-              const lastCandle = prev[prev.length - 1];
-              if (now - lastCandle.time < 60) {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  ...lastCandle,
-                  high: Math.max(lastCandle.high, price),
-                  low: Math.min(lastCandle.low, price),
-                  close: price,
-                  volume: (lastCandle.volume || 0) + (event.data.volume || 0),
-                };
-                return updated;
-              }
+        setChartData((prev) => {
+          if (prev.length > 0) {
+            const lastCandle = prev[prev.length - 1];
+            // Update the last candle if within 60 seconds
+            if (now - lastCandle.time < 60) {
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...lastCandle,
+                high: Math.max(lastCandle.high, price),
+                low: Math.min(lastCandle.low, price),
+                close: price,
+                volume: (lastCandle.volume || 0) + (event.data.volume || 0),
+              };
+              return updated;
             }
-            return [...prev, newCandle];
-          });
-        }
+          }
+          return [...prev, newCandle];
+        });
       }
     },
-    [selectedSymbol, refreshData, handlePriceUpdate]
+    [refreshData, handlePriceUpdate]
   );
 
+  // Pass selectedSymbol to the stream hook for automatic event filtering
+  // The hook uses refs internally to prevent reconnecting when symbol changes
   const { connected: streamConnected } = useCompanionStream({
+    symbol: selectedSymbol,
     onEvent: handleStreamEvent,
   });
 
