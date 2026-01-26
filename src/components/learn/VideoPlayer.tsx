@@ -33,6 +33,59 @@ interface VideoPlayerProps {
 
 const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
+// Check if the browser supports native HLS (Safari)
+function supportsNativeHLS(): boolean {
+  if (typeof document === 'undefined') return false;
+  const video = document.createElement('video');
+  return !!(
+    video.canPlayType('application/vnd.apple.mpegurl') ||
+    video.canPlayType('audio/mpegurl')
+  );
+}
+
+// Check if URL is an HLS manifest
+function isHLSUrl(url: string): boolean {
+  return url.endsWith('.m3u8') || url.includes('.m3u8?');
+}
+
+// Hook to track playback performance metrics
+function usePlaybackMetrics() {
+  const mountTime = useRef(performance.now());
+  const loadedMetadataTime = useRef<number | null>(null);
+  const firstPlayingTime = useRef<number | null>(null);
+  const metricsLogged = useRef(false);
+
+  const onLoadedMetadata = useCallback(() => {
+    if (loadedMetadataTime.current === null) {
+      loadedMetadataTime.current = performance.now();
+      const timeToMetadata = loadedMetadataTime.current - mountTime.current;
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[VideoPlayer] Time to loadedmetadata: ${timeToMetadata.toFixed(2)}ms`);
+      }
+    }
+  }, []);
+
+  const onFirstPlaying = useCallback(() => {
+    if (firstPlayingTime.current === null) {
+      firstPlayingTime.current = performance.now();
+      const timeToFirstFrame = firstPlayingTime.current - mountTime.current;
+      if (process.env.NODE_ENV === 'development' && !metricsLogged.current) {
+        metricsLogged.current = true;
+        console.log(`[VideoPlayer] Time to first playing: ${timeToFirstFrame.toFixed(2)}ms`);
+      }
+    }
+  }, []);
+
+  const reset = useCallback(() => {
+    mountTime.current = performance.now();
+    loadedMetadataTime.current = null;
+    firstPlayingTime.current = null;
+    metricsLogged.current = false;
+  }, []);
+
+  return { onLoadedMetadata, onFirstPlaying, reset };
+}
+
 export function VideoPlayer({
   src,
   poster,
@@ -51,6 +104,7 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
+  const hlsRef = useRef<import('hls.js').default | null>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(initialTime);
@@ -64,9 +118,13 @@ export function VideoPlayer({
   const [showSettings, setShowSettings] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [maxWatchedTime, setMaxWatchedTime] = useState(initialTime);
+  const [hlsError, setHlsError] = useState<string | null>(null);
 
   const hideControlsTimeout = useRef<NodeJS.Timeout>();
   const lastReportedTime = useRef(0);
+
+  // Playback metrics
+  const metrics = usePlaybackMetrics();
 
   // Format time as MM:SS or HH:MM:SS
   const formatTime = (seconds: number) => {
@@ -80,16 +138,100 @@ export function VideoPlayer({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Initialize video
+  // Initialize HLS.js or native playback
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !src) return;
+
+    metrics.reset();
+    setHlsError(null);
+    setIsLoading(true);
+
+    const isHLS = isHLSUrl(src);
+    const hasNativeHLS = supportsNativeHLS();
+
+    // Cleanup previous HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    if (isHLS && !hasNativeHLS) {
+      // Need hls.js for non-Safari browsers
+      import('hls.js').then(({ default: Hls }) => {
+        if (!Hls.isSupported()) {
+          setHlsError('HLS is not supported in this browser');
+          return;
+        }
+
+        const hls = new Hls({
+          // Optimize for low latency startup
+          enableWorker: true,
+          lowLatencyMode: false, // Not live streaming
+          backBufferLength: 90,
+          maxBufferSize: 60 * 1000 * 1000, // 60MB
+          maxBufferLength: 30, // 30 seconds
+          startLevel: -1, // Auto-select quality
+        });
+
+        hlsRef.current = hls;
+
+        hls.loadSource(src);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (initialTime > 0) {
+            video.currentTime = initialTime;
+          }
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.error('[VideoPlayer] HLS network error, attempting recovery');
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.error('[VideoPlayer] HLS media error, attempting recovery');
+                hls.recoverMediaError();
+                break;
+              default:
+                console.error('[VideoPlayer] Fatal HLS error:', data);
+                setHlsError('Failed to load video');
+                hls.destroy();
+                break;
+            }
+          }
+        });
+      }).catch((err) => {
+        console.error('[VideoPlayer] Failed to load hls.js:', err);
+        setHlsError('Failed to initialize video player');
+      });
+    } else {
+      // Use native playback (Safari for HLS, or non-HLS sources)
+      video.src = src;
+      if (initialTime > 0) {
+        video.currentTime = initialTime;
+      }
+    }
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [src, initialTime, metrics]);
+
+  // Initialize video event handlers
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
     const handleLoadedMetadata = () => {
       setDuration(video.duration);
-      if (initialTime > 0) {
-        video.currentTime = initialTime;
-      }
+      metrics.onLoadedMetadata();
       setIsLoading(false);
     };
 
@@ -107,12 +249,6 @@ export function VideoPlayer({
         lastReportedTime.current = time;
         onTimeUpdate?.(time, video.duration);
       }
-
-      // Check for completion
-      const watchPercent = (maxWatchedTime / video.duration) * 100;
-      if (watchPercent >= minWatchPercent && !video.ended) {
-        // User has watched enough to count as complete
-      }
     };
 
     const handleEnded = () => {
@@ -128,7 +264,11 @@ export function VideoPlayer({
     };
 
     const handleWaiting = () => setIsLoading(true);
-    const handlePlaying = () => setIsLoading(false);
+    const handlePlaying = () => {
+      setIsLoading(false);
+      metrics.onFirstPlaying();
+    };
+    const handleCanPlay = () => setIsLoading(false);
 
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
     video.addEventListener('timeupdate', handleTimeUpdate);
@@ -136,6 +276,7 @@ export function VideoPlayer({
     video.addEventListener('progress', handleProgress);
     video.addEventListener('waiting', handleWaiting);
     video.addEventListener('playing', handlePlaying);
+    video.addEventListener('canplay', handleCanPlay);
 
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
@@ -144,8 +285,9 @@ export function VideoPlayer({
       video.removeEventListener('progress', handleProgress);
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('playing', handlePlaying);
+      video.removeEventListener('canplay', handleCanPlay);
     };
-  }, [initialTime, minWatchPercent, maxWatchedTime, onTimeUpdate, onComplete]);
+  }, [maxWatchedTime, onTimeUpdate, onComplete, metrics]);
 
   // Hide controls after inactivity
   useEffect(() => {
@@ -305,6 +447,20 @@ export function VideoPlayer({
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const maxWatchedPercent = duration > 0 ? (maxWatchedTime / duration) * 100 : 0;
 
+  // Show error state
+  if (hlsError) {
+    return (
+      <Card className={`overflow-hidden bg-black ${className}`}>
+        <div className="aspect-video flex items-center justify-center">
+          <div className="text-center text-white">
+            <p className="text-red-400 mb-2">{hlsError}</p>
+            <p className="text-sm text-gray-400">Please try refreshing the page</p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card className={`overflow-hidden bg-black ${className}`}>
       <div
@@ -313,10 +469,9 @@ export function VideoPlayer({
         onClick={togglePlay}
         tabIndex={0}
       >
-        {/* Video element */}
+        {/* Video element - no src attribute for HLS, will be set by hls.js */}
         <video
           ref={videoRef}
-          src={src}
           poster={poster}
           className="w-full h-full"
           playsInline
