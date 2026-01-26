@@ -188,7 +188,7 @@ async function getLessonData(courseSlug: string, moduleSlug: string, lessonSlug:
     title: module.title as string,
     slug: module.slug as string,
     description: module.description as string,
-    moduleNumber: module.module_number as number,
+    moduleNumber: module.module_number as string,
     thumbnailUrl: module.thumbnail_url as string | null,
     sortOrder: module.sort_order as number,
     isPublished: module.is_published as boolean,
