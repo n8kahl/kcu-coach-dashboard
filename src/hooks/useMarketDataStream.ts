@@ -132,7 +132,7 @@ export function useMarketDataStream(
   const {
     symbols: initialSymbols = [],
     enableFallback = true,
-    fallbackInterval = 5000,
+    fallbackInterval = 10000, // Increased from 5000 to reduce rate limit issues
     maxReconnectAttempts = 3,
     debug = false,
   } = config;
@@ -178,74 +178,65 @@ export function useMarketDataStream(
     []
   );
 
-  // REST fallback fetch
+  // REST fallback fetch - limited concurrency to prevent rate limiting
   const fetchFallbackData = useCallback(async () => {
     if (isUnmountedRef.current) return;
 
     const symbols = Array.from(subscribedSymbolsRef.current);
     if (symbols.length === 0) return;
 
-    try {
-      const response = await fetch(`/api/market/quote?symbol=${symbols[0]}`);
-      if (!response.ok) {
-        if (response.status === 503) {
-          log('Market data service not configured');
-          setConnectionStatus('error');
-          return;
+    // Limit to max 3 concurrent requests to avoid rate limiting
+    const MAX_CONCURRENT = 3;
+    const fetchSymbol = async (symbol: string) => {
+      try {
+        const res = await fetch(`/api/market/quote?symbol=${symbol}`);
+        if (!res.ok) {
+          if (res.status === 503) {
+            log('Market data service not configured');
+            setConnectionStatus('error');
+            return null;
+          }
+          if (res.status === 429) {
+            log('Rate limited, skipping symbol:', symbol);
+            return null;
+          }
+          return null;
         }
-        throw new Error('Fetch failed');
+        const d = await res.json();
+        return d.quote;
+      } catch (e) {
+        log('Fallback fetch error for', symbol, e);
+        return null;
       }
+    };
 
-      const data = await response.json();
-      if (data.quote) {
-        const prevPrice = previousPricesRef.current[data.quote.symbol];
-        const price = data.quote.price;
+    try {
+      // Process symbols in batches to limit concurrency
+      for (let i = 0; i < symbols.length; i += MAX_CONCURRENT) {
+        if (isUnmountedRef.current) return;
 
-        priceBufferRef.current[data.quote.symbol] = {
-          price,
-          change: data.quote.change,
-          changePercent: data.quote.changePercent,
-          volume: data.quote.volume,
-          vwap: data.quote.vwap,
-          high: data.quote.high,
-          low: data.quote.low,
-          open: data.quote.open,
-          timestamp: Date.now(),
-        };
+        const batch = symbols.slice(i, i + MAX_CONCURRENT);
+        const results = await Promise.all(batch.map(fetchSymbol));
 
-        previousPricesRef.current[data.quote.symbol] = price;
-        flushPriceBuffer();
-      }
-
-      // Fetch remaining symbols in parallel
-      if (symbols.length > 1) {
-        const otherFetches = symbols.slice(1).map(async (symbol) => {
-          try {
-            const res = await fetch(`/api/market/quote?symbol=${symbol}`);
-            if (res.ok) {
-              const d = await res.json();
-              if (d.quote) {
-                priceBufferRef.current[d.quote.symbol] = {
-                  price: d.quote.price,
-                  change: d.quote.change,
-                  changePercent: d.quote.changePercent,
-                  volume: d.quote.volume,
-                  vwap: d.quote.vwap,
-                  high: d.quote.high,
-                  low: d.quote.low,
-                  open: d.quote.open,
-                  timestamp: Date.now(),
-                };
-              }
-            }
-          } catch (e) {
-            log('Fallback fetch error for', symbol, e);
+        results.forEach((quote) => {
+          if (quote) {
+            priceBufferRef.current[quote.symbol] = {
+              price: quote.price,
+              change: quote.change,
+              changePercent: quote.changePercent,
+              volume: quote.volume,
+              vwap: quote.vwap,
+              high: quote.high,
+              low: quote.low,
+              open: quote.open,
+              timestamp: Date.now(),
+            };
+            previousPricesRef.current[quote.symbol] = quote.price;
           }
         });
-
-        await Promise.all(otherFetches);
-        flushPriceBuffer();
       }
+
+      flushPriceBuffer();
     } catch (error) {
       log('Fallback fetch error:', error);
     }

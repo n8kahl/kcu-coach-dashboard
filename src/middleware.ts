@@ -63,6 +63,7 @@ const rateLimitConfig: Record<string, { requests: number; windowMs: number }> = 
   '/api/auth': { requests: 10, windowMs: 60000 }, // 10 requests per minute for auth
   '/api/chat': { requests: 30, windowMs: 60000 }, // 30 requests per minute for chat
   '/api/coach': { requests: 30, windowMs: 60000 }, // 30 requests per minute for coach
+  '/api/market': { requests: 300, windowMs: 60000 }, // 300 requests per minute for market data (real-time needs)
   '/api': { requests: 100, windowMs: 60000 }, // 100 requests per minute for other APIs
 };
 

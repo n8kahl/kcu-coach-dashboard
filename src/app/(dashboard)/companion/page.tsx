@@ -653,7 +653,11 @@ export default function CompanionTerminal() {
         console.log('[Companion] Setting chart levels:', levels.length, levels.map(l => ({ label: l.label, price: l.price })));
         setChartLevels(levels);
       } else {
-        // LTP API failed - try to get basic levels from quote as fallback
+        // LTP API failed - log the reason and try fallback
+        const ltpErrorText = await ltpRes.text().catch(() => 'Unknown error');
+        console.warn('[Companion] LTP API failed:', ltpRes.status, ltpErrorText);
+
+        // Try to get basic levels from quote as fallback
         try {
           const quoteRes = await fetch(`/api/market/quote?symbol=${symbol}`);
           if (quoteRes.ok) {
@@ -686,11 +690,14 @@ export default function CompanionTerminal() {
               });
             }
 
+            console.log('[Companion] Using fallback levels from quote:', fallbackLevels.length);
             setChartLevels(fallbackLevels);
           } else {
+            console.warn('[Companion] Quote API also failed - check if MASSIVE_API_KEY is configured');
             setChartLevels([]);
           }
-        } catch {
+        } catch (fallbackError) {
+          console.error('[Companion] Fallback quote fetch error:', fallbackError);
           setChartLevels([]);
         }
       }
