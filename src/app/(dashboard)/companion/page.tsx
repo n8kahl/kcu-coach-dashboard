@@ -540,7 +540,31 @@ export default function CompanionTerminal() {
 
         setChartLevels(levels);
       } else {
-        setChartLevels([]);
+        // LTP API failed - try to get basic levels from quote as fallback
+        try {
+          const quoteRes = await fetch(`/api/market/quote?symbol=${symbol}`);
+          if (quoteRes.ok) {
+            const quoteData = await quoteRes.json();
+            const quote = quoteData.quote;
+            const fallbackLevels: ChartLevel[] = [];
+
+            if (isValidPrice(quote?.prevHigh)) {
+              fallbackLevels.push({ price: quote.prevHigh, label: 'PDH', color: '#ef5350' });
+            }
+            if (isValidPrice(quote?.prevLow)) {
+              fallbackLevels.push({ price: quote.prevLow, label: 'PDL', color: '#26a69a' });
+            }
+            if (isValidPrice(quote?.vwap)) {
+              fallbackLevels.push({ price: quote.vwap, label: 'VWAP', color: '#ab47bc' });
+            }
+
+            setChartLevels(fallbackLevels);
+          } else {
+            setChartLevels([]);
+          }
+        } catch {
+          setChartLevels([]);
+        }
       }
 
       if (gammaRes.ok) {

@@ -1443,20 +1443,21 @@ export class MarketDataService {
     const symbol = ticker.toUpperCase();
     const cacheKey = `ltp:${symbol}`;
 
-    const result = await this.getCached<LTPAnalysis>(
-      cacheKey,
-      CACHE_TTL.snapshot,
-      async () => {
-        const [quote, keyLevels, mtf, bars5m, bars15m, bars1h] = await Promise.all([
-          this.getQuote(symbol),
-          this.getKeyLevels(symbol),
-          this.getMTFAnalysis(symbol),
-          this.getAggregates(symbol, '5', 50),
-          this.getAggregates(symbol, '15', 50),
-          this.getAggregates(symbol, '60', 50),
-        ]);
+    try {
+      const result = await this.getCached<LTPAnalysis>(
+        cacheKey,
+        CACHE_TTL.snapshot,
+        async () => {
+          const [quote, keyLevels, mtf, bars5m, bars15m, bars1h] = await Promise.all([
+            this.getQuote(symbol),
+            this.getKeyLevels(symbol),
+            this.getMTFAnalysis(symbol),
+            this.getAggregates(symbol, '5', 50),
+            this.getAggregates(symbol, '15', 50),
+            this.getAggregates(symbol, '60', 50),
+          ]);
 
-        if (!quote || !mtf) return null;
+          if (!quote || !mtf) return null;
 
         const currentPrice = quote.price;
 
@@ -1591,10 +1592,14 @@ export class MarketDataService {
           setupQuality,
           recommendation,
         };
-      }
-    );
+        }
+      );
 
-    return result;
+      return result;
+    } catch (error) {
+      console.error(`[MarketData] LTP analysis error for ${symbol}:`, error);
+      return null;
+    }
   }
 
   // ============================================
