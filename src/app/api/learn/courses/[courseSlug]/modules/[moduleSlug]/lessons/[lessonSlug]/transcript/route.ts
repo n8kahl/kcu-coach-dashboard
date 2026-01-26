@@ -51,12 +51,16 @@ export async function GET(request: Request, context: RouteContext) {
       return NextResponse.json({ error: 'Lesson not found' }, { status: 404 });
     }
 
-    return NextResponse.json({
+    // Cache transcript for 1 hour (transcripts rarely change)
+    const response = NextResponse.json({
       transcriptText: lesson.transcript_text,
       transcriptUrl: lesson.transcript_url,
       // Future: add segments here for synchronized highlighting
       // segments: []
     });
+
+    response.headers.set('Cache-Control', 'private, max-age=3600, stale-while-revalidate=86400');
+    return response;
   } catch (error) {
     console.error('Error in transcript API:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

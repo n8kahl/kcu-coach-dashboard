@@ -23,84 +23,77 @@ async function getLessonData(courseSlug: string, moduleSlug: string, lessonSlug:
     redirect('/login');
   }
 
-  // Get user profile
-  const { data: user } = await supabaseAdmin
-    .from('user_profiles')
-    .select('id')
-    .eq('discord_id', session.user.discordId)
-    .single();
+  // Parallel fetch: user profile AND lesson with nested course/module data
+  const [userResult, lessonResult] = await Promise.all([
+    supabaseAdmin
+      .from('user_profiles')
+      .select('id')
+      .eq('discord_id', session.user.discordId)
+      .single(),
+    // Single query with JOINs to get lesson + module + course
+    supabaseAdmin
+      .from('course_lessons')
+      .select(`
+        *,
+        course_modules!inner (
+          *,
+          courses!inner (
+            id,
+            title,
+            slug
+          )
+        )
+      `)
+      .eq('slug', lessonSlug)
+      .eq('is_published', true)
+      .eq('course_modules.slug', moduleSlug)
+      .eq('course_modules.is_published', true)
+      .eq('course_modules.courses.slug', courseSlug)
+      .eq('course_modules.courses.is_published', true)
+      .single(),
+  ]);
+
+  const { data: user } = userResult;
+  const { data: lessonWithRelations, error: lessonError } = lessonResult;
 
   if (!user) {
     redirect('/login');
   }
 
-  // Fetch course
-  const { data: course, error: courseError } = await supabaseAdmin
-    .from('courses')
-    .select('id, title')
-    .eq('slug', courseSlug)
-    .eq('is_published', true)
-    .single();
-
-  if (courseError || !course) {
+  if (lessonError || !lessonWithRelations) {
     notFound();
   }
 
-  // Fetch module
-  const { data: module, error: moduleError } = await supabaseAdmin
-    .from('course_modules')
-    .select('*')
-    .eq('course_id', course.id)
-    .eq('slug', moduleSlug)
-    .eq('is_published', true)
-    .single();
-
-  if (moduleError || !module) {
-    notFound();
-  }
-
-  // Fetch lesson
-  const { data: lesson, error: lessonError } = await supabaseAdmin
-    .from('course_lessons')
-    .select('*')
-    .eq('module_id', module.id)
-    .eq('slug', lessonSlug)
-    .eq('is_published', true)
-    .single();
-
-  if (lessonError || !lesson) {
-    notFound();
-  }
+  // Extract nested data
+  const moduleData = lessonWithRelations.course_modules as Record<string, unknown>;
+  const courseData = moduleData.courses as { id: string; title: string; slug: string };
+  const lesson = lessonWithRelations;
+  const module = moduleData;
+  const course = courseData;
 
   // Module access check disabled - all modules unlocked for development
   // TODO: Re-enable when gating is properly configured with user_course_access records
-  // if (!lesson.is_preview) {
-  //   const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
-  //     p_user_id: user.id,
-  //     p_module_id: module.id,
-  //   });
-  //   if (!canAccess) {
-  //     return { locked: true, courseSlug, moduleSlug };
-  //   }
-  // }
 
-  // Get lesson progress
-  const { data: progress } = await supabaseAdmin
-    .from('course_lesson_progress')
-    .select('*')
-    .eq('user_id', user.id)
-    .eq('lesson_id', lesson.id)
-    .single();
+  // Parallel fetch: current lesson progress AND all lessons in module
+  const [progressResult, allLessonsResult] = await Promise.all([
+    supabaseAdmin
+      .from('course_lesson_progress')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('lesson_id', lesson.id)
+      .single(),
+    supabaseAdmin
+      .from('course_lessons')
+      .select('*')
+      .eq('module_id', module.id as string)
+      .eq('is_published', true)
+      .order('sort_order'),
+  ]);
 
-  // Get all lessons in module for navigation and sidebar
-  const { data: allLessons } = await supabaseAdmin
-    .from('course_lessons')
-    .select('*')
-    .eq('module_id', module.id)
-    .eq('is_published', true)
-    .order('sort_order');
+  const { data: progress } = progressResult;
+  const { data: allLessons } = allLessonsResult;
 
-  // Get progress for all lessons
+  // Get progress for all lessons (needs lessonIds from previous query)
   const lessonIds = (allLessons || []).map(l => l.id);
   const { data: allProgress } = await supabaseAdmin
     .from('course_lesson_progress')
@@ -189,22 +182,22 @@ async function getLessonData(courseSlug: string, moduleSlug: string, lessonSlug:
     createdAt: lesson.created_at,
   };
 
-  const moduleData: CourseModule = {
-    id: module.id,
-    courseId: module.course_id,
-    title: module.title,
-    slug: module.slug,
-    description: module.description,
-    moduleNumber: module.module_number,
-    thumbnailUrl: module.thumbnail_url,
-    sortOrder: module.sort_order,
-    isPublished: module.is_published,
-    unlockAfterModuleId: module.unlock_after_module_id,
-    unlockAfterDays: module.unlock_after_days,
-    requiresQuizPass: module.requires_quiz_pass,
-    minQuizScore: module.min_quiz_score,
-    isRequired: module.is_required,
-    createdAt: module.created_at,
+  const moduleOutput: CourseModule = {
+    id: module.id as string,
+    courseId: module.course_id as string,
+    title: module.title as string,
+    slug: module.slug as string,
+    description: module.description as string,
+    moduleNumber: module.module_number as number,
+    thumbnailUrl: module.thumbnail_url as string | null,
+    sortOrder: module.sort_order as number,
+    isPublished: module.is_published as boolean,
+    unlockAfterModuleId: module.unlock_after_module_id as string | null,
+    unlockAfterDays: module.unlock_after_days as number | null,
+    requiresQuizPass: module.requires_quiz_pass as boolean,
+    minQuizScore: module.min_quiz_score as number | null,
+    isRequired: module.is_required as boolean,
+    createdAt: module.created_at as string,
   };
 
   const progressData: LessonProgress | null = progress ? {
@@ -228,7 +221,7 @@ async function getLessonData(courseSlug: string, moduleSlug: string, lessonSlug:
   return {
     locked: false,
     lesson: lessonData,
-    module: moduleData,
+    module: moduleOutput,
     progress: progressData,
     allLessons: allLessonsWithProgress,
     prevLesson: prevLesson ? { slug: prevLesson.slug, title: prevLesson.title } : null,
