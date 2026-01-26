@@ -172,8 +172,19 @@ export function LessonClient({
 
   const isCompleted = progress?.completed || videoProgress.isCompleted || justCompleted;
 
-  // Determine video source - prefer HLS for adaptive streaming
-  const videoSrc = lesson.videoPlaybackHls || lesson.videoUrl;
+  // Helper to construct Cloudflare Stream HLS URL from video UID
+  const getCloudflareHlsUrl = (videoUid: string | null): string | null => {
+    if (!videoUid) return null;
+    const customerCode = process.env.NEXT_PUBLIC_CLOUDFLARE_CUSTOMER_CODE;
+    if (customerCode) {
+      return `https://customer-${customerCode}.cloudflarestream.com/${videoUid}/manifest/video.m3u8`;
+    }
+    // Fallback to generic videodelivery.net if no customer code configured
+    return `https://videodelivery.net/${videoUid}/manifest/video.m3u8`;
+  };
+
+  // Determine video source - prefer HLS for adaptive streaming, fallback to constructed URL
+  const videoSrc = lesson.videoPlaybackHls || lesson.videoUrl || getCloudflareHlsUrl(lesson.videoUid);
 
   // Prefetch next lesson manifest at 75% progress for instant navigation
   const prefetchedRef = useRef(false);
@@ -200,7 +211,9 @@ export function LessonClient({
 
       // Find the next lesson to get its HLS URL
       const nextLessonData = allLessons.find(l => l.slug === nextLesson.slug);
-      const nextHlsUrl = nextLessonData?.videoPlaybackHls;
+      const nextHlsUrl = nextLessonData?.videoPlaybackHls ||
+                         nextLessonData?.videoUrl ||
+                         getCloudflareHlsUrl(nextLessonData?.videoUid || null);
 
       if (nextHlsUrl) {
         prefetchedRef.current = true;
