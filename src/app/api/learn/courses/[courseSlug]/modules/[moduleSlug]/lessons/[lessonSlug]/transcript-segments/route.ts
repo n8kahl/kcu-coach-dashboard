@@ -68,10 +68,14 @@ export async function GET(request: Request, context: RouteContext) {
       startFormatted: seg.start_formatted,
     }));
 
-    return NextResponse.json({
+    // Cache segments for 1 hour (segments rarely change)
+    const response = NextResponse.json({
       segments: formattedSegments,
       count: formattedSegments.length,
     });
+
+    response.headers.set('Cache-Control', 'private, max-age=3600, stale-while-revalidate=86400');
+    return response;
   } catch (error) {
     console.error('Error in transcript-segments API:', error);
     return NextResponse.json({ segments: [] });

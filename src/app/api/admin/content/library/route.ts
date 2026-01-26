@@ -57,7 +57,7 @@ export async function GET(request: Request) {
 
     const videos: LibraryVideo[] = [];
 
-    // Fetch YouTube videos
+    // Fetch YouTube videos - optimized to avoid N+1 queries
     if (typeFilter === 'all' || typeFilter === 'youtube') {
       const { data: youtubeVideos, error: ytError } = await supabaseAdmin
         .from('youtube_videos')
@@ -66,14 +66,26 @@ export async function GET(request: Request) {
 
       if (ytError) {
         logger.error('Error fetching YouTube videos', { error: ytError.message });
-      } else {
-        for (const video of youtubeVideos || []) {
-          // Count how many lessons use this video
-          const { count } = await supabaseAdmin
-            .from('course_lessons')
-            .select('*', { count: 'exact', head: true })
-            .eq('video_url', `https://www.youtube.com/watch?v=${video.video_id}`);
+      } else if (youtubeVideos && youtubeVideos.length > 0) {
+        // Build all possible YouTube URLs for these videos
+        const videoUrls = youtubeVideos.map(v => `https://www.youtube.com/watch?v=${v.video_id}`);
 
+        // Single query to get lesson counts for all YouTube videos
+        const { data: lessonCounts } = await supabaseAdmin
+          .from('course_lessons')
+          .select('video_url')
+          .in('video_url', videoUrls);
+
+        // Build a count map from the results
+        const usageCountMap = new Map<string, number>();
+        for (const lesson of lessonCounts || []) {
+          if (lesson.video_url) {
+            usageCountMap.set(lesson.video_url, (usageCountMap.get(lesson.video_url) || 0) + 1);
+          }
+        }
+
+        for (const video of youtubeVideos) {
+          const videoUrl = `https://www.youtube.com/watch?v=${video.video_id}`;
           videos.push({
             id: video.id,
             type: 'youtube',
@@ -87,9 +99,9 @@ export async function GET(request: Request) {
             chunkCount: video.chunk_count,
             topics: video.topics,
             createdAt: video.created_at,
-            url: `https://www.youtube.com/watch?v=${video.video_id}`,
+            url: videoUrl,
             thumbnailUrl: `https://img.youtube.com/vi/${video.video_id}/mqdefault.jpg`,
-            usedInLessons: count || 0,
+            usedInLessons: usageCountMap.get(videoUrl) || 0,
           });
         }
       }

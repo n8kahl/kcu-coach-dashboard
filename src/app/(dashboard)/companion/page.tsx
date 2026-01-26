@@ -518,6 +518,7 @@ export default function CompanionTerminal() {
         setLtpAnalysis(data);
 
         const levels: ChartLevel[] = [];
+        const addedTypes = new Set<string>(); // Track what we actually added
 
         // Previous Day Levels - Gold (#fbbf24)
         if (isValidPrice(data.levels?.pdh)) {
@@ -527,6 +528,7 @@ export default function CompanionTerminal() {
             color: getLevelColor('pdh'),
             type: 'pdh',
           });
+          addedTypes.add('pdh');
         }
         if (isValidPrice(data.levels?.pdl)) {
           levels.push({
@@ -535,6 +537,7 @@ export default function CompanionTerminal() {
             color: getLevelColor('pdl'),
             type: 'pdl',
           });
+          addedTypes.add('pdl');
         }
 
         // VWAP - Purple (#8b5cf6)
@@ -545,6 +548,7 @@ export default function CompanionTerminal() {
             color: getLevelColor('vwap'),
             type: 'vwap',
           });
+          addedTypes.add('vwap');
         }
 
         // ORB Levels - Cyan (#06b6d4)
@@ -556,6 +560,7 @@ export default function CompanionTerminal() {
             lineStyle: 'dashed',
             type: 'orb_high',
           });
+          addedTypes.add('orb_high');
         }
         if (isValidPrice(data.levels?.orbLow)) {
           levels.push({
@@ -565,6 +570,7 @@ export default function CompanionTerminal() {
             lineStyle: 'dashed',
             type: 'orb_low',
           });
+          addedTypes.add('orb_low');
         }
 
         // Pre-Market Levels - Pink (#ec4899)
@@ -576,6 +582,7 @@ export default function CompanionTerminal() {
             lineStyle: 'dashed',
             type: 'pmh',
           });
+          addedTypes.add('pmh');
         }
         if (isValidPrice(data.levels?.pml)) {
           levels.push({
@@ -585,6 +592,7 @@ export default function CompanionTerminal() {
             lineStyle: 'dashed',
             type: 'pml',
           });
+          addedTypes.add('pml');
         }
 
         // SMA 200 - White (#ffffff)
@@ -595,6 +603,7 @@ export default function CompanionTerminal() {
             color: getLevelColor('sma_200'),
             type: 'sma_200',
           });
+          addedTypes.add('sma200');
         }
 
         // Add round number levels near current price
@@ -613,12 +622,12 @@ export default function CompanionTerminal() {
         }
 
         // Add levels from the nearest array (includes swing levels, support/resistance)
+        // Only skip types we actually added above to avoid missing levels
         if (Array.isArray(data.levels?.nearest)) {
           for (const level of data.levels.nearest) {
             if (!isValidPrice(level.price)) continue;
-            // Skip types we already added explicitly above
-            const alreadyAdded = ['pdh', 'pdl', 'vwap', 'orb_high', 'orb_low', 'pmh', 'pml', 'sma200', 'ema9', 'ema21'];
-            if (alreadyAdded.includes(level.type)) continue;
+            // Skip if we already added this type from explicit fields
+            if (level.type && addedTypes.has(level.type)) continue;
 
             // Format label based on type
             let label = level.type?.replace(/_/g, ' ').toUpperCase() || 'LEVEL';
@@ -637,6 +646,7 @@ export default function CompanionTerminal() {
               type: level.type,
               strength: level.strength,
             });
+            if (level.type) addedTypes.add(level.type);
           }
         }
 

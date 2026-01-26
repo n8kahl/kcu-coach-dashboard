@@ -111,15 +111,19 @@ export function LessonClient({
   }, []);
 
   // Fetch transcript when panel is opened
+  // Fetch transcript when panel is opened - parallel fetch for better performance
   const fetchTranscript = useCallback(async () => {
     if (transcriptLoaded || transcriptLoading) return;
 
     setTranscriptLoading(true);
     try {
-      // Fetch transcript text
-      const transcriptResponse = await fetch(
-        `/api/learn/courses/${courseSlug}/modules/${moduleSlug}/lessons/${lesson.slug}/transcript`
-      );
+      // Fetch transcript text and segments in parallel
+      const [transcriptResponse, segmentsResponse] = await Promise.all([
+        fetch(`/api/learn/courses/${courseSlug}/modules/${moduleSlug}/lessons/${lesson.slug}/transcript`),
+        fetch(`/api/learn/courses/${courseSlug}/modules/${moduleSlug}/lessons/${lesson.slug}/transcript-segments`),
+      ]);
+
+      // Process transcript text
       if (transcriptResponse.ok) {
         const data = await transcriptResponse.json();
         if (data.transcriptText) {
@@ -127,10 +131,7 @@ export function LessonClient({
         }
       }
 
-      // Fetch transcript segments (non-blocking)
-      const segmentsResponse = await fetch(
-        `/api/learn/courses/${courseSlug}/modules/${moduleSlug}/lessons/${lesson.slug}/transcript-segments`
-      );
+      // Process transcript segments
       if (segmentsResponse.ok) {
         const data = await segmentsResponse.json();
         if (data.segments && data.segments.length > 0) {
