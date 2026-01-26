@@ -101,10 +101,14 @@ export interface RSIResult {
 // ============================================
 
 export interface KeyLevel {
-  type: 'support' | 'resistance' | 'pdh' | 'pdl' | 'vwap' | 'orb_high' | 'orb_low' | 'ema9' | 'ema21' | 'sma200' | 'pmh' | 'pml';
+  type: 'support' | 'resistance' | 'pdh' | 'pdl' | 'vwap' | 'orb_high' | 'orb_low' | 'ema9' | 'ema21' | 'sma200' | 'pmh' | 'pml' | 'swing_high_4h' | 'swing_low_4h' | 'swing_high_1h' | 'swing_low_1h';
   price: number;
   strength: number;
   distance?: number;
+  /** Number of times price has touched this level (for swing points) */
+  touchCount?: number;
+  /** Timeframe the level was detected on */
+  timeframe?: '1H' | '4H' | 'D';
 }
 
 // ============================================
@@ -455,7 +459,7 @@ export const CACHE_TTL = {
   quote: 5,
   snapshot: 10,
   aggregates: 60,
-  levels: 300,
+  levels: 30,  // Reduced from 300 to 30 seconds for fresher level data
   marketStatus: 30,
   indicators: 60,
   options: 30,

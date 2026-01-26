@@ -44,6 +44,14 @@ import {
   HOT_CACHE_FRESHNESS_MS,
 } from './cache';
 
+import {
+  detectSwingPoints,
+  filterNearbyLevels,
+  mergeMTFLevels,
+  type SwingPoint,
+  type Bar as SwingBar,
+} from '../swing-point-detector';
+
 /**
  * Market Data Service Class
  */
@@ -1165,11 +1173,18 @@ export class MarketDataService {
           });
         }
 
-        // Get ORB levels from intraday data
+        // Get ORB levels from intraday data (Opening Range: 9:30-10:00 ET)
         const intradayBars = await this.getIntradayBars(symbol, 1);
         if (intradayBars.length > 0) {
+          // Get today's date in ET timezone
+          const todayET = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+
           const orbBars = intradayBars.filter(bar => {
             const barTime = new Date(bar.t);
+            // Check if this bar is from today
+            const barDateET = barTime.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+            if (barDateET !== todayET) return false;
+
             const etTime = barTime.toLocaleTimeString('en-US', {
               timeZone: 'America/New_York',
               hour: '2-digit',
@@ -1177,7 +1192,8 @@ export class MarketDataService {
               hour12: false,
             });
             const [hours, minutes] = etTime.split(':').map(Number);
-            return hours === 9 && minutes >= 30;
+            // Opening Range is 9:30 to 10:00 ET (fixed: was only checking 9:30-9:59)
+            return (hours === 9 && minutes >= 30) || (hours === 10 && minutes === 0);
           });
 
           if (orbBars.length > 0) {
@@ -1229,6 +1245,51 @@ export class MarketDataService {
           }
         } catch (err) {
           console.warn(`[Market Data] Failed to fetch premarket for ${symbol}:`, err);
+        }
+
+        // Get Swing High/Low levels from 4H and 1H MTF charts
+        try {
+          const [bars4h, bars1h] = await Promise.all([
+            this.getAggregates(symbol, '240', 50),  // 4-hour bars
+            this.getAggregates(symbol, '60', 50),   // 1-hour bars
+          ]);
+
+          // Convert to swing detector bar format
+          const convertBars = (bars: Bar[]): SwingBar[] =>
+            bars.map(b => ({
+              time: b.t,
+              open: b.open,
+              high: b.high,
+              low: b.low,
+              close: b.close,
+              volume: b.volume,
+            }));
+
+          // Detect swing points
+          const swings4h = detectSwingPoints(convertBars(bars4h), '4H');
+          const swings1h = detectSwingPoints(convertBars(bars1h), '1H');
+
+          // Merge MTF levels (4H takes priority, 1H adds confluence)
+          const mergedSwings = mergeMTFLevels(swings4h, swings1h);
+
+          // Filter to only levels near current price (within 5%)
+          const nearbySwings = filterNearbyLevels(mergedSwings, currentPrice, 5);
+
+          // Add top swing levels (limit to 4 to avoid cluttering chart)
+          for (const swing of nearbySwings.slice(0, 4)) {
+            levels.push({
+              type: swing.type === 'high'
+                ? (swing.timeframe === '4H' ? 'swing_high_4h' : 'swing_high_1h')
+                : (swing.timeframe === '4H' ? 'swing_low_4h' : 'swing_low_1h'),
+              price: swing.price,
+              strength: swing.strength,
+              distance: ((currentPrice - swing.price) / currentPrice) * 100,
+              touchCount: swing.touchCount,
+              timeframe: swing.timeframe,
+            });
+          }
+        } catch (err) {
+          console.warn(`[Market Data] Failed to detect swing levels for ${symbol}:`, err);
         }
 
         levels.sort((a, b) => Math.abs(a.distance || 0) - Math.abs(b.distance || 0));
