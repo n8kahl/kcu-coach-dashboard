@@ -63,15 +63,16 @@ interface APIMarketStatus {
 // ============================================
 
 export async function GET(request: Request) {
+  // Parse symbols outside try block so they're available in catch for logging
+  const { searchParams } = new URL(request.url);
+  const symbolsParam = searchParams.get('symbols') || 'SPY,QQQ';
+  const symbols = symbolsParam.split(',').map((s) => s.trim().toUpperCase());
+
   try {
     const user = await getAuthenticatedUser();
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    const { searchParams } = new URL(request.url);
-    const symbolsParam = searchParams.get('symbols') || 'SPY,QQQ';
-    const symbols = symbolsParam.split(',').map((s) => s.trim().toUpperCase());
 
     // Check if market data service is configured
     if (!marketDataService.isConfigured()) {
@@ -108,10 +109,18 @@ export async function GET(request: Request) {
       lastUpdated: new Date().toISOString(),
     });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error('Market data error', {
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
+      symbols: symbols.join(','),
+      stack: error instanceof Error ? error.stack : undefined,
     });
-    return NextResponse.json({ error: 'Failed to fetch market data' }, { status: 500 });
+
+    // Return more informative error in non-production
+    return NextResponse.json({
+      error: 'Failed to fetch market data',
+      details: process.env.NODE_ENV !== 'production' ? errorMessage : undefined,
+    }, { status: 500 });
   }
 }
 

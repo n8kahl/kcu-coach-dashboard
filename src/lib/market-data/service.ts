@@ -90,14 +90,33 @@ export class MarketDataService {
       });
 
       if (!response.ok) {
-        const error = await response.text();
-        console.error(`[MarketData] API error for ${endpoint}: ${response.status} - ${error}`);
+        const errorText = await response.text();
+        console.error(`[MarketData] API error: ${endpoint} - HTTP ${response.status} - ${errorText}`);
+
+        // Log specific error types prominently
+        if (response.status === 401 || response.status === 403) {
+          console.error('[MarketData] CRITICAL: API key may be invalid or expired. Check MASSIVE_API_KEY environment variable.');
+        } else if (response.status === 429) {
+          console.error('[MarketData] Rate limited by Massive.com API. Consider reducing request frequency.');
+        } else if (response.status >= 500) {
+          console.error('[MarketData] Massive.com API server error. Service may be temporarily unavailable.');
+        }
+
         return null;
       }
 
       return await response.json();
     } catch (error) {
-      console.error('[MarketData] Fetch error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[MarketData] Fetch error for ${endpoint}:`, errorMessage);
+
+      // Check for common network issues
+      if (errorMessage.includes('fetch failed') || errorMessage.includes('ECONNREFUSED')) {
+        console.error('[MarketData] Network error - unable to reach Massive.com API');
+      } else if (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT')) {
+        console.error('[MarketData] Request timeout - Massive.com API may be slow or unresponsive');
+      }
+
       return null;
     }
   }
@@ -1259,7 +1278,10 @@ export class MarketDataService {
       this.getIntradayBars(symbol, 5),
     ]);
 
-    if (!quote) return null;
+    if (!quote) {
+      console.warn(`[MarketData] getMarketSnapshot: No quote data available for ${symbol}`);
+      return null;
+    }
 
     const ema9 = keyLevels.find((l) => l.type === 'ema9');
     const ema21 = keyLevels.find((l) => l.type === 'ema21');
