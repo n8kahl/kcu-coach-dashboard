@@ -68,10 +68,11 @@ async function checkAndGenerateBriefings() {
     const { supabaseAdmin } = await import('./lib/supabase');
     const logger = (await import('./lib/logger')).default;
     const { generateMorningBriefing, generateEODBriefing } = await import('./lib/briefing-generator');
-    const { marketDataService } = await import('./lib/market-data');
+    const marketDataModule = await import('./lib/market-data');
+    const marketDataService = marketDataModule?.marketDataService;
 
-    // Skip if market data not configured
-    if (!marketDataService.isConfigured()) {
+    // Skip if market data not configured or service unavailable
+    if (!marketDataService || typeof marketDataService.isConfigured !== 'function' || !marketDataService.isConfigured()) {
       return;
     }
 
@@ -148,12 +149,13 @@ export async function register() {
   // Only run background services on server runtime (not edge)
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     const { startDetector, addSymbols } = await import('./lib/ltp-detector');
-    const { marketDataService } = await import('./lib/market-data');
+    const marketDataModule = await import('./lib/market-data');
+    const marketDataService = marketDataModule?.marketDataService;
     const logger = (await import('./lib/logger')).default;
 
-    // Check if market data is configured
-    if (!marketDataService.isConfigured()) {
-      logger.warn('LTP Detector not started - MASSIVE_API_KEY not configured');
+    // Check if market data is configured or service unavailable
+    if (!marketDataService || typeof marketDataService.isConfigured !== 'function' || !marketDataService.isConfigured()) {
+      logger.warn('LTP Detector not started - marketDataService unavailable or MASSIVE_API_KEY not configured');
       return;
     }
 
