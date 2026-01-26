@@ -237,7 +237,7 @@ export function MarketSocketProvider({
 
         // Update chart imperatively
         if (chartRefInternal.current) {
-          chartRefInternal.current.updateCandle(candle);
+          chartRefInternal.current.updateLastCandle(candle);
         }
 
         const latencyMs = performance.now() - startTime;
@@ -282,7 +282,7 @@ export function MarketSocketProvider({
 
         // Update chart imperatively
         if (chartRefInternal.current) {
-          chartRefInternal.current.updateCandle(buildingCandleRef.current);
+          chartRefInternal.current.updateLastCandle(buildingCandleRef.current);
         }
       }
 
