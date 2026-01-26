@@ -11,8 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ProgressBar } from '@/components/ui/progress';
-import { ModuleProgressList, ContinueLearning } from '@/components/learn';
-import { motion } from 'framer-motion';
+import { JourneyMap, ContinueLearning } from '@/components/learn';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Loader2,
   AlertCircle,
@@ -288,20 +288,92 @@ export default function CourseDetailPage() {
             </motion.div>
           )}
 
-          {/* Module List */}
+          {/* Journey Map - Premium Timeline Visualization */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
           >
-            <ModuleProgressList
+            <JourneyMap
               modules={modules}
               courseSlug={courseSlug}
             />
           </motion.div>
         </div>
+
+        {/* Sticky Resume Button - Appears when scrolling */}
+        <AnimatePresence>
+          {resumeLesson && (
+            <StickyResumeButton
+              courseSlug={courseSlug}
+              moduleSlug={resumeLesson.module.slug}
+              lessonSlug={resumeLesson.lesson.slug}
+              lessonTitle={resumeLesson.lesson.title}
+              lessonNumber={resumeLesson.lesson.lessonNumber}
+            />
+          )}
+        </AnimatePresence>
       </PageShell>
     </>
+  );
+}
+
+/**
+ * Sticky Resume Button - Floats at bottom right when user scrolls down
+ */
+function StickyResumeButton({
+  courseSlug,
+  moduleSlug,
+  lessonSlug,
+  lessonTitle,
+  lessonNumber,
+}: {
+  courseSlug: string;
+  moduleSlug: string;
+  lessonSlug: string;
+  lessonTitle: string;
+  lessonNumber: string;
+}) {
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      // Show button after scrolling 300px
+      setIsVisible(window.scrollY > 300);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  return (
+    <AnimatePresence>
+      {isVisible && (
+        <motion.div
+          initial={{ opacity: 0, y: 20, scale: 0.9 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 20, scale: 0.9 }}
+          className="fixed bottom-6 right-6 z-50"
+        >
+          <Link href={`/learn/${courseSlug}/${moduleSlug}/${lessonSlug}`}>
+            <motion.div
+              className="flex items-center gap-3 px-5 py-3 rounded-full bg-[var(--accent-primary)] text-black font-semibold shadow-lg hover:shadow-xl transition-shadow cursor-pointer"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.98 }}
+              style={{
+                boxShadow: '0 8px 32px rgba(212, 175, 55, 0.4)',
+              }}
+            >
+              <Play className="w-5 h-5" />
+              <div className="text-left">
+                <div className="text-xs opacity-80">Resume Lesson {lessonNumber}</div>
+                <div className="text-sm font-bold truncate max-w-[200px]">{lessonTitle}</div>
+              </div>
+            </motion.div>
+          </Link>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 

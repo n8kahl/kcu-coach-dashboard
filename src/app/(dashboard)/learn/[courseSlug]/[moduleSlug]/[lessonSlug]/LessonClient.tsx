@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { VideoPlayer, TranscriptPanel, LessonList } from '@/components/learn';
 import { useVideoProgress } from '@/hooks/useVideoProgress';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import confetti from 'canvas-confetti';
 import {
   AlertCircle,
   CheckCircle2,
@@ -18,6 +19,7 @@ import {
   MessageSquare,
   BookOpen,
   Trophy,
+  Sparkles,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { CourseModule, CourseLesson, LessonProgress } from '@/types/learning';
@@ -72,6 +74,11 @@ export function LessonClient({
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [transcriptLoaded, setTranscriptLoaded] = useState(false);
 
+  // Cinematic mode state
+  const [lightsOutMode, setLightsOutMode] = useState(false);
+  const [moduleCompleted, setModuleCompleted] = useState(false);
+  const confettiTriggeredRef = useRef(false);
+
   // Determine initial time: prefer URL timestamp, fall back to saved progress
   const effectiveInitialTime = startTimeFromUrl !== null && startTimeFromUrl > 0
     ? startTimeFromUrl
@@ -85,6 +92,51 @@ export function LessonClient({
     minWatchPercent: lesson.minWatchPercent || 90,
     onComplete: () => {
       setJustCompleted(true);
+
+      // Check if this completes the module (no next lesson in this module)
+      if (!nextLesson && !confettiTriggeredRef.current) {
+        setModuleCompleted(true);
+        confettiTriggeredRef.current = true;
+
+        // Trigger premium confetti celebration
+        const duration = 3 * 1000;
+        const animationEnd = Date.now() + duration;
+        const colors = ['#d4af37', '#f5d742', '#10b981', '#3b82f6', '#ec4899'];
+
+        const randomInRange = (min: number, max: number) => {
+          return Math.random() * (max - min) + min;
+        };
+
+        const interval = setInterval(() => {
+          const timeLeft = animationEnd - Date.now();
+
+          if (timeLeft <= 0) {
+            return clearInterval(interval);
+          }
+
+          const particleCount = 50 * (timeLeft / duration);
+
+          // Confetti from left
+          confetti({
+            particleCount: Math.floor(particleCount / 2),
+            startVelocity: 30,
+            spread: 60,
+            origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 },
+            colors,
+            disableForReducedMotion: true,
+          });
+
+          // Confetti from right
+          confetti({
+            particleCount: Math.floor(particleCount / 2),
+            startVelocity: 30,
+            spread: 60,
+            origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 },
+            colors,
+            disableForReducedMotion: true,
+          });
+        }, 250);
+      }
     },
   });
 
@@ -200,90 +252,166 @@ export function LessonClient({
 
   return (
     <>
-      <Header
-        title={`${lesson.lessonNumber} ${lesson.title}`}
-        breadcrumbs={[
-          { label: 'Dashboard' },
-          { label: 'Learn', href: '/learn' },
-          { label: courseTitle, href: `/learn/${courseSlug}` },
-          { label: `Module ${module.moduleNumber}`, href: `/learn/${courseSlug}/${moduleSlug}` },
-          { label: `Lesson ${lesson.lessonNumber}` },
-        ]}
-        actions={
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowLessonList(!showLessonList)}
-            >
-              <BookOpen className="w-4 h-4 mr-2" />
-              Lessons
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleToggleTranscript}
-            >
-              <MessageSquare className="w-4 h-4 mr-2" />
-              Transcript
-            </Button>
-          </div>
-        }
-      />
+      {/* Lights Out overlay for cinema mode */}
+      <AnimatePresence>
+        {lightsOutMode && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 bg-black/80 z-10 pointer-events-none"
+            style={{ backdropFilter: 'blur(2px)' }}
+          />
+        )}
+      </AnimatePresence>
+
+      <motion.div
+        animate={{ opacity: lightsOutMode ? 0.2 : 1 }}
+        transition={{ duration: 0.3 }}
+        style={{ position: 'relative', zIndex: lightsOutMode ? 5 : 'auto' }}
+      >
+        <Header
+          title={`${lesson.lessonNumber} ${lesson.title}`}
+          breadcrumbs={[
+            { label: 'Dashboard' },
+            { label: 'Learn', href: '/learn' },
+            { label: courseTitle, href: `/learn/${courseSlug}` },
+            { label: `Module ${module.moduleNumber}`, href: `/learn/${courseSlug}/${moduleSlug}` },
+            { label: `Lesson ${lesson.lessonNumber}` },
+          ]}
+          actions={
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowLessonList(!showLessonList)}
+              >
+                <BookOpen className="w-4 h-4 mr-2" />
+                Lessons
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleToggleTranscript}
+              >
+                <MessageSquare className="w-4 h-4 mr-2" />
+                Transcript
+              </Button>
+            </div>
+          }
+        />
+      </motion.div>
 
       <PageShell maxWidth="full" padding="sm">
         <div className="flex flex-col lg:flex-row gap-6">
           {/* Lesson List Sidebar (mobile: slide-over, desktop: side column) */}
-          {showLessonList && (
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="lg:w-80 flex-shrink-0"
-            >
-              <LessonList
-                lessons={allLessons}
-                courseSlug={courseSlug}
-                moduleSlug={moduleSlug}
-                currentLessonId={lesson.id}
-              />
-            </motion.div>
-          )}
-
-          {/* Main Content */}
-          <div className="flex-1 min-w-0 space-y-6">
-            {/* Completion Banner */}
-            {justCompleted && (
+          <AnimatePresence>
+            {showLessonList && (
               <motion.div
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: lightsOutMode ? 0.2 : 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.3 }}
+                className="lg:w-80 flex-shrink-0"
+                style={{ position: 'relative', zIndex: lightsOutMode ? 5 : 'auto' }}
               >
-                <Card className="border-[var(--profit)] bg-[var(--profit)]/10">
-                  <CardContent className="py-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-[var(--profit)]/20 flex items-center justify-center">
-                          <Trophy className="w-5 h-5 text-[var(--profit)]" />
-                        </div>
-                        <div>
-                          <p className="font-medium text-[var(--text-primary)]">
-                            Lesson Complete!
-                          </p>
-                          <p className="text-sm text-[var(--text-secondary)]">
-                            Great job! Keep up the momentum.
-                          </p>
-                        </div>
-                      </div>
-                      {nextLesson && (
-                        <Button onClick={navigateToNext}>
-                          Next Lesson
-                          <ChevronRight className="w-4 h-4 ml-1" />
-                        </Button>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
+                <LessonList
+                  lessons={allLessons}
+                  courseSlug={courseSlug}
+                  moduleSlug={moduleSlug}
+                  currentLessonId={lesson.id}
+                />
               </motion.div>
             )}
+          </AnimatePresence>
+
+          {/* Main Content */}
+          <div className="flex-1 min-w-0 space-y-6" style={{ position: 'relative', zIndex: lightsOutMode ? 20 : 'auto' }}>
+            {/* Module Completion Banner with special styling */}
+            <AnimatePresence>
+              {moduleCompleted && (
+                <motion.div
+                  initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -20 }}
+                >
+                  <Card className="border-[var(--accent-primary)] bg-gradient-to-r from-[var(--accent-primary)]/10 via-[var(--accent-primary)]/5 to-transparent overflow-hidden">
+                    <CardContent className="py-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <motion.div
+                            className="w-14 h-14 rounded-full bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-primary-hover)] flex items-center justify-center"
+                            animate={{
+                              scale: [1, 1.1, 1],
+                              rotate: [0, 5, -5, 0],
+                            }}
+                            transition={{
+                              duration: 2,
+                              repeat: Infinity,
+                              repeatType: 'reverse',
+                            }}
+                          >
+                            <Sparkles className="w-7 h-7 text-black" />
+                          </motion.div>
+                          <div>
+                            <p className="text-lg font-bold bg-gradient-to-r from-[var(--accent-primary)] to-[var(--text-primary)] bg-clip-text text-transparent">
+                              Module Complete!
+                            </p>
+                            <p className="text-sm text-[var(--text-secondary)]">
+                              Outstanding work! You&apos;ve mastered this module.
+                            </p>
+                          </div>
+                        </div>
+                        <Link href={`/learn/${courseSlug}/${moduleSlug}`}>
+                          <Button variant="primary">
+                            View Module
+                            <ChevronRight className="w-4 h-4 ml-1" />
+                          </Button>
+                        </Link>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Lesson Completion Banner */}
+            <AnimatePresence>
+              {justCompleted && !moduleCompleted && (
+                <motion.div
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  <Card className="border-[var(--profit)] bg-[var(--profit)]/10">
+                    <CardContent className="py-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-[var(--profit)]/20 flex items-center justify-center">
+                            <Trophy className="w-5 h-5 text-[var(--profit)]" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-[var(--text-primary)]">
+                              Lesson Complete!
+                            </p>
+                            <p className="text-sm text-[var(--text-secondary)]">
+                              Great job! Keep up the momentum.
+                            </p>
+                          </div>
+                        </div>
+                        {nextLesson && (
+                          <Button onClick={navigateToNext}>
+                            Next Lesson
+                            <ChevronRight className="w-4 h-4 ml-1" />
+                          </Button>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Video Player */}
             <motion.div
@@ -304,6 +432,14 @@ export function LessonClient({
                   onSpeedChange={videoProgress.handleSpeedChange}
                   minWatchPercent={lesson.minWatchPercent}
                   allowSkip={lesson.allowSkip}
+                  nextLesson={nextLesson ? {
+                    title: nextLesson.title,
+                    slug: nextLesson.slug,
+                  } : null}
+                  onAutoAdvance={navigateToNext}
+                  autoAdvanceDelay={5}
+                  onLightsOutChange={setLightsOutMode}
+                  lightsOutActive={lightsOutMode}
                 />
               ) : (
                 <Card className="aspect-video flex items-center justify-center bg-[var(--bg-tertiary)]">
@@ -318,8 +454,9 @@ export function LessonClient({
             {/* Lesson Info */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
+              animate={{ opacity: lightsOutMode ? 0.2 : 1, y: 0 }}
+              transition={{ delay: 0.1, duration: 0.3 }}
+              style={{ position: 'relative', zIndex: lightsOutMode ? 5 : 'auto' }}
             >
               <Card>
                 <CardHeader className="pb-3">
@@ -355,8 +492,9 @@ export function LessonClient({
             {/* Navigation */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
+              animate={{ opacity: lightsOutMode ? 0.2 : 1, y: 0 }}
+              transition={{ delay: 0.2, duration: 0.3 }}
+              style={{ position: 'relative', zIndex: lightsOutMode ? 5 : 'auto' }}
             >
               <div className="flex items-center justify-between">
                 {prevLesson ? (
@@ -395,38 +533,43 @@ export function LessonClient({
           </div>
 
           {/* Transcript Sidebar */}
-          {showTranscript && (
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="lg:w-96 flex-shrink-0"
-            >
-              {transcriptLoading ? (
-                <Card className="h-[400px] flex items-center justify-center">
-                  <div className="animate-pulse space-y-3 w-full px-6">
-                    <div className="h-4 bg-[var(--bg-tertiary)] rounded w-3/4"></div>
-                    <div className="h-4 bg-[var(--bg-tertiary)] rounded w-full"></div>
-                    <div className="h-4 bg-[var(--bg-tertiary)] rounded w-5/6"></div>
-                    <div className="h-4 bg-[var(--bg-tertiary)] rounded w-2/3"></div>
-                  </div>
-                </Card>
-              ) : transcriptText ? (
-                <TranscriptPanel
-                  transcript={transcriptText}
-                  segments={transcriptSegments.length > 0 ? transcriptSegments : undefined}
-                  downloadUrl={lesson.transcriptUrl || undefined}
-                  currentTime={videoProgress.currentTime}
-                  onSeek={(time) => {
-                    videoProgress.handleSeek(videoProgress.currentTime, time);
-                  }}
-                />
-              ) : (
-                <Card className="h-[400px] flex items-center justify-center">
-                  <p className="text-[var(--text-secondary)]">No transcript available</p>
-                </Card>
-              )}
-            </motion.div>
-          )}
+          <AnimatePresence>
+            {showTranscript && (
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: lightsOutMode ? 0.2 : 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.3 }}
+                className="lg:w-96 flex-shrink-0"
+                style={{ position: 'relative', zIndex: lightsOutMode ? 5 : 'auto' }}
+              >
+                {transcriptLoading ? (
+                  <Card className="h-[400px] flex items-center justify-center">
+                    <div className="animate-pulse space-y-3 w-full px-6">
+                      <div className="h-4 bg-[var(--bg-tertiary)] rounded w-3/4"></div>
+                      <div className="h-4 bg-[var(--bg-tertiary)] rounded w-full"></div>
+                      <div className="h-4 bg-[var(--bg-tertiary)] rounded w-5/6"></div>
+                      <div className="h-4 bg-[var(--bg-tertiary)] rounded w-2/3"></div>
+                    </div>
+                  </Card>
+                ) : transcriptText ? (
+                  <TranscriptPanel
+                    transcript={transcriptText}
+                    segments={transcriptSegments.length > 0 ? transcriptSegments : undefined}
+                    downloadUrl={lesson.transcriptUrl || undefined}
+                    currentTime={videoProgress.currentTime}
+                    onSeek={(time) => {
+                      videoProgress.handleSeek(videoProgress.currentTime, time);
+                    }}
+                  />
+                ) : (
+                  <Card className="h-[400px] flex items-center justify-center">
+                    <p className="text-[var(--text-secondary)]">No transcript available</p>
+                  </Card>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </PageShell>
     </>

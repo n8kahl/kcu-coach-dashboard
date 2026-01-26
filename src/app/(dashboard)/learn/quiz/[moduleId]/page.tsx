@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/header';
 import { PageShell } from '@/components/layout/page-shell';
@@ -8,7 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ProgressBar } from '@/components/ui/progress';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useAnimation } from 'framer-motion';
+import { useSoundEffects } from '@/hooks/useSoundEffects';
+import confetti from 'canvas-confetti';
 import {
   Loader2,
   AlertCircle,
@@ -21,6 +23,11 @@ import {
   BookOpen,
   Clock,
   Target,
+  Sparkles,
+  Lightbulb,
+  ArrowRight,
+  Award,
+  Zap,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { QuizQuestion, QuizChoice, CourseModule } from '@/types/learning';
@@ -43,6 +50,43 @@ interface QuizAnswer {
 
 type QuizState = 'loading' | 'ready' | 'in_progress' | 'submitting' | 'results';
 
+// Animation variants for question card
+const questionCardVariants = {
+  enter: (direction: number) => ({
+    x: direction > 0 ? 300 : -300,
+    opacity: 0,
+    scale: 0.95,
+  }),
+  center: {
+    x: 0,
+    opacity: 1,
+    scale: 1,
+  },
+  exit: (direction: number) => ({
+    x: direction < 0 ? 300 : -300,
+    opacity: 0,
+    scale: 0.95,
+  }),
+};
+
+// Shake animation for wrong answers
+const shakeAnimation = {
+  x: [0, -15, 15, -10, 10, -5, 5, 0],
+  transition: { duration: 0.5 },
+};
+
+// Button press animation
+const buttonPressVariants = {
+  tap: { scale: 0.97 },
+  hover: { scale: 1.02 },
+};
+
+// Pop animation for correct answers
+const popAnimation = {
+  scale: [1, 1.2, 1],
+  transition: { duration: 0.3 },
+};
+
 export default function QuizPage() {
   const params = useParams();
   const router = useRouter();
@@ -57,6 +101,14 @@ export default function QuizPage() {
   const [answers, setAnswers] = useState<Map<string, QuizAnswer>>(new Map());
   const [questionStartTime, setQuestionStartTime] = useState<number>(Date.now());
   const [showExplanation, setShowExplanation] = useState(false);
+  const [slideDirection, setSlideDirection] = useState(1);
+  const [isShaking, setIsShaking] = useState(false);
+  const [showCorrectPop, setShowCorrectPop] = useState(false);
+
+  // Animation and sound hooks
+  const cardControls = useAnimation();
+  const { play: playSound } = useSoundEffects({ enabled: true });
+  const confettiTriggeredRef = useRef(false);
 
   // Results state
   const [results, setResults] = useState<{
@@ -109,6 +161,9 @@ export default function QuizPage() {
   const selectChoice = (choiceId: string) => {
     if (!data || showExplanation) return;
 
+    // Play selection sound
+    playSound('select');
+
     const question = data.questions[currentQuestionIndex];
     const currentAnswer = answers.get(question.id);
     const timeSpent = Math.floor((Date.now() - questionStartTime) / 1000);
@@ -138,7 +193,7 @@ export default function QuizPage() {
     });
   };
 
-  const submitCurrentAnswer = () => {
+  const submitCurrentAnswer = async () => {
     if (!data) return;
 
     const question = data.questions[currentQuestionIndex];
@@ -161,6 +216,18 @@ export default function QuizPage() {
       return newAnswers;
     });
 
+    // Trigger animations based on correctness
+    if (isCorrect) {
+      playSound('correct');
+      setShowCorrectPop(true);
+      setTimeout(() => setShowCorrectPop(false), 500);
+    } else {
+      playSound('incorrect');
+      setIsShaking(true);
+      await cardControls.start(shakeAnimation);
+      setIsShaking(false);
+    }
+
     setShowExplanation(true);
   };
 
@@ -168,6 +235,7 @@ export default function QuizPage() {
     if (!data) return;
 
     setShowExplanation(false);
+    setSlideDirection(1); // Slide left to right
 
     if (currentQuestionIndex < data.questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
@@ -175,6 +243,14 @@ export default function QuizPage() {
     } else {
       // Submit quiz
       submitQuiz();
+    }
+  };
+
+  const prevQuestion = () => {
+    if (currentQuestionIndex > 0) {
+      setShowExplanation(false);
+      setSlideDirection(-1); // Slide right to left
+      setCurrentQuestionIndex(prev => prev - 1);
     }
   };
 
@@ -205,6 +281,38 @@ export default function QuizPage() {
 
       if (!response.ok) {
         throw new Error('Failed to submit quiz');
+      }
+
+      // Trigger celebration if passed
+      if (passed && !confettiTriggeredRef.current) {
+        confettiTriggeredRef.current = true;
+        playSound('celebration');
+
+        // Massive confetti burst
+        const duration = 4 * 1000;
+        const animationEnd = Date.now() + duration;
+        const colors = ['#d4af37', '#f5d742', '#10b981', '#3b82f6', '#ec4899'];
+
+        const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
+
+        const interval = setInterval(() => {
+          const timeLeft = animationEnd - Date.now();
+          if (timeLeft <= 0) return clearInterval(interval);
+
+          const particleCount = 60 * (timeLeft / duration);
+
+          // Center burst
+          confetti({
+            particleCount: Math.floor(particleCount),
+            startVelocity: 35,
+            spread: 360,
+            origin: { x: 0.5, y: 0.4 },
+            colors,
+            disableForReducedMotion: true,
+          });
+        }, 250);
+      } else if (!passed) {
+        playSound('incorrect');
       }
 
       setResults({
@@ -363,7 +471,7 @@ export default function QuizPage() {
     );
   }
 
-  // Render results state
+  // Render results state with enhanced animations
   if (quizState === 'results' && results) {
     return (
       <>
@@ -378,88 +486,294 @@ export default function QuizPage() {
           ]}
         />
         <PageShell>
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-          >
-            <Card className="max-w-2xl mx-auto">
-              <CardContent className="py-8">
-                {/* Score Display */}
-                <div className="text-center mb-8">
-                  <div className={`w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4 ${
-                    results.passed
-                      ? 'bg-[var(--profit)]/10'
-                      : 'bg-[var(--loss)]/10'
-                  }`}>
-                    {results.passed ? (
-                      <Trophy className="w-12 h-12 text-[var(--profit)]" />
-                    ) : (
-                      <XCircle className="w-12 h-12 text-[var(--loss)]" />
-                    )}
-                  </div>
-                  <h2 className={`text-4xl font-bold mb-2 ${
-                    results.passed ? 'text-[var(--profit)]' : 'text-[var(--loss)]'
-                  }`}>
-                    {Math.round(results.score)}%
-                  </h2>
-                  <p className="text-lg text-[var(--text-secondary)]">
-                    {results.passed ? 'Congratulations! You passed!' : 'Keep studying and try again!'}
-                  </p>
-                </div>
+          <div className="max-w-2xl mx-auto space-y-6">
+            {/* Main Results Card */}
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            >
+              <Card className={`overflow-hidden ${results.passed ? 'border-[var(--profit)]' : 'border-[var(--loss)]'}`}>
+                <CardContent className="py-10 px-8">
+                  {/* Animated Score Display */}
+                  <div className="text-center mb-10">
+                    <motion.div
+                      className={`w-32 h-32 rounded-full flex items-center justify-center mx-auto mb-6 ${
+                        results.passed
+                          ? 'bg-gradient-to-br from-[var(--profit)]/20 to-[var(--profit)]/5'
+                          : 'bg-gradient-to-br from-[var(--loss)]/20 to-[var(--loss)]/5'
+                      }`}
+                      initial={{ scale: 0, rotate: -180 }}
+                      animate={{ scale: 1, rotate: 0 }}
+                      transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.2 }}
+                    >
+                      {results.passed ? (
+                        <motion.div
+                          animate={{
+                            scale: [1, 1.1, 1],
+                          }}
+                          transition={{ duration: 2, repeat: Infinity }}
+                        >
+                          <Trophy className="w-16 h-16 text-[var(--profit)]" />
+                        </motion.div>
+                      ) : (
+                        <XCircle className="w-16 h-16 text-[var(--loss)]" />
+                      )}
+                    </motion.div>
 
-                {/* Stats */}
-                <div className="grid grid-cols-2 gap-4 mb-8">
-                  <div className="p-4 rounded-lg bg-[var(--bg-secondary)] text-center">
-                    <p className="text-2xl font-bold text-[var(--profit)]">
-                      {results.correctCount}
-                    </p>
-                    <p className="text-xs text-[var(--text-tertiary)]">Correct</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-[var(--bg-secondary)] text-center">
-                    <p className="text-2xl font-bold text-[var(--loss)]">
-                      {results.totalQuestions - results.correctCount}
-                    </p>
-                    <p className="text-xs text-[var(--text-tertiary)]">Incorrect</p>
-                  </div>
-                </div>
+                    {/* Animated Count-Up Score */}
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: 0.5 }}
+                    >
+                      <AnimatedScore
+                        score={results.score}
+                        passed={results.passed}
+                        duration={1.5}
+                      />
+                    </motion.div>
 
-                {/* Progress Bar */}
-                <div className="mb-8">
-                  <div className="flex items-center justify-between text-sm mb-2">
-                    <span className="text-[var(--text-secondary)]">Score</span>
-                    <span className="text-[var(--text-tertiary)]">
-                      Pass: {data.passingScore}%
-                    </span>
+                    <motion.p
+                      className="text-xl text-[var(--text-secondary)] mt-3"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.8 }}
+                    >
+                      {results.passed ? 'Outstanding work!' : 'Keep studying and try again!'}
+                    </motion.p>
                   </div>
-                  <ProgressBar
-                    value={results.score}
-                    variant={results.passed ? 'success' : 'error'}
-                    size="lg"
-                  />
-                </div>
 
-                {/* Actions */}
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <Button
-                    variant="secondary"
-                    className="flex-1"
-                    onClick={startQuiz}
+                  {/* Animated Stats */}
+                  <motion.div
+                    className="grid grid-cols-3 gap-4 mb-10"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 1 }}
                   >
-                    <RotateCcw className="w-4 h-4 mr-2" />
-                    Retake Quiz
-                  </Button>
-                  <Link href={`/learn/${data.courseSlug}/${data.module.slug}`} className="flex-1">
-                    <Button variant="primary" className="w-full">
-                      <BookOpen className="w-4 h-4 mr-2" />
-                      Back to Module
-                    </Button>
-                  </Link>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
+                    <div className="p-5 rounded-xl bg-[var(--profit)]/10 text-center">
+                      <motion.p
+                        className="text-3xl font-bold text-[var(--profit)]"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: 1.2 }}
+                      >
+                        {results.correctCount}
+                      </motion.p>
+                      <p className="text-sm text-[var(--text-tertiary)]">Correct</p>
+                    </div>
+                    <div className="p-5 rounded-xl bg-[var(--loss)]/10 text-center">
+                      <motion.p
+                        className="text-3xl font-bold text-[var(--loss)]"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: 1.3 }}
+                      >
+                        {results.totalQuestions - results.correctCount}
+                      </motion.p>
+                      <p className="text-sm text-[var(--text-tertiary)]">Incorrect</p>
+                    </div>
+                    <div className="p-5 rounded-xl bg-[var(--bg-secondary)] text-center">
+                      <motion.p
+                        className="text-3xl font-bold text-[var(--text-primary)]"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: 1.4 }}
+                      >
+                        {results.totalQuestions}
+                      </motion.p>
+                      <p className="text-sm text-[var(--text-tertiary)]">Total</p>
+                    </div>
+                  </motion.div>
+
+                  {/* Animated Progress Bar */}
+                  <motion.div
+                    className="mb-10"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 1.5 }}
+                  >
+                    <div className="flex items-center justify-between text-sm mb-3">
+                      <span className="text-[var(--text-secondary)]">Your Score</span>
+                      <span className="text-[var(--text-tertiary)]">
+                        Passing: {data.passingScore}%
+                      </span>
+                    </div>
+                    <div className="h-4 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
+                      <motion.div
+                        className={`h-full rounded-full ${results.passed ? 'bg-[var(--profit)]' : 'bg-[var(--loss)]'}`}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${results.score}%` }}
+                        transition={{ delay: 1.6, duration: 0.8, ease: 'easeOut' }}
+                      />
+                    </div>
+                    {/* Passing threshold marker */}
+                    <div className="relative h-0">
+                      <div
+                        className="absolute -top-5 w-0.5 h-6 bg-[var(--text-muted)]"
+                        style={{ left: `${data.passingScore}%` }}
+                      />
+                    </div>
+                  </motion.div>
+
+                  {/* Actions */}
+                  <motion.div
+                    className="flex flex-col sm:flex-row gap-4"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 1.8 }}
+                  >
+                    <motion.div
+                      className="flex-1"
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <Button
+                        variant="secondary"
+                        size="lg"
+                        className="w-full"
+                        onClick={startQuiz}
+                      >
+                        <RotateCcw className="w-5 h-5 mr-2" />
+                        Retake Quiz
+                      </Button>
+                    </motion.div>
+                    <Link href={`/learn/${data.courseSlug}/${data.module.slug}`} className="flex-1">
+                      <motion.div
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <Button variant="primary" size="lg" className="w-full">
+                          <BookOpen className="w-5 h-5 mr-2" />
+                          Back to Module
+                        </Button>
+                      </motion.div>
+                    </Link>
+                  </motion.div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Achievement Card (Passed) */}
+            {results.passed && (
+              <motion.div
+                initial={{ opacity: 0, rotateY: 90 }}
+                animate={{ opacity: 1, rotateY: 0 }}
+                transition={{ delay: 2, duration: 0.6, type: 'spring' }}
+              >
+                <Card className="border-[var(--accent-primary)] bg-gradient-to-br from-[var(--accent-primary)]/10 via-transparent to-transparent overflow-hidden">
+                  <CardContent className="py-6 px-8">
+                    <div className="flex items-center gap-6">
+                      <motion.div
+                        className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-primary-hover)] flex items-center justify-center flex-shrink-0"
+                        animate={{
+                          boxShadow: [
+                            '0 0 20px rgba(212,175,55,0.3)',
+                            '0 0 40px rgba(212,175,55,0.5)',
+                            '0 0 20px rgba(212,175,55,0.3)',
+                          ],
+                        }}
+                        transition={{ duration: 2, repeat: Infinity }}
+                      >
+                        <Award className="w-10 h-10 text-black" />
+                      </motion.div>
+                      <div>
+                        <p className="text-sm text-[var(--accent-primary)] uppercase tracking-wider font-medium mb-1">
+                          Module Mastery Unlocked
+                        </p>
+                        <h3 className="text-xl font-bold text-[var(--text-primary)]">
+                          {data.module.title}
+                        </h3>
+                        <p className="text-sm text-[var(--text-secondary)] mt-1">
+                          You&apos;ve demonstrated mastery of this module!
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )}
+
+            {/* Study Plan Card (Failed) */}
+            {!results.passed && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 2 }}
+              >
+                <Card className="border-[var(--warning)] bg-gradient-to-br from-[var(--warning)]/10 via-transparent to-transparent">
+                  <CardContent className="py-6 px-8">
+                    <div className="flex items-start gap-4 mb-4">
+                      <div className="w-12 h-12 rounded-xl bg-[var(--warning)]/20 flex items-center justify-center flex-shrink-0">
+                        <Lightbulb className="w-6 h-6 text-[var(--warning)]" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-[var(--text-primary)]">
+                          Study Plan
+                        </h3>
+                        <p className="text-sm text-[var(--text-secondary)]">
+                          Review these areas before your next attempt
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-2 pl-16">
+                      {results.answersWithResults
+                        .filter(a => !a.isCorrect)
+                        .slice(0, 3)
+                        .map((answer, idx) => {
+                          const question = data.questions.find(q => q.id === answer.questionId);
+                          return question ? (
+                            <motion.div
+                              key={answer.questionId}
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: 2.2 + idx * 0.1 }}
+                              className="flex items-center gap-2 text-sm text-[var(--text-secondary)] p-2 rounded-lg bg-[var(--bg-secondary)]"
+                            >
+                              <XCircle className="w-4 h-4 text-[var(--loss)] flex-shrink-0" />
+                              <span className="line-clamp-1">{question.questionText}</span>
+                            </motion.div>
+                          ) : null;
+                        })}
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )}
+          </div>
         </PageShell>
       </>
+    );
+  }
+
+  // Animated Score Component
+  function AnimatedScore({ score, passed, duration }: { score: number; passed: boolean; duration: number }) {
+    const [displayScore, setDisplayScore] = useState(0);
+
+    useEffect(() => {
+      const startTime = Date.now();
+      const endTime = startTime + duration * 1000;
+
+      const animate = () => {
+        const now = Date.now();
+        if (now >= endTime) {
+          setDisplayScore(Math.round(score));
+          return;
+        }
+
+        const progress = (now - startTime) / (duration * 1000);
+        const eased = 1 - Math.pow(1 - progress, 3); // Ease out cubic
+        setDisplayScore(Math.round(score * eased));
+        requestAnimationFrame(animate);
+      };
+
+      requestAnimationFrame(animate);
+    }, [score, duration]);
+
+    return (
+      <span className={`text-6xl font-bold ${passed ? 'text-[var(--profit)]' : 'text-[var(--loss)]'}`}>
+        {displayScore}%
+      </span>
     );
   }
 
@@ -491,112 +805,224 @@ export default function QuizPage() {
             <ProgressBar value={progress} variant="gold" size="sm" />
           </motion.div>
 
-          {/* Question Card */}
-          <AnimatePresence mode="wait">
+          {/* Question Card with Enhanced Animations */}
+          <AnimatePresence mode="wait" custom={slideDirection}>
             <motion.div
               key={currentQuestionIndex}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
+              custom={slideDirection}
+              variants={questionCardVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             >
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-xl leading-relaxed">
-                    {currentQuestion.questionText}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {currentQuestion.choices.map((choice, index) => {
-                    const isSelected = currentAnswer?.selectedChoiceIds.includes(choice.id);
-                    const showResult = showExplanation;
-                    const isCorrect = choice.isCorrect;
+              <motion.div animate={cardControls}>
+                <Card className="overflow-hidden">
+                  <CardHeader className="pb-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Badge variant="gold" size="sm">
+                        <Target className="w-3 h-3 mr-1" />
+                        Question {currentQuestionIndex + 1}
+                      </Badge>
+                    </div>
+                    <CardTitle className="text-xl leading-relaxed">
+                      {currentQuestion.questionText}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {currentQuestion.choices.map((choice, index) => {
+                      const isSelected = currentAnswer?.selectedChoiceIds.includes(choice.id);
+                      const showResult = showExplanation;
+                      const isCorrect = choice.isCorrect;
+                      const isWrongSelected = isSelected && !isCorrect && showResult;
+                      const isCorrectShown = isCorrect && showResult;
 
-                    let bgColor = 'bg-[var(--bg-secondary)]';
-                    let borderColor = 'border-[var(--border-primary)]';
-                    let textColor = 'text-[var(--text-primary)]';
-
-                    if (showResult) {
-                      if (isCorrect) {
-                        bgColor = 'bg-[var(--profit)]/10';
-                        borderColor = 'border-[var(--profit)]';
-                        textColor = 'text-[var(--profit)]';
-                      } else if (isSelected && !isCorrect) {
-                        bgColor = 'bg-[var(--loss)]/10';
-                        borderColor = 'border-[var(--loss)]';
-                        textColor = 'text-[var(--loss)]';
-                      }
-                    } else if (isSelected) {
-                      bgColor = 'bg-[var(--accent-primary)]/10';
-                      borderColor = 'border-[var(--accent-primary)]';
-                    }
-
-                    return (
-                      <button
-                        key={choice.id}
-                        onClick={() => selectChoice(choice.id)}
-                        disabled={showExplanation}
-                        className={`
-                          w-full p-4 rounded-lg border-2 text-left transition-all
-                          ${bgColor} ${borderColor}
-                          ${!showExplanation ? 'hover:border-[var(--accent-primary)] hover:bg-[var(--bg-tertiary)]' : ''}
-                          ${showExplanation ? 'cursor-default' : 'cursor-pointer'}
-                        `}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className={`
-                            w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0
-                            ${isSelected ? borderColor : 'border-[var(--border-secondary)]'}
-                          `}>
-                            {showResult ? (
-                              isCorrect ? (
-                                <CheckCircle2 className="w-4 h-4 text-[var(--profit)]" />
+                      return (
+                        <motion.button
+                          key={choice.id}
+                          onClick={() => selectChoice(choice.id)}
+                          disabled={showExplanation}
+                          variants={buttonPressVariants}
+                          whileHover={!showExplanation ? 'hover' : undefined}
+                          whileTap={!showExplanation ? 'tap' : undefined}
+                          animate={isCorrectShown && showCorrectPop ? popAnimation : undefined}
+                          className={`
+                            w-full p-4 rounded-xl border-2 text-left transition-all
+                            ${isCorrectShown
+                              ? 'bg-[var(--profit)]/10 border-[var(--profit)]'
+                              : isWrongSelected
+                              ? 'bg-[var(--loss)]/10 border-[var(--loss)]'
+                              : isSelected
+                              ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)]'
+                              : 'bg-[var(--bg-secondary)] border-[var(--border-primary)]'
+                            }
+                            ${!showExplanation ? 'hover:border-[var(--accent-primary)] hover:bg-[var(--bg-tertiary)] hover:shadow-md' : ''}
+                            ${showExplanation ? 'cursor-default' : 'cursor-pointer'}
+                          `}
+                        >
+                          <div className="flex items-center gap-4">
+                            {/* Choice Indicator */}
+                            <div className={`
+                              w-8 h-8 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all
+                              ${isCorrectShown
+                                ? 'border-[var(--profit)] bg-[var(--profit)]'
+                                : isWrongSelected
+                                ? 'border-[var(--loss)] bg-[var(--loss)]'
+                                : isSelected
+                                ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]'
+                                : 'border-[var(--border-secondary)]'
+                              }
+                            `}>
+                              {showResult ? (
+                                isCorrectShown ? (
+                                  <motion.div
+                                    initial={{ scale: 0 }}
+                                    animate={{ scale: 1 }}
+                                    transition={{ type: 'spring', stiffness: 500 }}
+                                  >
+                                    <CheckCircle2 className="w-5 h-5 text-white" />
+                                  </motion.div>
+                                ) : isWrongSelected ? (
+                                  <motion.div
+                                    initial={{ scale: 0 }}
+                                    animate={{ scale: 1 }}
+                                    transition={{ type: 'spring', stiffness: 500 }}
+                                  >
+                                    <XCircle className="w-5 h-5 text-white" />
+                                  </motion.div>
+                                ) : (
+                                  <span className="text-sm font-medium text-[var(--text-tertiary)]">
+                                    {String.fromCharCode(65 + index)}
+                                  </span>
+                                )
                               ) : isSelected ? (
-                                <XCircle className="w-4 h-4 text-[var(--loss)]" />
-                              ) : null
-                            ) : (
-                              isSelected && (
-                                <div className="w-3 h-3 rounded-full bg-[var(--accent-primary)]" />
-                              )
+                                <motion.div
+                                  initial={{ scale: 0 }}
+                                  animate={{ scale: 1 }}
+                                  className="w-3 h-3 rounded-full bg-white"
+                                />
+                              ) : (
+                                <span className="text-sm font-medium text-[var(--text-tertiary)]">
+                                  {String.fromCharCode(65 + index)}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Choice Text */}
+                            <span className={`flex-1 font-medium ${
+                              isCorrectShown
+                                ? 'text-[var(--profit)]'
+                                : isWrongSelected
+                                ? 'text-[var(--loss)]'
+                                : 'text-[var(--text-primary)]'
+                            }`}>
+                              {choice.choiceText}
+                            </span>
+
+                            {/* Result Icon */}
+                            {isCorrectShown && (
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                transition={{ delay: 0.2 }}
+                              >
+                                <Sparkles className="w-5 h-5 text-[var(--profit)]" />
+                              </motion.div>
                             )}
                           </div>
-                          <span className={`flex-1 ${textColor}`}>
-                            {choice.choiceText}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
+                        </motion.button>
+                      );
+                    })}
 
-                  {/* Explanation */}
-                  {showExplanation && currentQuestion.explanation && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      className="mt-4 p-4 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-primary)]"
-                    >
-                      <p className="text-sm font-medium text-[var(--text-primary)] mb-1">
-                        Explanation:
-                      </p>
-                      <p className="text-sm text-[var(--text-secondary)]">
-                        {currentQuestion.explanation}
-                      </p>
-                    </motion.div>
-                  )}
-                </CardContent>
-              </Card>
+                    {/* Knowledge Gap Card for Incorrect Answers */}
+                    <AnimatePresence>
+                      {showExplanation && currentAnswer && !currentAnswer.isCorrect && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0, y: -20 }}
+                          animate={{ opacity: 1, height: 'auto', y: 0 }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                          className="mt-4"
+                        >
+                          <Card className="border-[var(--warning)] bg-gradient-to-r from-[var(--warning)]/5 to-transparent">
+                            <CardContent className="p-4">
+                              <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 rounded-full bg-[var(--warning)]/20 flex items-center justify-center flex-shrink-0">
+                                  <Lightbulb className="w-5 h-5 text-[var(--warning)]" />
+                                </div>
+                                <div className="flex-1">
+                                  <p className="font-semibold text-[var(--text-primary)] mb-1">
+                                    Knowledge Gap Identified
+                                  </p>
+                                  {currentQuestion.explanation && (
+                                    <p className="text-sm text-[var(--text-secondary)] mb-3">
+                                      {currentQuestion.explanation}
+                                    </p>
+                                  )}
+                                  {currentQuestion.videoTimestamp && (
+                                    <Link
+                                      href={`/learn/${data.courseSlug}/${data.module.slug}?t=${currentQuestion.videoTimestamp}`}
+                                      className="inline-flex items-center gap-2 text-sm font-medium text-[var(--accent-primary)] hover:underline"
+                                    >
+                                      <BookOpen className="w-4 h-4" />
+                                      Review this topic in the video
+                                      <ArrowRight className="w-3 h-3" />
+                                    </Link>
+                                  )}
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Success Explanation Card */}
+                    <AnimatePresence>
+                      {showExplanation && currentAnswer?.isCorrect && currentQuestion.explanation && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0, y: -20 }}
+                          animate={{ opacity: 1, height: 'auto', y: 0 }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                          className="mt-4"
+                        >
+                          <Card className="border-[var(--profit)] bg-gradient-to-r from-[var(--profit)]/5 to-transparent">
+                            <CardContent className="p-4">
+                              <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 rounded-full bg-[var(--profit)]/20 flex items-center justify-center flex-shrink-0">
+                                  <Zap className="w-5 h-5 text-[var(--profit)]" />
+                                </div>
+                                <div className="flex-1">
+                                  <p className="font-semibold text-[var(--profit)] mb-1">
+                                    Correct!
+                                  </p>
+                                  <p className="text-sm text-[var(--text-secondary)]">
+                                    {currentQuestion.explanation}
+                                  </p>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </CardContent>
+                </Card>
+              </motion.div>
             </motion.div>
           </AnimatePresence>
 
           {/* Actions */}
-          <div className="flex items-center justify-between">
+          <motion.div
+            className="flex items-center justify-between"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+          >
             <Button
               variant="ghost"
-              onClick={() => {
-                if (currentQuestionIndex > 0) {
-                  setShowExplanation(false);
-                  setCurrentQuestionIndex(prev => prev - 1);
-                }
-              }}
+              onClick={prevQuestion}
               disabled={currentQuestionIndex === 0}
             >
               <ChevronLeft className="w-4 h-4 mr-1" />
@@ -604,28 +1030,40 @@ export default function QuizPage() {
             </Button>
 
             {showExplanation ? (
-              <Button onClick={nextQuestion}>
-                {currentQuestionIndex === data.questions.length - 1 ? (
-                  <>
-                    See Results
-                    <Trophy className="w-4 h-4 ml-1" />
-                  </>
-                ) : (
-                  <>
-                    Next Question
-                    <ChevronRight className="w-4 h-4 ml-1" />
-                  </>
-                )}
-              </Button>
-            ) : (
-              <Button
-                onClick={submitCurrentAnswer}
-                disabled={!hasAnswered}
+              <motion.div
+                initial={{ scale: 0.9 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', stiffness: 400 }}
               >
-                Submit Answer
-              </Button>
+                <Button onClick={nextQuestion} size="lg">
+                  {currentQuestionIndex === data.questions.length - 1 ? (
+                    <>
+                      See Results
+                      <Trophy className="w-4 h-4 ml-2" />
+                    </>
+                  ) : (
+                    <>
+                      Next Question
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    </>
+                  )}
+                </Button>
+              </motion.div>
+            ) : (
+              <motion.div
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <Button
+                  onClick={submitCurrentAnswer}
+                  disabled={!hasAnswered}
+                  size="lg"
+                >
+                  Submit Answer
+                </Button>
+              </motion.div>
             )}
-          </div>
+          </motion.div>
         </div>
       </PageShell>
     </>
