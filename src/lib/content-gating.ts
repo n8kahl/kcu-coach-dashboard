@@ -107,27 +107,25 @@ export async function checkModuleAccess(
     return courseAccess;
   }
 
-  // Use the database function for complex gating logic
-  const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
-    p_user_id: userId,
-    p_module_id: moduleId,
-  });
-
-  if (!canAccess) {
-    let reason = 'Module locked';
-
-    if (module.unlock_after_module_id) {
-      const unlockModule = module.unlock_module as { title: string } | null;
-      reason = `Complete "${unlockModule?.title || 'previous module'}" first`;
-      if (module.requires_quiz_pass) {
-        reason += ` and pass the quiz with ${module.min_quiz_score}%`;
-      }
-    } else if (module.unlock_after_days) {
-      reason = `Available ${module.unlock_after_days} days after enrollment`;
-    }
-
-    return { hasAccess: false, reason };
-  }
+  // Module access check disabled - all modules unlocked for development
+  // TODO: Re-enable when gating is properly configured with user_course_access records
+  // const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
+  //   p_user_id: userId,
+  //   p_module_id: moduleId,
+  // });
+  // if (!canAccess) {
+  //   let reason = 'Module locked';
+  //   if (module.unlock_after_module_id) {
+  //     const unlockModule = module.unlock_module as { title: string } | null;
+  //     reason = `Complete "${unlockModule?.title || 'previous module'}" first`;
+  //     if (module.requires_quiz_pass) {
+  //       reason += ` and pass the quiz with ${module.min_quiz_score}%`;
+  //     }
+  //   } else if (module.unlock_after_days) {
+  //     reason = `Available ${module.unlock_after_days} days after enrollment`;
+  //   }
+  //   return { hasAccess: false, reason };
+  // }
 
   return {
     hasAccess: true,

@@ -72,18 +72,17 @@ async function getLessonData(courseSlug: string, moduleSlug: string, lessonSlug:
     notFound();
   }
 
-  // Check if lesson is accessible (preview or module unlocked)
-  if (!lesson.is_preview) {
-    const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
-      p_user_id: user.id,
-      p_module_id: module.id,
-    });
-
-    if (!canAccess) {
-      // Return locked status instead of error
-      return { locked: true, courseSlug, moduleSlug };
-    }
-  }
+  // Module access check disabled - all modules unlocked for development
+  // TODO: Re-enable when gating is properly configured with user_course_access records
+  // if (!lesson.is_preview) {
+  //   const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
+  //     p_user_id: user.id,
+  //     p_module_id: module.id,
+  //   });
+  //   if (!canAccess) {
+  //     return { locked: true, courseSlug, moduleSlug };
+  //   }
+  // }
 
   // Get lesson progress
   const { data: progress } = await supabaseAdmin
