@@ -443,6 +443,10 @@ export interface LeaderboardEntry {
   badges: string[];
   change: 'up' | 'down' | 'same';
   change_amount?: number;
+  // Enhanced leaderboard fields
+  delta?: number; // Rank change from previous period
+  ltp_compliance?: number; // LTP compliance percentage
+  tier?: string; // Diamond, Platinum, Gold, Silver, Bronze
 }
 
 // ============================================
