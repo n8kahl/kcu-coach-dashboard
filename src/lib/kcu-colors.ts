@@ -77,6 +77,12 @@ export const KCU_COLORS = {
   support: '#10b981',
   resistance: '#ef4444',
 
+  // Swing Levels from MTF (4H/1H)
+  swingHigh4h: '#f97316',  // Orange - strong resistance
+  swingLow4h: '#14b8a6',   // Teal - strong support
+  swingHigh1h: '#fb923c',  // Light orange - resistance
+  swingLow1h: '#5eead4',   // Light teal - support
+
   // Gamma Levels
   callWall: '#ef4444',   // Red - resistance
   putWall: '#10b981',    // Green - support
@@ -154,6 +160,12 @@ const LEVEL_COLOR_MAP: Record<string, string> = {
   daily_resistance: KCU_COLORS.resistance,
   demand_zone: KCU_COLORS.support,
   supply_zone: KCU_COLORS.resistance,
+
+  // Swing Levels from MTF Charts
+  swing_high_4h: KCU_COLORS.swingHigh4h,
+  swing_low_4h: KCU_COLORS.swingLow4h,
+  swing_high_1h: KCU_COLORS.swingHigh1h,
+  swing_low_1h: KCU_COLORS.swingLow1h,
 
   // Gamma
   call_wall: KCU_COLORS.callWall,
@@ -241,11 +253,12 @@ export function getLevelStyle(
   // Determine line style based on level type
   let lineStyle = LineStyle.Solid;
 
-  // Dashed for ORB, PMH/PML, and gamma levels
+  // Dashed for ORB, PMH/PML, gamma levels, and swing levels
   const dashedLevels = [
     'orb_high', 'orb_low', 'opening_range_high', 'opening_range_low',
     'pmh', 'pml', 'pm_high', 'pm_low', 'premarket_high', 'premarket_low',
-    'call_wall', 'put_wall', 'zero_gamma', 'gamma_flip'
+    'call_wall', 'put_wall', 'zero_gamma', 'gamma_flip',
+    'swing_high_4h', 'swing_low_4h', 'swing_high_1h', 'swing_low_1h'
   ];
 
   // Dotted for round numbers and hourly levels
