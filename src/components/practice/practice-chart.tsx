@@ -12,6 +12,12 @@
  * - Displaying indicators (VWAP, EMAs, Ripster Clouds)
  * - Showing key levels and gamma levels
  * - Animating the current candle formation (via useCandleReplay)
+ *
+ * Performance Optimization:
+ * - Indicator series are created ONCE during initialization
+ * - Data updates use setData() without recreating series
+ * - Horizontal levels use createPriceLine() attached to candle series
+ * - Decision point marker uses chart markers, not line series
  */
 
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
@@ -25,6 +31,8 @@ import {
   CrosshairMode,
   LineStyle,
   AreaData,
+  IPriceLine,
+  SeriesMarker,
 } from 'lightweight-charts';
 import { cn } from '@/lib/utils';
 import {
@@ -263,8 +271,23 @@ export function PracticeChart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
-  const indicatorSeriesRef = useRef<ISeriesApi<'Line' | 'Area'>[]>([]);
-  const levelLinesRef = useRef<ISeriesApi<'Line'>[]>([]);
+
+  // Persistent indicator series refs - created once, updated via setData()
+  const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const vwapUpper1Ref = useRef<ISeriesApi<'Line'> | null>(null);
+  const vwapLower1Ref = useRef<ISeriesApi<'Line'> | null>(null);
+  const vwapUpper2Ref = useRef<ISeriesApi<'Line'> | null>(null);
+  const vwapLower2Ref = useRef<ISeriesApi<'Line'> | null>(null);
+  const ema9SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const ema21SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const ribbonBullishRef = useRef<ISeriesApi<'Area'> | null>(null);
+  const ribbonBearishRef = useRef<ISeriesApi<'Area'> | null>(null);
+
+  // Price lines for horizontal levels (attached to candle series)
+  const priceLinesRef = useRef<IPriceLine[]>([]);
+
+  // Track initialization state
+  const isInitializedRef = useRef(false);
 
   // Local UI state (not game state)
   const [showLevels, setShowLevels] = useState(true);
@@ -309,7 +332,7 @@ export function PracticeChart({
   }, []);
 
   // =============================================================================
-  // Initialize Chart
+  // Initialize Chart - Create all series ONCE
   // =============================================================================
 
   useEffect(() => {
@@ -387,9 +410,85 @@ export function PracticeChart({
       scaleMargins: { top: 0.85, bottom: 0 },
     });
 
+    // =========================================================================
+    // Create indicator series ONCE - they persist for chart lifetime
+    // =========================================================================
+
+    // Ripster Clouds (area series for ribbon) - add first so they render behind
+    ribbonBullishRef.current = chart.addAreaSeries({
+      topColor: CHART_COLORS.ribbonBullish,
+      bottomColor: 'transparent',
+      lineColor: 'transparent',
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    ribbonBearishRef.current = chart.addAreaSeries({
+      topColor: CHART_COLORS.ribbonBearish,
+      bottomColor: 'transparent',
+      lineColor: 'transparent',
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+
+    // VWAP bands (dotted/dashed lines)
+    vwapUpper2Ref.current = chart.addLineSeries({
+      color: CHART_COLORS.vwap,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    vwapLower2Ref.current = chart.addLineSeries({
+      color: CHART_COLORS.vwap,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    vwapUpper1Ref.current = chart.addLineSeries({
+      color: CHART_COLORS.vwap,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    vwapLower1Ref.current = chart.addLineSeries({
+      color: CHART_COLORS.vwap,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+
+    // VWAP main line
+    vwapSeriesRef.current = chart.addLineSeries({
+      color: CHART_COLORS.vwap,
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      title: 'VWAP',
+    });
+
+    // EMA lines
+    ema9SeriesRef.current = chart.addLineSeries({
+      color: CHART_COLORS.ema9,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: 'EMA9',
+    });
+    ema21SeriesRef.current = chart.addLineSeries({
+      color: CHART_COLORS.ema21,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: 'EMA21',
+    });
+
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
+    isInitializedRef.current = true;
 
     // Handle resize with requestAnimationFrame to prevent "ResizeObserver loop limit exceeded" errors
     let rafId: number | null = null;
@@ -418,12 +517,22 @@ export function PracticeChart({
         cancelAnimationFrame(rafId);
       }
       resizeObserver.disconnect();
+      // Clear all price lines before removing chart
+      priceLinesRef.current = [];
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
-      indicatorSeriesRef.current = [];
-      levelLinesRef.current = [];
+      vwapSeriesRef.current = null;
+      vwapUpper1Ref.current = null;
+      vwapLower1Ref.current = null;
+      vwapUpper2Ref.current = null;
+      vwapLower2Ref.current = null;
+      ema9SeriesRef.current = null;
+      ema21SeriesRef.current = null;
+      ribbonBullishRef.current = null;
+      ribbonBearishRef.current = null;
+      isInitializedRef.current = false;
     };
   }, []);
 
@@ -475,23 +584,24 @@ export function PracticeChart({
   }, [visibleCandles, animatingCandle, isAnimating, indicators.showVolume, formatCandlesForChart, formatVolumeForChart]);
 
   // =============================================================================
-  // Update Indicators
+  // Update Indicators - Use setData() on existing series (no recreation)
   // =============================================================================
 
   useEffect(() => {
-    if (!chartRef.current) return;
-
-    // Remove existing indicator series
-    indicatorSeriesRef.current.forEach((series) => {
-      try {
-        chartRef.current?.removeSeries(series);
-      } catch {
-        // Series may already be removed
-      }
-    });
-    indicatorSeriesRef.current = [];
-
-    if (visibleCandles.length < 21) return;
+    if (!isInitializedRef.current) return;
+    if (visibleCandles.length < 21) {
+      // Clear all indicator data when not enough candles
+      vwapSeriesRef.current?.setData([]);
+      vwapUpper1Ref.current?.setData([]);
+      vwapLower1Ref.current?.setData([]);
+      vwapUpper2Ref.current?.setData([]);
+      vwapLower2Ref.current?.setData([]);
+      ema9SeriesRef.current?.setData([]);
+      ema21SeriesRef.current?.setData([]);
+      ribbonBullishRef.current?.setData([]);
+      ribbonBearishRef.current?.setData([]);
+      return;
+    }
 
     const bars: Bar[] = visibleCandles.map((c) => ({
       t: c.time,
@@ -504,20 +614,13 @@ export function PracticeChart({
     const closes = bars.map((b) => b.c);
     const timestamps = bars.map((b) => b.t);
 
-    // VWAP and bands
+    // VWAP and bands - update existing series via setData()
     if (indicators.showVWAP || indicators.showVWAPBands) {
       const vwapBands = calculateVWAPBands(bars);
 
-      // VWAP line - PURPLE
-      if (indicators.showVWAP) {
-        const vwapSeries = chartRef.current.addLineSeries({
-          color: CHART_COLORS.vwap,
-          lineWidth: 2,
-          priceLineVisible: false,
-          lastValueVisible: true,
-          title: 'VWAP',
-        });
-        vwapSeries.setData(
+      // VWAP main line
+      if (indicators.showVWAP && vwapSeriesRef.current) {
+        vwapSeriesRef.current.setData(
           vwapBands.vwap
             .map((v, i) => ({
               time: (timestamps[i] / 1000) as Time,
@@ -525,148 +628,74 @@ export function PracticeChart({
             }))
             .filter((d) => d.value != null && isFinite(d.value))
         );
-        indicatorSeriesRef.current.push(vwapSeries);
+      } else {
+        vwapSeriesRef.current?.setData([]);
       }
 
-      // VWAP Standard Deviation Bands
+      // VWAP bands
       if (indicators.showVWAPBands) {
-        // Upper band 1 (+1 SD)
-        const upper1Series = chartRef.current.addLineSeries({
-          color: CHART_COLORS.vwap,
-          lineWidth: 1,
-          lineStyle: LineStyle.Dotted,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        });
-        upper1Series.setData(
+        vwapUpper1Ref.current?.setData(
           vwapBands.upperBand1
-            .map((v, i) => ({
-              time: (timestamps[i] / 1000) as Time,
-              value: v,
-            }))
+            .map((v, i) => ({ time: (timestamps[i] / 1000) as Time, value: v }))
             .filter((d) => d.value != null && isFinite(d.value))
         );
-        indicatorSeriesRef.current.push(upper1Series);
-
-        // Lower band 1 (-1 SD)
-        const lower1Series = chartRef.current.addLineSeries({
-          color: CHART_COLORS.vwap,
-          lineWidth: 1,
-          lineStyle: LineStyle.Dotted,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        });
-        lower1Series.setData(
+        vwapLower1Ref.current?.setData(
           vwapBands.lowerBand1
-            .map((v, i) => ({
-              time: (timestamps[i] / 1000) as Time,
-              value: v,
-            }))
+            .map((v, i) => ({ time: (timestamps[i] / 1000) as Time, value: v }))
             .filter((d) => d.value != null && isFinite(d.value))
         );
-        indicatorSeriesRef.current.push(lower1Series);
-
-        // Upper band 2 (+2 SD)
-        const upper2Series = chartRef.current.addLineSeries({
-          color: CHART_COLORS.vwap,
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        });
-        upper2Series.setData(
+        vwapUpper2Ref.current?.setData(
           vwapBands.upperBand2
-            .map((v, i) => ({
-              time: (timestamps[i] / 1000) as Time,
-              value: v,
-            }))
+            .map((v, i) => ({ time: (timestamps[i] / 1000) as Time, value: v }))
             .filter((d) => d.value != null && isFinite(d.value))
         );
-        indicatorSeriesRef.current.push(upper2Series);
-
-        // Lower band 2 (-2 SD)
-        const lower2Series = chartRef.current.addLineSeries({
-          color: CHART_COLORS.vwap,
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        });
-        lower2Series.setData(
+        vwapLower2Ref.current?.setData(
           vwapBands.lowerBand2
-            .map((v, i) => ({
-              time: (timestamps[i] / 1000) as Time,
-              value: v,
-            }))
+            .map((v, i) => ({ time: (timestamps[i] / 1000) as Time, value: v }))
             .filter((d) => d.value != null && isFinite(d.value))
         );
-        indicatorSeriesRef.current.push(lower2Series);
+      } else {
+        vwapUpper1Ref.current?.setData([]);
+        vwapLower1Ref.current?.setData([]);
+        vwapUpper2Ref.current?.setData([]);
+        vwapLower2Ref.current?.setData([]);
       }
+    } else {
+      // Hide VWAP entirely
+      vwapSeriesRef.current?.setData([]);
+      vwapUpper1Ref.current?.setData([]);
+      vwapLower1Ref.current?.setData([]);
+      vwapUpper2Ref.current?.setData([]);
+      vwapLower2Ref.current?.setData([]);
     }
 
     // EMA 9 - GREEN (KCU Standard)
-    if (indicators.showEMA9) {
+    if (indicators.showEMA9 && ema9SeriesRef.current) {
       const ema9Values = calculateEMA(closes, 9);
-      const ema9Series = chartRef.current.addLineSeries({
-        color: CHART_COLORS.ema9, // GREEN
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        title: 'EMA9',
-      });
-      ema9Series.setData(
+      ema9SeriesRef.current.setData(
         ema9Values
-          .map((v, i) => ({
-            time: (timestamps[i] / 1000) as Time,
-            value: v,
-          }))
+          .map((v, i) => ({ time: (timestamps[i] / 1000) as Time, value: v }))
           .filter((d) => d.value > 0)
       );
-      indicatorSeriesRef.current.push(ema9Series);
+    } else {
+      ema9SeriesRef.current?.setData([]);
     }
 
     // EMA 21 - RED (KCU Standard)
-    if (indicators.showEMA21) {
+    if (indicators.showEMA21 && ema21SeriesRef.current) {
       const ema21Values = calculateEMA(closes, 21);
-      const ema21Series = chartRef.current.addLineSeries({
-        color: CHART_COLORS.ema21, // RED
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        title: 'EMA21',
-      });
-      ema21Series.setData(
+      ema21SeriesRef.current.setData(
         ema21Values
-          .map((v, i) => ({
-            time: (timestamps[i] / 1000) as Time,
-            value: v,
-          }))
+          .map((v, i) => ({ time: (timestamps[i] / 1000) as Time, value: v }))
           .filter((d) => d.value > 0)
       );
-      indicatorSeriesRef.current.push(ema21Series);
+    } else {
+      ema21SeriesRef.current?.setData([]);
     }
 
     // Ripster Clouds - EMA 8/21 Fill Area
-    if (indicators.showEMARibbon) {
+    if (indicators.showEMARibbon && ribbonBullishRef.current && ribbonBearishRef.current) {
       const ribbon = calculateEMARibbon(closes);
-
-      // Create area series for the bullish ribbon (green when EMA8 > EMA21)
-      const bullishRibbonSeries = chartRef.current.addAreaSeries({
-        topColor: CHART_COLORS.ribbonBullish,
-        bottomColor: 'transparent',
-        lineColor: 'transparent',
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-
-      // Create area series for bearish ribbon (red when EMA8 < EMA21)
-      const bearishRibbonSeries = chartRef.current.addAreaSeries({
-        topColor: CHART_COLORS.ribbonBearish,
-        bottomColor: 'transparent',
-        lineColor: 'transparent',
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
 
       // Build bullish and bearish area data
       const bullishData: AreaData[] = [];
@@ -681,40 +710,34 @@ export function PracticeChart({
         }
       });
 
-      if (bullishData.length > 0) {
-        bullishRibbonSeries.setData(bullishData);
-        indicatorSeriesRef.current.push(bullishRibbonSeries);
-      }
-
-      if (bearishData.length > 0) {
-        bearishRibbonSeries.setData(bearishData);
-        indicatorSeriesRef.current.push(bearishRibbonSeries);
-      }
+      ribbonBullishRef.current.setData(bullishData);
+      ribbonBearishRef.current.setData(bearishData);
+    } else {
+      ribbonBullishRef.current?.setData([]);
+      ribbonBearishRef.current?.setData([]);
     }
   }, [visibleCandles, indicators]);
 
   // =============================================================================
-  // Update Key Levels (including Gamma and Trade Levels)
+  // Update Key Levels using createPriceLine() - No series churn
+  // Price lines are horizontal lines attached to a series, showing exact price
   // =============================================================================
 
   useEffect(() => {
-    if (!chartRef.current) return;
+    if (!candleSeriesRef.current) return;
+    const candleSeries = candleSeriesRef.current;
 
-    // Remove existing level lines
-    levelLinesRef.current.forEach((line) => {
+    // Remove existing price lines
+    priceLinesRef.current.forEach((priceLine) => {
       try {
-        chartRef.current?.removeSeries(line);
+        candleSeries.removePriceLine(priceLine);
       } catch {
-        // Series may already be removed
+        // Price line may already be removed
       }
     });
-    levelLinesRef.current = [];
+    priceLinesRef.current = [];
 
     if (!showLevels) return;
-    if (visibleCandles.length === 0) return;
-
-    const startTime = visibleCandles[0].time / 1000;
-    const endTime = visibleCandles[visibleCandles.length - 1].time / 1000;
 
     // Combine all levels
     const allLevels: Array<KeyLevel & { isGamma?: boolean; isTrade?: boolean }> = [
@@ -732,49 +755,58 @@ export function PracticeChart({
       })),
     ];
 
-    // Add each level as a line series
+    // Add each level as a price line attached to candle series
     allLevels.forEach((level) => {
       const color = LEVEL_COLORS[level.type] || LEVEL_COLORS.default;
       const strength = level.strength || 50;
 
-      const lineSeries = chartRef.current!.addLineSeries({
+      const priceLine = candleSeries.createPriceLine({
+        price: level.price,
         color,
         lineWidth: strength >= 80 ? 2 : level.isTrade ? 2 : 1,
         lineStyle: level.isTrade ? LineStyle.Solid : strength >= 70 ? LineStyle.Solid : LineStyle.Dashed,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
+        axisLabelVisible: true,
+        title: `${level.label} $${level.price.toFixed(2)}`,
       });
 
-      const lineData: LineData[] = [
-        { time: startTime as Time, value: level.price },
-        { time: endTime as Time, value: level.price },
-      ];
-
-      lineSeries.setData(lineData);
-      levelLinesRef.current.push(lineSeries);
+      priceLinesRef.current.push(priceLine);
     });
+  }, [levels, gammaLevels, tradeLevels, showLevels]);
 
-    // Add decision point marker if in replay mode and reached
-    if (isReplayMode && decisionReached && decisionPointIndex !== undefined && visibleCandles[decisionPointIndex]) {
-      const decisionCandle = visibleCandles[Math.min(decisionPointIndex, visibleCandles.length - 1)];
-      const markerSeries = chartRef.current.addLineSeries({
-        color: CHART_COLORS.decisionPoint,
-        lineWidth: 2,
-        lineStyle: LineStyle.Dashed,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-      });
+  // =============================================================================
+  // Decision Point Marker - Uses chart markers, not line series
+  // =============================================================================
 
-      const decisionTime = decisionCandle.time / 1000;
-      markerSeries.setData([
-        { time: decisionTime as Time, value: decisionCandle.close * 0.99 },
-        { time: decisionTime as Time, value: decisionCandle.close * 1.01 },
-      ]);
-      levelLinesRef.current.push(markerSeries);
+  useEffect(() => {
+    if (!candleSeriesRef.current) return;
+    const candleSeries = candleSeriesRef.current;
+
+    // Only show decision point marker in replay mode when decision is reached
+    if (!isReplayMode || !decisionReached || decisionPointIndex === undefined || visibleCandles.length === 0) {
+      // Clear markers
+      candleSeries.setMarkers([]);
+      return;
     }
-  }, [levels, gammaLevels, tradeLevels, showLevels, visibleCandles, isReplayMode, decisionReached, decisionPointIndex]);
+
+    const decisionCandle = visibleCandles[Math.min(decisionPointIndex, visibleCandles.length - 1)];
+    if (!decisionCandle) {
+      candleSeries.setMarkers([]);
+      return;
+    }
+
+    // Create a marker at the decision point
+    const markers: SeriesMarker<Time>[] = [
+      {
+        time: (decisionCandle.time / 1000) as Time,
+        position: 'aboveBar',
+        color: CHART_COLORS.decisionPoint,
+        shape: 'arrowDown',
+        text: 'DECISION',
+      },
+    ];
+
+    candleSeries.setMarkers(markers);
+  }, [isReplayMode, decisionReached, decisionPointIndex, visibleCandles]);
 
   // =============================================================================
   // Zoom Controls

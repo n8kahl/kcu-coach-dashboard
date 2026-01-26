@@ -331,7 +331,7 @@ export default function OverviewPage() {
                     <Button
                       variant="primary"
                       icon={<BookOpen className="w-4 h-4" />}
-                      onClick={() => router.push('/learning')}
+                      onClick={() => router.push('/learn')}
                     >
                       Begin Learning
                     </Button>
@@ -366,7 +366,7 @@ export default function OverviewPage() {
                     variant="secondary"
                     className="w-full justify-start"
                     icon={<Target className="w-4 h-4" />}
-                    onClick={() => router.push('/learning')}
+                    onClick={() => router.push('/learn')}
                   >
                     Take a Quiz
                   </Button>

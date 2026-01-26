@@ -11,8 +11,6 @@ export {
   useCourseProgress,
   useModuleProgress,
   useRecentActivity,
-  useThinkificSSO,
-  useOpenThinkific,
 } from './use-learning-progress';
 
 // New Video Learning System Hooks

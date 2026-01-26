@@ -421,9 +421,9 @@ function getMockResults(query: string, scope: string): SearchResult[] {
     { id: 't3', type: 'trade', title: 'NVDA Long +$380', description: 'Jan 13, 2024 - Perfect patience candle', url: '/journal?trade=t3', relevance: 80 },
 
     // Lessons
-    { id: 'l1', type: 'lesson', title: 'Understanding Patience Candles', description: 'LTP Framework Module - 12 min', url: '/learning/ltp-framework/patience-candles', relevance: 90 },
-    { id: 'l2', type: 'lesson', title: 'Key Level Identification', description: 'LTP Framework Module - 15 min', url: '/learning/ltp-framework/key-levels', relevance: 85 },
-    { id: 'l3', type: 'lesson', title: 'Trend Analysis Masterclass', description: 'Advanced Module - 20 min', url: '/learning/advanced/trend-analysis', relevance: 75 },
+    { id: 'l1', type: 'lesson', title: 'Understanding Patience Candles', description: 'LTP Framework Module - 12 min', url: '/learn/ltp-framework/patience-candles', relevance: 90 },
+    { id: 'l2', type: 'lesson', title: 'Key Level Identification', description: 'LTP Framework Module - 15 min', url: '/learn/ltp-framework/key-levels', relevance: 85 },
+    { id: 'l3', type: 'lesson', title: 'Trend Analysis Masterclass', description: 'Advanced Module - 20 min', url: '/learn/advanced/trend-analysis', relevance: 75 },
 
     // Videos
     { id: 'v1', type: 'video', title: 'Live Trading Session - LTP in Action', description: 'YouTube - 45 min', url: '/resources?video=v1', relevance: 70 },
@@ -432,7 +432,7 @@ function getMockResults(query: string, scope: string): SearchResult[] {
     { id: 's1', type: 'setup', title: 'SPY Support Level Setup', description: 'Current - 85% confluence', url: '/companion?setup=s1', relevance: 88 },
 
     // Concepts
-    { id: 'c1', type: 'concept', title: 'LTP Framework', description: 'Core trading methodology', url: '/learning/ltp-framework', relevance: 95 },
+    { id: 'c1', type: 'concept', title: 'LTP Framework', description: 'Core trading methodology', url: '/learn/ltp-framework', relevance: 95 },
   ];
 
   // Filter by query relevance

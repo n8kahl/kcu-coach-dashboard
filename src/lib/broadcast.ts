@@ -16,6 +16,25 @@ let useRedis = false;
 let redisInitialized = false;
 
 /**
+ * Broadcast mode enum for honest client status reporting
+ */
+export type BroadcastMode = 'redis' | 'memory' | 'unknown';
+
+/**
+ * Get current broadcast mode information.
+ * Used to provide honest status to clients about real-time capabilities.
+ */
+export function getBroadcastMode(): { mode: BroadcastMode; initialized: boolean } {
+  if (!redisInitialized) {
+    return { mode: 'unknown', initialized: false };
+  }
+  return {
+    mode: useRedis ? 'redis' : 'memory',
+    initialized: true,
+  };
+}
+
+/**
  * Initialize Redis pub/sub if available
  */
 async function initializeRedis(): Promise<void> {
@@ -257,6 +276,15 @@ export interface CoachingUpdateEvent {
   timestamp: string;
 }
 
+export interface CompanionMessageEvent {
+  sessionId: string;
+  messageType: 'info' | 'warning' | 'action' | 'milestone' | 'risk' | 'education';
+  message: string;
+  triggerType?: string;
+  priceAtMessage?: number;
+  pnlPercent?: number;
+}
+
 // ============================================
 // Helper Functions for Specific Event Types
 // ============================================
@@ -287,6 +315,10 @@ export function broadcastLevelApproach(userId: string, approach: LevelApproachEv
 
 export function broadcastCoachingUpdate(userId: string, event: CoachingUpdateEvent): Promise<boolean> {
   return broadcastToUser(userId, 'coaching_update', event);
+}
+
+export function broadcastCompanionMessage(userId: string, message: CompanionMessageEvent): Promise<boolean> {
+  return broadcastToUser(userId, 'companion_message', message);
 }
 
 // ============================================

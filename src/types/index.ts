@@ -3,6 +3,20 @@
 // ============================================
 
 // ============================================
+// Market Data Types (Canonical)
+// ============================================
+export type {
+  Quote,
+  Bar,
+  Candle,
+  LegacyBar,
+  MarketSession,
+  TrendDirection,
+  GammaRegime,
+} from './market';
+export { fromLegacyBar, toLegacyBar } from './market';
+
+// ============================================
 // User & Auth Types
 // ============================================
 
@@ -563,7 +577,6 @@ export type RichContent =
   | SetupVisualizationContent
   | QuizPromptContent
   | VideoTimestampContent
-  | ThinkificLinkContent
   | LTPAnalysisChartContent;
 
 export interface LessonLinkContent {
@@ -574,6 +587,8 @@ export interface LessonLinkContent {
   duration: string;
   description?: string;
   moduleTitle?: string;
+  /** If provided, enables direct canonical link instead of resolver */
+  courseSlug?: string;
 }
 
 export interface ChartWidgetContent {
@@ -624,16 +639,6 @@ export interface VideoTimestampContent {
   description?: string;
   source: 'youtube';
   thumbnailUrl?: string;
-}
-
-export interface ThinkificLinkContent {
-  type: 'thinkific_link';
-  courseSlug: string;
-  lessonSlug: string;
-  title: string;
-  timestampSeconds?: number;
-  description?: string;
-  source: 'thinkific';
 }
 
 export interface LTPAnalysisChartContent {

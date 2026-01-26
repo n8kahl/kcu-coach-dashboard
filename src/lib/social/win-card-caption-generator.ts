@@ -78,67 +78,21 @@ export interface WinCardCaption {
   voiceProfileUsed: string;
 }
 
-export interface WinCardAspectRatio {
-  name: 'story' | 'post' | 'square';
-  width: number;
-  height: number;
-  ratio: string;
-  label: string;
-}
+// Import and re-export types from centralized location
+import {
+  type AspectRatioOption,
+  type WinCardTheme as WinCardThemeType,
+  type WinCardThemeName,
+  ASPECT_RATIOS as ASPECT_RATIOS_BASE,
+  WIN_CARD_THEMES as WIN_CARD_THEMES_BASE,
+} from '@/types/win-card';
 
-export const ASPECT_RATIOS: WinCardAspectRatio[] = [
-  { name: 'story', width: 1080, height: 1920, ratio: '9:16', label: 'Instagram Story' },
-  { name: 'post', width: 1080, height: 1350, ratio: '4:5', label: 'Instagram Post' },
-  { name: 'square', width: 1080, height: 1080, ratio: '1:1', label: 'Square' },
-];
-
-// ============================================
-// Win Card Themes
-// ============================================
-
-export interface WinCardTheme {
-  name: string;
-  backgroundColor: string;
-  headerColor: string;
-  accentColor: string;
-  textPrimary: string;
-  textSecondary: string;
-  borderColor: string;
-  glowColor: string;
-}
-
-export const WIN_CARD_THEMES: Record<string, WinCardTheme> = {
-  gold: {
-    name: 'Gold & Black',
-    backgroundColor: '#0A0A0A',
-    headerColor: '#FFD700',
-    accentColor: '#FFD700',
-    textPrimary: '#FFFFFF',
-    textSecondary: '#A0A0A0',
-    borderColor: '#FFD700',
-    glowColor: 'rgba(255, 215, 0, 0.3)',
-  },
-  platinum: {
-    name: 'Platinum',
-    backgroundColor: '#0F0F0F',
-    headerColor: '#E5E4E2',
-    accentColor: '#E5E4E2',
-    textPrimary: '#FFFFFF',
-    textSecondary: '#808080',
-    borderColor: '#E5E4E2',
-    glowColor: 'rgba(229, 228, 226, 0.3)',
-  },
-  emerald: {
-    name: 'Emerald',
-    backgroundColor: '#0A1F0A',
-    headerColor: '#50C878',
-    accentColor: '#50C878',
-    textPrimary: '#FFFFFF',
-    textSecondary: '#7CB68B',
-    borderColor: '#50C878',
-    glowColor: 'rgba(80, 200, 120, 0.3)',
-  },
-};
+// Re-export with original names for backwards compatibility
+export type WinCardAspectRatio = AspectRatioOption;
+export type WinCardTheme = WinCardThemeType;
+export { WinCardThemeName };
+export const ASPECT_RATIOS = ASPECT_RATIOS_BASE;
+export const WIN_CARD_THEMES = WIN_CARD_THEMES_BASE;
 
 // ============================================
 // Caption Generation Prompt
@@ -551,7 +505,7 @@ export async function getWinCardQueue(
     studentWin: row.win_data as StudentWinData,
     caption: row.caption_data as WinCardCaption,
     aspectRatio: ASPECT_RATIOS.find(ar => ar.name === row.aspect_ratio) || ASPECT_RATIOS[1],
-    theme: WIN_CARD_THEMES[row.theme_name.toLowerCase().replace(/\s+/g, '')] || WIN_CARD_THEMES.gold,
+    theme: WIN_CARD_THEMES[row.theme_name.toLowerCase().replace(/\s+/g, '') as WinCardThemeName] || WIN_CARD_THEMES.gold,
     status: row.status as QueuedWinCard['status'],
     imageUrl: row.image_url,
     createdAt: row.created_at,

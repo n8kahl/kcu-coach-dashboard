@@ -58,7 +58,7 @@ const userNavItems: NavItem[] = [
   { label: 'Companion', href: '/companion', icon: Target },
   { label: 'Practice', href: '/practice', icon: Dumbbell, badge: 'New' },
   { label: 'AI Coach', href: '#ai-coach', icon: Sparkles, isAICoach: true },
-  { label: 'Learning', href: '/learning', icon: GraduationCap },
+  { label: 'Learning', href: '/learn', icon: GraduationCap },
   { label: 'Resources', href: '/resources', icon: Youtube },
   { label: 'Progress', href: '/progress', icon: TrendingUp },
   { label: 'Trade Journal', href: '/journal', icon: BookOpen },

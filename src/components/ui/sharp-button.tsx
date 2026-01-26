@@ -1,6 +1,19 @@
 'use client';
 
 /**
+ * @deprecated Use Button from '@/components/ui/button' instead.
+ *
+ * SharpButton is deprecated and will be removed in a future release.
+ * The Button component already uses sharp corners due to Tailwind config.
+ *
+ * Migration:
+ *   Before: <SharpButton variant="primary">Save</SharpButton>
+ *   After:  <Button variant="primary">Save</Button>
+ *
+ * Import: import { Button } from '@/components/ui/button';
+ */
+
+/**
  * SharpButton - Premium Trading Terminal Button
  *
  * A demonstration component showcasing the KCU Design System tokens:

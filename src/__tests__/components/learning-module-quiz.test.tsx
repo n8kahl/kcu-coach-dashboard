@@ -26,7 +26,7 @@ const TestQuizButton = ({ moduleSlug, progressPercent }: QuizButtonProps) => {
       disabled={progressPercent < 100}
       onClick={() => {
         if (progressPercent === 100) {
-          router.push(`/learning/${moduleSlug}/quiz`);
+          router.push(`/learn/${moduleSlug}/quiz`);
         }
       }}
       data-testid="quiz-button"
@@ -59,7 +59,7 @@ describe('Learning Module Quiz Button', () => {
     render(<TestQuizButton moduleSlug="fundamentals" progressPercent={100} />);
 
     fireEvent.click(screen.getByTestId('quiz-button'));
-    expect(mockPush).toHaveBeenCalledWith('/learning/fundamentals/quiz');
+    expect(mockPush).toHaveBeenCalledWith('/learn/fundamentals/quiz');
   });
 
   it('should not navigate when clicked with less than 100% progress', () => {
@@ -73,6 +73,6 @@ describe('Learning Module Quiz Button', () => {
     render(<TestQuizButton moduleSlug="advanced-patterns" progressPercent={100} />);
 
     fireEvent.click(screen.getByTestId('quiz-button'));
-    expect(mockPush).toHaveBeenCalledWith('/learning/advanced-patterns/quiz');
+    expect(mockPush).toHaveBeenCalledWith('/learn/advanced-patterns/quiz');
   });
 });

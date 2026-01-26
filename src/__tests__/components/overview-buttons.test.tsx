@@ -20,13 +20,13 @@ const TestOverviewButtons = () => {
       <button onClick={() => router.push('/win-cards')} data-testid="share-progress">
         Share Progress
       </button>
-      <button onClick={() => router.push('/learning')} data-testid="begin-learning">
+      <button onClick={() => router.push('/learn')} data-testid="begin-learning">
         Begin Learning
       </button>
       <button onClick={() => router.push('/journal')} data-testid="log-trade">
         Log a Trade
       </button>
-      <button onClick={() => router.push('/learning')} data-testid="take-quiz">
+      <button onClick={() => router.push('/learn')} data-testid="take-quiz">
         Take a Quiz
       </button>
       <button onClick={() => router.push('/win-cards')} data-testid="create-win-card">
@@ -52,7 +52,7 @@ describe('Overview Page Navigation Buttons', () => {
     render(<TestOverviewButtons />);
 
     fireEvent.click(screen.getByTestId('begin-learning'));
-    expect(mockPush).toHaveBeenCalledWith('/learning');
+    expect(mockPush).toHaveBeenCalledWith('/learn');
   });
 
   it('should navigate to journal when Log a Trade is clicked', () => {
@@ -66,7 +66,7 @@ describe('Overview Page Navigation Buttons', () => {
     render(<TestOverviewButtons />);
 
     fireEvent.click(screen.getByTestId('take-quiz'));
-    expect(mockPush).toHaveBeenCalledWith('/learning');
+    expect(mockPush).toHaveBeenCalledWith('/learn');
   });
 
   it('should navigate to win-cards when Create Win Card is clicked', () => {

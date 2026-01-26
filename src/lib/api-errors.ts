@@ -2,10 +2,12 @@
  * API Error Utilities
  *
  * Standardized error handling for API routes.
+ * Uses structured logging and Sentry integration.
  */
 
 import { NextResponse } from 'next/server';
 import { ZodError } from 'zod';
+import { logger, getRequestId } from './logger';
 
 // Error codes enum
 export enum ErrorCode {
@@ -62,21 +64,32 @@ export function createErrorResponse(
   code: ErrorCode,
   message: string,
   status: number,
-  details?: unknown
+  details?: unknown,
+  requestId?: string
 ): NextResponse<APIErrorResponse> {
   const error: APIError = {
     code,
     message,
     details,
     timestamp: new Date().toISOString(),
+    requestId,
   };
 
-  // Log server errors
+  // Log errors using structured logger
   if (status >= 500) {
-    console.error(`[API Error] ${code}: ${message}`, details);
+    logger.error(`API Error: ${code}`, { code, message, status, details, requestId });
+  } else if (status >= 400) {
+    logger.warn(`API Warning: ${code}`, { code, message, status, details, requestId });
   }
 
-  return NextResponse.json({ error }, { status });
+  const response = NextResponse.json({ error }, { status });
+
+  // Add request ID header for correlation
+  if (requestId) {
+    response.headers.set('X-Request-ID', requestId);
+  }
+
+  return response;
 }
 
 // ============================================
@@ -196,14 +209,14 @@ export function withErrorHandler(handler: RouteHandler): RouteHandler {
         }
 
         // Log and return internal error
-        console.error('[API] Unhandled error:', error);
+        logger.error('Unhandled API error', { error: error.message, stack: error.stack });
         return internalError(
           process.env.NODE_ENV === 'development' ? error.message : undefined
         );
       }
 
       // Unknown error type
-      console.error('[API] Unknown error type:', error);
+      logger.error('Unknown error type in API handler', { error: String(error) });
       return internalError();
     }
   };

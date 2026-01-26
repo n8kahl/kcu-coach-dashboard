@@ -81,59 +81,6 @@
   }
 
   /* =============================================================================
-   * BUTTON-SHARP: Premium sharp-cornered buttons
-   * Uses the enforced sharp border-radius from tailwind config
-   * ============================================================================= */
-  .btn-sharp {
-    @apply inline-flex items-center justify-center gap-2;
-    @apply px-4 py-2.5 text-sm font-semibold uppercase tracking-wide;
-    @apply transition-all duration-150;
-    border-radius: 0;
-    border: 1px solid transparent;
-  }
-
-  .btn-sharp-primary {
-    @apply btn-sharp;
-    background: #F59E0B;
-    color: #0d0d0d;
-    border-color: #F59E0B;
-  }
-
-  .btn-sharp-primary:hover {
-    background: #D97706;
-    border-color: #D97706;
-    box-shadow: 0 0 20px rgba(245, 158, 11, 0.3);
-  }
-
-  .btn-sharp-primary:active {
-    transform: scale(0.98);
-  }
-
-  .btn-sharp-secondary {
-    @apply btn-sharp;
-    background: transparent;
-    color: var(--text-primary);
-    border-color: #333333;
-  }
-
-  .btn-sharp-secondary:hover {
-    border-color: #F59E0B;
-    color: #F59E0B;
-  }
-
-  .btn-sharp-ghost {
-    @apply btn-sharp;
-    background: transparent;
-    color: var(--text-secondary);
-    border-color: transparent;
-  }
-
-  .btn-sharp-ghost:hover {
-    color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  /* =============================================================================
    * CARD-TERMINAL: Sharp-cornered panel cards
    * ============================================================================= */
   .card-terminal {
@@ -245,6 +192,33 @@
   /* Profit/Loss Glow */
   --shadow-profit: 0 0 20px rgba(34, 197, 94, 0.3);
   --shadow-loss: 0 0 20px rgba(239, 68, 68, 0.3);
+
+  /* =============================================================================
+   * COMPANION MODE COLORS
+   * TradingView-compatible dark theme for Companion cockpit
+   * ============================================================================= */
+  --companion-bg: #0b0e11;
+  --companion-sidebar: #131722;
+
+  /* =============================================================================
+   * CHART COLORS
+   * TradingView lightweight-charts compatible colors
+   * ============================================================================= */
+  --chart-up: #26a69a;
+  --chart-down: #ef5350;
+
+  /* =============================================================================
+   * WIN CARD THEME COLORS
+   * Colors for social sharing win cards
+   * ============================================================================= */
+  --win-gold-bg: #0A0A0A;
+  --win-gold-accent: #FFD700;
+  --win-platinum-bg: #0F0F0F;
+  --win-platinum-accent: #E5E4E2;
+  --win-emerald-bg: #0A1F0A;
+  --win-emerald-accent: #50C878;
+  --win-ruby-bg: #1A0A0A;
+  --win-ruby-accent: #E0115F;
 }
 
 /* Custom color palette available via CSS variables above */
@@ -326,7 +300,12 @@ body {
   box-shadow: var(--shadow-glow);
 }
 
-/* Button base - no rounded corners */
+/* =============================================================================
+ * LEGACY BUTTON CLASSES
+ * @deprecated Use the Button component from @/components/ui/button instead.
+ * These classes are kept for Link elements that need button styling.
+ * For actual <button> elements, use: <Button variant="primary|secondary|ghost">
+ * ============================================================================= */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -921,35 +900,6 @@ body {
 
 .card-tilt:hover {
   transform: perspective(1000px) rotateX(2deg) rotateY(-2deg) translateZ(10px);
-}
-
-/* Premium Button States */
-.btn-premium {
-  position: relative;
-  overflow: hidden;
-  transition: all var(--duration-normal) var(--ease-smooth);
-}
-
-.btn-premium::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.1) 0%,
-    transparent 50%,
-    transparent 100%
-  );
-  opacity: 0;
-  transition: opacity var(--duration-fast);
-}
-
-.btn-premium:hover::before {
-  opacity: 1;
-}
-
-.btn-premium:active {
-  transform: scale(0.98);
 }
 
 /* Stagger Children - for list animations */

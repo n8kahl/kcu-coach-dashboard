@@ -101,7 +101,7 @@ const createDefaultCommands = (router: ReturnType<typeof useRouter>): CommandIte
     description: 'Continue your trading education',
     icon: <BookOpen className="w-4 h-4" />,
     shortcut: 'G L',
-    href: '/learning',
+    href: '/learn',
     category: 'navigation',
     keywords: ['learn', 'education', 'courses', 'lessons'],
   },

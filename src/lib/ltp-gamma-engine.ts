@@ -12,6 +12,8 @@
  * - Enhanced patience candle detection at key levels
  */
 
+import { safeDivideValue } from './number';
+
 export interface MarketContext {
   // Price data
   currentPrice: number;
@@ -553,11 +555,11 @@ export function detectPatienceCandle(
  * Calculate EMAs from price data
  */
 export function calculateEMA(prices: number[], period: number): number {
-  if (prices.length === 0) return 0;
+  if (prices.length === 0 || period <= 0) return 0;
   if (prices.length < period) return prices[prices.length - 1];
 
   const multiplier = 2 / (period + 1);
-  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let ema = safeDivideValue(prices.slice(0, period).reduce((a, b) => a + b, 0), period, 0);
 
   for (let i = period; i < prices.length; i++) {
     ema = (prices[i] - ema) * multiplier + ema;
@@ -645,6 +647,130 @@ export function createMarketContext(
     previousLow: chartData.previousLow,
     currentHigh: chartData.high,
     currentLow: chartData.low,
+  };
+}
+
+/**
+ * LTP2ScoreExplanation provides a deterministic, human-readable breakdown
+ * of an LTP 2.0 Gamma score calculation. This is passed to the AI coach for
+ * explanation - the AI must NEVER compute scores directly.
+ */
+export interface LTP2ScoreExplanation {
+  /** Overall assessment */
+  score: number;
+  grade: 'Sniper' | 'Decent' | 'Dumb Shit';
+  direction: 'bullish' | 'bearish' | 'neutral';
+  confidence: number;
+
+  /** Component breakdown with human-readable reasons */
+  breakdown: {
+    cloud: { score: number; reason: string };
+    vwap: { score: number; reason: string };
+    gammaWall: { score: number; reason: string };
+    gammaRegime: { score: number; reason: string };
+    patience: { score: number; reason: string };
+    resistancePenalty: { score: number; reason: string };
+  };
+
+  /** Warnings and recommendation */
+  warnings: string[];
+  recommendation: string;
+
+  /** Input data used for calculation (audit trail) */
+  inputs: {
+    symbol: string;
+    currentPrice: number;
+    ema8: number;
+    ema21: number;
+    vwap: number;
+    callWall: number;
+    putWall: number;
+    gammaExposure: number;
+    timestamp: string;
+  };
+}
+
+/**
+ * Generate a deterministic LTP2ScoreExplanation for AI coaching.
+ * The AI must use this pre-computed explanation - it cannot calculate scores.
+ */
+export function generateLTP2ScoreExplanation(
+  symbol: string,
+  context: MarketContext,
+  ltp2Result: LTP2Score
+): LTP2ScoreExplanation {
+  const { breakdown, direction, confidence, warnings, recommendation, grade, score } = ltp2Result;
+
+  // Generate human-readable reasons for each component
+  const emaSpread = context.ema21 > 0
+    ? ((context.ema8 - context.ema21) / context.ema21) * 100
+    : 0;
+  const cloudReason = Math.abs(emaSpread) < 0.1
+    ? 'EMAs are crossed/neutral - no clear trend direction'
+    : `8 EMA ${emaSpread > 0 ? 'above' : 'below'} 21 EMA by ${Math.abs(emaSpread).toFixed(2)}% - ${emaSpread > 0 ? 'bullish' : 'bearish'} cloud`;
+
+  const vwapDistance = context.vwap > 0
+    ? ((context.currentPrice - context.vwap) / context.vwap) * 100
+    : 0;
+  const vwapReason = `Price ${vwapDistance >= 0 ? 'above' : 'below'} VWAP by ${Math.abs(vwapDistance).toFixed(2)}%${
+    (direction === 'bullish' && vwapDistance > 0) || (direction === 'bearish' && vwapDistance < 0)
+      ? ' - aligned with direction'
+      : ' - not aligned with direction'
+  }`;
+
+  const gammaWallReason = direction === 'bullish' || direction === 'neutral'
+    ? context.currentPrice > context.putWall
+      ? `Price above Put Wall (${context.putWall.toFixed(2)}) - institutional support intact`
+      : `Price below Put Wall (${context.putWall.toFixed(2)}) - support broken`
+    : context.currentPrice < context.callWall
+      ? `Price below Call Wall (${context.callWall.toFixed(2)}) - resistance intact`
+      : `Price above Call Wall (${context.callWall.toFixed(2)}) - resistance broken`;
+
+  const gammaRegimeReason = context.gammaExposure > 0
+    ? `Positive gamma (${context.gammaExposure.toFixed(0)}) - dealers buy dips, expect mean reversion`
+    : `Negative gamma (${context.gammaExposure.toFixed(0)}) - dealers sell dips, expect volatility`;
+
+  const patienceReason = breakdown.patienceScore > 0
+    ? `Patience candle detected - confirmation present`
+    : 'No patience candle - waiting for inside bar confirmation';
+
+  const opposingWall = direction === 'bullish' ? context.callWall : context.putWall;
+  const distanceToWall = opposingWall > 0
+    ? Math.abs((context.currentPrice - opposingWall) / context.currentPrice) * 100
+    : 100;
+  const penaltyReason = breakdown.resistancePenalty < 0
+    ? `${distanceToWall.toFixed(1)}% from ${direction === 'bullish' ? 'Call' : 'Put'} Wall - ${
+        breakdown.resistancePenalty <= -15 ? 'high rejection risk' :
+        breakdown.resistancePenalty <= -10 ? 'approaching resistance' : 'nearing wall'
+      }`
+    : 'Safe distance from opposing gamma wall';
+
+  return {
+    score,
+    grade,
+    direction,
+    confidence,
+    breakdown: {
+      cloud: { score: breakdown.cloudScore, reason: cloudReason },
+      vwap: { score: breakdown.vwapScore, reason: vwapReason },
+      gammaWall: { score: breakdown.gammaWallScore, reason: gammaWallReason },
+      gammaRegime: { score: breakdown.gammaRegimeScore, reason: gammaRegimeReason },
+      patience: { score: breakdown.patienceScore, reason: patienceReason },
+      resistancePenalty: { score: breakdown.resistancePenalty, reason: penaltyReason },
+    },
+    warnings,
+    recommendation,
+    inputs: {
+      symbol,
+      currentPrice: context.currentPrice,
+      ema8: context.ema8,
+      ema21: context.ema21,
+      vwap: context.vwap,
+      callWall: context.callWall,
+      putWall: context.putWall,
+      gammaExposure: context.gammaExposure,
+      timestamp: new Date().toISOString(),
+    },
   };
 }
 

@@ -231,7 +231,7 @@ export default function QuizPage() {
               <div className="flex flex-col items-center gap-4 text-center">
                 <AlertCircle className="w-12 h-12 text-[var(--error)]" />
                 <p className="font-medium text-[var(--text-primary)]">{error || 'Quiz not found'}</p>
-                <Link href="/learning">
+                <Link href="/learn">
                   <Button variant="secondary">Back to Learning</Button>
                 </Link>
               </div>
@@ -254,8 +254,8 @@ export default function QuizPage() {
           subtitle={quiz.moduleSlug ? `Module Quiz` : undefined}
           breadcrumbs={[
             { label: 'Dashboard' },
-            { label: 'Learning', href: '/learning' },
-            ...(quiz.moduleSlug ? [{ label: 'Module', href: `/learning/${quiz.moduleSlug}` }] : []),
+            { label: 'Learning', href: '/learn' },
+            ...(quiz.moduleSlug ? [{ label: 'Module', href: `/learn/${quiz.moduleSlug}` }] : []),
             { label: 'Quiz' },
           ]}
         />
@@ -314,8 +314,8 @@ export default function QuizPage() {
           subtitle={quiz.title}
           breadcrumbs={[
             { label: 'Dashboard' },
-            { label: 'Learning', href: '/learning' },
-            ...(quiz.moduleSlug ? [{ label: 'Module', href: `/learning/${quiz.moduleSlug}` }] : []),
+            { label: 'Learning', href: '/learn' },
+            ...(quiz.moduleSlug ? [{ label: 'Module', href: `/learn/${quiz.moduleSlug}` }] : []),
             { label: 'Quiz Results' },
           ]}
         />
@@ -374,7 +374,7 @@ export default function QuizPage() {
                     <Button variant="secondary" icon={<RotateCcw className="w-4 h-4" />} onClick={handleRetake}>
                       Retake Quiz
                     </Button>
-                    <Link href={quiz.moduleSlug ? `/learning/${quiz.moduleSlug}` : '/learning'}>
+                    <Link href={quiz.moduleSlug ? `/learn/${quiz.moduleSlug}` : '/learn'}>
                       <Button variant="primary" icon={<Home className="w-4 h-4" />}>
                         {quiz.moduleSlug ? 'Back to Module' : 'Back to Learning'}
                       </Button>
@@ -446,8 +446,8 @@ export default function QuizPage() {
         subtitle={quiz.title}
         breadcrumbs={[
           { label: 'Dashboard' },
-          { label: 'Learning', href: '/learning' },
-          ...(quiz.moduleSlug ? [{ label: 'Module', href: `/learning/${quiz.moduleSlug}` }] : []),
+          { label: 'Learning', href: '/learn' },
+          ...(quiz.moduleSlug ? [{ label: 'Module', href: `/learn/${quiz.moduleSlug}` }] : []),
           { label: 'Quiz' },
         ]}
       />

@@ -5,12 +5,12 @@
  * structured rich content objects for rendering.
  *
  * Supported markers:
- * - [[LESSON:module-slug/lesson-slug|Title|Duration]]
+ * - [[LESSON:module-slug/lesson-slug|Title|Duration]] - 2-part path (uses resolver)
+ * - [[LESSON:course-slug/module-slug/lesson-slug|Title|Duration]] - 3-part path (direct link)
  * - [[CHART:SYMBOL|interval|indicators]]
  * - [[SETUP:SYMBOL|direction|entry|stop|target|level%|trend%|patience%]]
  * - [[QUIZ:module-slug|title]]
  * - [[VIDEO:videoId|startMs|endMs|Title]] - YouTube video with timestamp
- * - [[THINKIFIC:courseSlug|lessonSlug|timestampSeconds|Title]] - Thinkific lesson link
  * - [[LTP_ANALYSIS:SYMBOL|DATE|TIMEFRAME|{JSON}]] - Interactive LTP analysis chart
  */
 
@@ -21,10 +21,44 @@ import type {
   SetupVisualizationContent,
   QuizPromptContent,
   VideoTimestampContent,
-  ThinkificLinkContent,
   LTPAnalysisChartContent,
 } from '@/types';
-import { getLessonBySlug } from './curriculum-context';
+
+// Lazy-loaded curriculum context for optional metadata enrichment
+// The /learn/lesson resolver route is the authoritative source for path resolution
+let curriculumModule: { getLessonBySlug?: (moduleSlug: string, lessonSlug: string) => { lesson: { description?: string }; module: { title?: string } } | undefined } | null = null;
+let curriculumLoadAttempted = false;
+
+function tryGetLessonMetadata(moduleSlug: string, lessonSlug: string): { description?: string; moduleTitle?: string } | undefined {
+  // Only attempt to load curriculum module once
+  if (!curriculumLoadAttempted) {
+    curriculumLoadAttempted = true;
+    try {
+      // Dynamic import to avoid hard dependency
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      curriculumModule = require('./curriculum-context');
+    } catch {
+      // Curriculum context not available - that's fine, we'll use the resolver
+      curriculumModule = null;
+    }
+  }
+
+  if (!curriculumModule?.getLessonBySlug) return undefined;
+
+  try {
+    const lessonData = curriculumModule.getLessonBySlug(moduleSlug, lessonSlug);
+    if (lessonData) {
+      return {
+        description: lessonData.lesson.description,
+        moduleTitle: lessonData.module.title,
+      };
+    }
+  } catch {
+    // Ignore errors from curriculum lookup
+  }
+
+  return undefined;
+}
 
 // Regex patterns for each marker type
 const LESSON_PATTERN = /\[\[LESSON:([^|]+)\|([^|]+)\|([^\]]+)\]\]/g;
@@ -33,8 +67,6 @@ const SETUP_PATTERN = /\[\[SETUP:([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([
 const QUIZ_PATTERN = /\[\[QUIZ:([^|]+)\|([^\]]+)\]\]/g;
 // Video timestamp: [[VIDEO:videoId|startMs|endMs|Title]]
 const VIDEO_PATTERN = /\[\[VIDEO:([^|]+)\|(\d+)\|(\d+)\|([^\]]+)\]\]/g;
-// Thinkific link: [[THINKIFIC:courseSlug|lessonSlug|timestampSeconds|Title]]
-const THINKIFIC_PATTERN = /\[\[THINKIFIC:([^|]+)\|([^|]+)\|(\d+)\|([^\]]+)\]\]/g;
 // LTP Analysis chart: [[LTP_ANALYSIS:SYMBOL|DATE|TIMEFRAME|{JSON}]]
 const LTP_ANALYSIS_PATTERN = /\[\[LTP_ANALYSIS:([^|]+)\|([^|]+)\|([^|]+)\|(\{.*?\})\]\]/g;
 
@@ -51,6 +83,10 @@ function calculateGrade(total: number): string {
 
 /**
  * Parse lesson markers from text
+ *
+ * Supports two formats:
+ * - 2-part: [[LESSON:module-slug/lesson-slug|Title|Duration]] - uses resolver
+ * - 3-part: [[LESSON:course-slug/module-slug/lesson-slug|Title|Duration]] - direct link
  */
 function parseLessonMarkers(text: string): LessonLinkContent[] {
   const lessons: LessonLinkContent[] = [];
@@ -61,10 +97,25 @@ function parseLessonMarkers(text: string): LessonLinkContent[] {
 
   while ((match = LESSON_PATTERN.exec(text)) !== null) {
     const [, path, title, duration] = match;
-    const [moduleSlug, lessonSlug] = path.split('/');
+    const parts = path.split('/');
 
-    // Try to get additional details from curriculum
-    const lessonData = getLessonBySlug(moduleSlug, lessonSlug);
+    let courseSlug: string | undefined;
+    let moduleSlug: string;
+    let lessonSlug: string;
+
+    if (parts.length === 3) {
+      // 3-part path: course/module/lesson - link directly to canonical route
+      [courseSlug, moduleSlug, lessonSlug] = parts;
+    } else if (parts.length === 2) {
+      // 2-part path: module/lesson - uses resolver route
+      [moduleSlug, lessonSlug] = parts;
+    } else {
+      // Invalid format, skip
+      continue;
+    }
+
+    // Try to get additional metadata from curriculum (optional enrichment)
+    const metadata = tryGetLessonMetadata(moduleSlug, lessonSlug);
 
     lessons.push({
       type: 'lesson_link',
@@ -72,8 +123,9 @@ function parseLessonMarkers(text: string): LessonLinkContent[] {
       lessonId: lessonSlug,
       title: title.trim(),
       duration: duration.trim(),
-      description: lessonData?.lesson.description,
-      moduleTitle: lessonData?.module.title,
+      description: metadata?.description,
+      moduleTitle: metadata?.moduleTitle,
+      courseSlug, // If provided, enables direct canonical link
     });
   }
 
@@ -194,32 +246,6 @@ function parseVideoMarkers(text: string): VideoTimestampContent[] {
 }
 
 /**
- * Parse Thinkific link markers from text
- * Format: [[THINKIFIC:courseSlug|lessonSlug|timestampSeconds|Title]]
- */
-function parseThinkificMarkers(text: string): ThinkificLinkContent[] {
-  const links: ThinkificLinkContent[] = [];
-  let match;
-
-  THINKIFIC_PATTERN.lastIndex = 0;
-
-  while ((match = THINKIFIC_PATTERN.exec(text)) !== null) {
-    const [, courseSlug, lessonSlug, timestampSeconds, title] = match;
-
-    links.push({
-      type: 'thinkific_link',
-      courseSlug: courseSlug.trim(),
-      lessonSlug: lessonSlug.trim(),
-      timestampSeconds: parseInt(timestampSeconds, 10),
-      title: title.trim(),
-      source: 'thinkific',
-    });
-  }
-
-  return links;
-}
-
-/**
  * Parse LTP Analysis chart markers from text
  * Format: [[LTP_ANALYSIS:SYMBOL|DATE|TIMEFRAME|{JSON}]]
  * JSON contains: title, summary, ltpAnalysis, keyLevels
@@ -276,7 +302,6 @@ export function stripRichContentMarkers(text: string): string {
     .replace(SETUP_PATTERN, '')
     .replace(QUIZ_PATTERN, '')
     .replace(VIDEO_PATTERN, '')
-    .replace(THINKIFIC_PATTERN, '')
     .replace(LTP_ANALYSIS_PATTERN, '')
     .replace(/\n{3,}/g, '\n\n') // Clean up extra newlines
     .trim();
@@ -294,7 +319,6 @@ export function parseRichContent(text: string): RichContent[] {
   richContent.push(...parseSetupMarkers(text));
   richContent.push(...parseQuizMarkers(text));
   richContent.push(...parseVideoMarkers(text));
-  richContent.push(...parseThinkificMarkers(text));
   richContent.push(...parseLTPAnalysisMarkers(text));
 
   return richContent;
@@ -323,7 +347,6 @@ export function hasRichContent(text: string): boolean {
   SETUP_PATTERN.lastIndex = 0;
   QUIZ_PATTERN.lastIndex = 0;
   VIDEO_PATTERN.lastIndex = 0;
-  THINKIFIC_PATTERN.lastIndex = 0;
   LTP_ANALYSIS_PATTERN.lastIndex = 0;
 
   return (
@@ -332,7 +355,6 @@ export function hasRichContent(text: string): boolean {
     SETUP_PATTERN.test(text) ||
     QUIZ_PATTERN.test(text) ||
     VIDEO_PATTERN.test(text) ||
-    THINKIFIC_PATTERN.test(text) ||
     LTP_ANALYSIS_PATTERN.test(text)
   );
 }

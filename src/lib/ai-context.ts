@@ -15,6 +15,12 @@ import type {
   UserProfileContext,
 } from '@/types/ai';
 import { getCurriculumReference } from './curriculum-context';
+import {
+  STRUCTURED_OUTPUT_PROMPT,
+  formatScoreExplanationForPrompt,
+} from './ai-output-schema';
+import type { ScoreExplanation } from './ltp-engine';
+import type { LTP2ScoreExplanation } from './ltp-gamma-engine';
 
 // =============================================================================
 // Input Sanitization
@@ -960,10 +966,21 @@ Impact: ${nextEvent.impact.toUpperCase()} - Warn user to flatten or avoid new tr
   return prompt;
 }
 
+/** Options for system prompt generation */
+export interface SystemPromptOptions {
+  /** Enable structured JSON output mode (for trustworthy coaching) */
+  structuredOutput?: boolean;
+  /** Pre-computed score explanation from LTP engine (AI must not compute its own) */
+  scoreExplanation?: ScoreExplanation | LTP2ScoreExplanation | null;
+}
+
 /**
  * Generate the complete system prompt based on context
  */
-export function generateSystemPrompt(context: AIContext): string {
+export function generateSystemPrompt(
+  context: AIContext,
+  options?: SystemPromptOptions
+): string {
   const parts = [
     BASE_SYSTEM_PROMPT,
     RICH_CONTENT_INSTRUCTIONS,
@@ -974,6 +991,16 @@ export function generateSystemPrompt(context: AIContext): string {
     getMarketContextPrompt(context.marketContext),
     getProactiveCoachingPrompt(context.marketContext),
   ];
+
+  // Add structured output instructions if enabled
+  if (options?.structuredOutput) {
+    parts.push(STRUCTURED_OUTPUT_PROMPT);
+  }
+
+  // Add pre-computed score explanation if provided
+  if (options?.scoreExplanation !== undefined) {
+    parts.push(formatScoreExplanationForPrompt(options.scoreExplanation));
+  }
 
   return parts.filter(Boolean).join('\n');
 }

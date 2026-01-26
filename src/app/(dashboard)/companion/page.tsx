@@ -29,7 +29,8 @@ import {
   CompanionHUD,
   CompanionCoachBox,
 } from '@/components/companion';
-import { ProfessionalChart, type ChartCandle, type ChartLevel, type ProfessionalGammaLevel } from '@/components/charts';
+import { ProfessionalChart, type ChartCandle, type ChartLevel, type ProfessionalGammaLevel, type ProfessionalChartHandle } from '@/components/charts';
+import { toEpochSeconds, getBucketStart, TIMEFRAME_SECONDS } from '@/lib/charts/time';
 import {
   kcuCoachingRules,
   getMarketSession,
@@ -254,6 +255,20 @@ export default function CompanionTerminal() {
   const [chartError, setChartError] = useState<string | null>(null);
   const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('5min');
 
+  // Chart ref for imperative updates (no React re-render on tick)
+  const chartRef = useRef<ProfessionalChartHandle>(null);
+
+  // Debug state for real-time tick validation (env-controlled)
+  const showDebugOverlay = process.env.NEXT_PUBLIC_CHART_DEBUG === 'true';
+  const [debugInfo, setDebugInfo] = useState<{
+    lastTickTs: number | null;
+    currentBucketStart: number | null;
+    lastCandleTime: number | null;
+  }>({ lastTickTs: null, currentBucketStart: null, lastCandleTime: null });
+
+  // Track current candle state for imperative updates
+  const currentCandleRef = useRef<ChartCandle | null>(null);
+
   // UI state
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [lastAlertType, setLastAlertType] = useState<'patience' | 'entry' | 'warning' | null>(null);
@@ -344,10 +359,9 @@ export default function CompanionTerminal() {
   const timeframeMinutes = chartTimeframe === '2min' ? 2 : 5;
 
   // ==========================================================================
-  // SSE Event Handler
+  // SSE Event Handler - Imperative Chart Updates
   // ==========================================================================
 
-  // Stream event handler - symbol filtering is done in the hook via `symbol` param
   const handleStreamEvent = useCallback(
     (event: CompanionEvent) => {
       if (event.type === 'setup_forming' || event.type === 'setup_ready') {
@@ -357,50 +371,70 @@ export default function CompanionTerminal() {
           setTimeout(() => setLastAlertType(null), 2000);
         }
       } else if (event.type === 'price_update') {
-        // Always update the watchlist prices (for all symbols)
+        // Update watchlist prices (React state - this is fine, it's not per-tick)
         handlePriceUpdate(event.data);
 
-        // For chart updates, the hook already filtered for selectedSymbol
+        // Only update chart for selected symbol
+        if (event.data.symbol !== selectedSymbol) return;
+
         const price = event.data.price;
         if (!isValidPrice(price)) return;
 
-        const now = Math.floor(Date.now() / 1000);
-        const newCandle: ChartCandle = {
-          time: now,
-          open: price,
-          high: price,
-          low: price,
-          close: price,
-          volume: event.data.volume || 0,
-        };
+        // Get timeframe in seconds for proper bucketing
+        const timeframeKey = chartTimeframe === '2min' ? '2m' : '5m';
+        const timeframeSeconds = TIMEFRAME_SECONDS[timeframeKey];
 
-        setChartData((prev) => {
-          if (prev.length > 0) {
-            const lastCandle = prev[prev.length - 1];
-            // Update the last candle if within 60 seconds
-            if (now - lastCandle.time < 60) {
-              const updated = [...prev];
-              updated[updated.length - 1] = {
-                ...lastCandle,
-                high: Math.max(lastCandle.high, price),
-                low: Math.min(lastCandle.low, price),
-                close: price,
-                volume: (lastCandle.volume || 0) + (event.data.volume || 0),
-              };
-              return updated;
-            }
-          }
-          return [...prev, newCandle];
-        });
+        // Normalize timestamp and compute bucket
+        const nowMs = Date.now();
+        const nowSeconds = toEpochSeconds(nowMs);
+        const bucketStart = getBucketStart(nowSeconds, timeframeSeconds);
+
+        // Get last candle time from chart ref or current candle ref
+        const lastCandleTime = chartRef.current?.getLastCandleTime() ?? currentCandleRef.current?.time ?? null;
+
+        // Update debug info (only if enabled)
+        if (showDebugOverlay) {
+          setDebugInfo({
+            lastTickTs: nowSeconds,
+            currentBucketStart: bucketStart,
+            lastCandleTime,
+          });
+        }
+
+        // Determine if this tick belongs to current bucket or starts a new one
+        const isSameBucket = lastCandleTime !== null && getBucketStart(lastCandleTime, timeframeSeconds) === bucketStart;
+
+        if (isSameBucket && currentCandleRef.current) {
+          // Update existing candle (same bucket)
+          const candle = currentCandleRef.current;
+          candle.high = Math.max(candle.high, price);
+          candle.low = Math.min(candle.low, price);
+          candle.close = price;
+          candle.volume = (candle.volume || 0) + (event.data.volume || 0);
+
+          // Imperative update - NO setChartData, NO React re-render
+          chartRef.current?.updateLastCandle(candle);
+        } else {
+          // New bucket - create new candle
+          const newCandle: ChartCandle = {
+            time: bucketStart,
+            open: price,
+            high: price,
+            low: price,
+            close: price,
+            volume: event.data.volume || 0,
+          };
+          currentCandleRef.current = newCandle;
+
+          // Imperative add - NO setChartData, NO React re-render
+          chartRef.current?.addCandle(newCandle);
+        }
       }
     },
-    [refreshData, handlePriceUpdate]
+    [selectedSymbol, chartTimeframe, refreshData, handlePriceUpdate, showDebugOverlay]
   );
 
-  // Pass selectedSymbol to the stream hook for automatic event filtering
-  // The hook uses refs internally to prevent reconnecting when symbol changes
-  const { connected: streamConnected } = useCompanionStream({
-    symbol: selectedSymbol,
+  const { connected: streamConnected, connectionStatus } = useCompanionStream({
     onEvent: handleStreamEvent,
   });
 
@@ -443,9 +477,14 @@ export default function CompanionTerminal() {
             });
           setChartData(validBars);
           setChartError(null);
+          // Initialize current candle ref with last candle for imperative updates
+          if (validBars.length > 0) {
+            currentCandleRef.current = { ...validBars[validBars.length - 1] };
+          }
         } else {
           setChartData([]);
           setChartError('No market data available');
+          currentCandleRef.current = null;
         }
       } else {
         const errorData = await res.json().catch(() => ({}));
@@ -932,11 +971,20 @@ export default function CompanionTerminal() {
           <div
             className={cn(
               'flex items-center gap-1.5 px-2 py-1 text-xs font-semibold uppercase tracking-wider',
-              streamConnected ? 'bg-[#26a69a]/10 text-[#26a69a]' : 'bg-[#ef5350]/10 text-[#ef5350]'
+              connectionStatus === 'live' && 'bg-[#26a69a]/10 text-[#26a69a]',
+              connectionStatus === 'degraded' && 'bg-[#f59e0b]/10 text-[#f59e0b]',
+              connectionStatus === 'offline' && 'bg-[#ef5350]/10 text-[#ef5350]'
             )}
+            title={
+              connectionStatus === 'live'
+                ? 'Full realtime via Redis pub/sub'
+                : connectionStatus === 'degraded'
+                  ? 'Single-server mode, polling recommended'
+                  : 'Disconnected'
+            }
           >
-            <Radio className={cn('w-3 h-3', streamConnected && 'animate-pulse')} />
-            {streamConnected ? 'LIVE' : 'OFFLINE'}
+            <Radio className={cn('w-3 h-3', connectionStatus === 'live' && 'animate-pulse')} />
+            {connectionStatus === 'live' ? 'LIVE' : connectionStatus === 'degraded' ? 'POLLING' : 'OFFLINE'}
           </div>
         </div>
       </div>
@@ -949,6 +997,7 @@ export default function CompanionTerminal() {
             <>
               {!chartLoading && chartData.length > 0 && (
                 <ProfessionalChart
+                  ref={chartRef}
                   data={chartData}
                   symbol={selectedSymbol}
                   levels={chartLevels}
@@ -957,6 +1006,19 @@ export default function CompanionTerminal() {
                   showIndicators={true}
                   height="100%"
                 />
+              )}
+
+              {/* Debug overlay for validating tick bucketing (env-controlled) */}
+              {showDebugOverlay && selectedSymbol && debugInfo.lastTickTs && (
+                <div className="absolute top-12 left-3 z-20 bg-black/80 border border-yellow-500/50 p-2 text-[10px] font-mono text-yellow-400">
+                  <div className="font-semibold text-yellow-300 mb-1">CHART DEBUG</div>
+                  <div>Last Tick: {new Date(debugInfo.lastTickTs * 1000).toLocaleTimeString()}</div>
+                  <div>Bucket Start: {debugInfo.currentBucketStart ? new Date(debugInfo.currentBucketStart * 1000).toLocaleTimeString() : 'N/A'}</div>
+                  <div>Last Candle: {debugInfo.lastCandleTime ? new Date(debugInfo.lastCandleTime * 1000).toLocaleTimeString() : 'N/A'}</div>
+                  <div className="mt-1 text-[9px] text-yellow-500">
+                    Timeframe: {chartTimeframe} ({TIMEFRAME_SECONDS[chartTimeframe === '2min' ? '2m' : '5m']}s)
+                  </div>
+                </div>
               )}
 
               {chartLoading && (

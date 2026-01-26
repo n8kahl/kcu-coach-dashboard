@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import {
   ShieldCheck,
   Settings,
@@ -228,10 +229,14 @@ function LTPConfigPanel({
         <h3 className="text-lg font-semibold text-[var(--text-primary)] uppercase tracking-wide">
           LTP Detection Thresholds
         </h3>
-        <button onClick={onSave} disabled={saving} className="btn btn-primary">
-          {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+        <Button
+          onClick={onSave}
+          disabled={saving}
+          loading={saving}
+          icon={<Save className="w-4 h-4" />}
+        >
           Save Changes
-        </button>
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -370,10 +375,14 @@ function MTFConfigPanel({
         <h3 className="text-lg font-semibold text-[var(--text-primary)] uppercase tracking-wide">
           MTF Analysis Configuration
         </h3>
-        <button onClick={onSave} disabled={saving} className="btn btn-primary">
-          {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+        <Button
+          onClick={onSave}
+          disabled={saving}
+          loading={saving}
+          icon={<Save className="w-4 h-4" />}
+        >
           Save Changes
-        </button>
+        </Button>
       </div>
 
       <div className="space-y-4">
@@ -444,10 +453,14 @@ function AIConfigPanel({
         <h3 className="text-lg font-semibold text-[var(--text-primary)] uppercase tracking-wide">
           AI Coach Settings
         </h3>
-        <button onClick={onSave} disabled={saving} className="btn btn-primary">
-          {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+        <Button
+          onClick={onSave}
+          disabled={saving}
+          loading={saving}
+          icon={<Save className="w-4 h-4" />}
+        >
           Save Changes
-        </button>
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -536,10 +549,9 @@ function RolesPanel({ roles, onRefresh }: { roles: UserRole[]; onRefresh: () => 
         <h3 className="text-lg font-semibold text-[var(--text-primary)] uppercase tracking-wide">
           Roles & Permissions
         </h3>
-        <button onClick={onRefresh} className="btn btn-secondary">
-          <RefreshCw className="w-4 h-4" />
+        <Button onClick={onRefresh} variant="secondary" icon={<RefreshCw className="w-4 h-4" />}>
           Refresh
-        </button>
+        </Button>
       </div>
 
       <div className="space-y-4">
@@ -579,9 +591,9 @@ function AlertTemplatesPanel() {
         <h3 className="text-lg font-semibold text-[var(--text-primary)] uppercase tracking-wide">
           Alert Templates
         </h3>
-        <button className="btn btn-primary">
+        <Button variant="primary">
           Add Template
-        </button>
+        </Button>
       </div>
 
       <p className="text-sm text-[var(--text-secondary)]">

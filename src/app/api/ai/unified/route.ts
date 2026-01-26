@@ -13,6 +13,14 @@ import { getEnhancedRAGContext } from '@/lib/rag';
 import { findRelevantContent } from '@/lib/ai/knowledge-retrieval';
 import { generateSystemPrompt, sanitizeInput, validateMessage } from '@/lib/ai-context';
 import { getMarketDataTools, executeMarketDataTool } from '@/lib/market-data-tools';
+import {
+  parseAICoachResponse,
+  SAFE_FALLBACK_RESPONSE,
+  type CoachResponse,
+} from '@/lib/ai-output-schema';
+import type { ScoreExplanation } from '@/lib/ltp-engine';
+import type { LTP2ScoreExplanation } from '@/lib/ltp-gamma-engine';
+import { logCoachingTrace } from '@/lib/trace-service';
 import logger from '@/lib/logger';
 import Anthropic from '@anthropic-ai/sdk';
 import type { MessageParam, ContentBlock, ToolResultBlockParam } from '@anthropic-ai/sdk/resources/messages';
@@ -414,6 +422,138 @@ Provide guidance without giving away the answer directly.`;
 }
 
 /**
+ * Handle coach mode - structured, validated AI coaching responses
+ *
+ * CRITICAL: In this mode, the AI NEVER computes scores.
+ * All scores come from pre-computed ScoreExplanation objects.
+ */
+async function handleCoachMode(
+  message: string,
+  context: AIContext,
+  conversationHistory: Array<{ role: string; content: string }>,
+  scoreExplanation: ScoreExplanation | LTP2ScoreExplanation | null
+): Promise<UnifiedAIResponse & { coachResponse?: CoachResponse }> {
+  // Build system prompt with structured output enabled
+  const systemPrompt = generateSystemPrompt(context, {
+    structuredOutput: true,
+    scoreExplanation,
+  });
+
+  // Build messages array
+  const messages: MessageParam[] = [
+    ...conversationHistory.map((msg) => ({
+      role: msg.role as 'user' | 'assistant',
+      content: msg.content,
+    })),
+    {
+      role: 'user' as const,
+      content: message,
+    },
+  ];
+
+  let rawResponse = '';
+  let coachResponse: CoachResponse;
+
+  try {
+    // Call Claude API - no tools in coach mode for predictable JSON output
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages,
+    });
+
+    // Extract text response
+    const textBlock = response.content.find(
+      (block): block is Anthropic.TextBlock => block.type === 'text'
+    );
+    rawResponse = textBlock?.text || '';
+
+    // Parse and validate the response
+    coachResponse = parseAICoachResponse(rawResponse, {
+      userId: context.user?.id,
+      messageId: response.id,
+    });
+
+    const usedFallback = coachResponse === SAFE_FALLBACK_RESPONSE;
+
+    // Log if we had to use fallback
+    if (usedFallback) {
+      logger.warn('Coach mode used fallback response', {
+        userId: context.user?.id,
+        messageId: response.id,
+        rawResponseLength: rawResponse.length,
+        rawResponsePreview: rawResponse.slice(0, 200),
+      });
+    }
+
+    // Log trace asynchronously (don't block response)
+    logCoachingTrace({
+      traceType: 'coaching',
+      userId: context.user?.id,
+      symbol: context.selectedSymbol || context.selectedTrade?.symbol,
+      inputSnapshot: {
+        message,
+        context: {
+          currentPage: context.currentPage,
+          selectedSymbol: context.selectedSymbol,
+          selectedTrade: context.selectedTrade,
+        },
+        conversationHistory,
+      },
+      scoreExplanation,
+      aiResponse: coachResponse,
+      modelUsed: 'claude-sonnet-4-20250514',
+      tokensUsed: {
+        input: response.usage.input_tokens,
+        output: response.usage.output_tokens,
+      },
+      usedFallback,
+    }).catch((err) => {
+      logger.warn('Failed to log coaching trace', { error: String(err) });
+    });
+
+    return {
+      id: response.id,
+      message: coachResponse.message,
+      coachResponse,
+      usage: {
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+      },
+    };
+  } catch (error) {
+    // Log the error and return safe fallback
+    logger.error('Coach mode API error', {
+      error: error instanceof Error ? error.message : String(error),
+      userId: context.user?.id,
+      rawResponseLength: rawResponse.length,
+    });
+
+    // Log error trace asynchronously
+    logCoachingTrace({
+      traceType: 'coaching',
+      userId: context.user?.id,
+      symbol: context.selectedSymbol || context.selectedTrade?.symbol,
+      inputSnapshot: {
+        message,
+        context: { currentPage: context.currentPage },
+        conversationHistory,
+      },
+      scoreExplanation,
+      aiResponse: SAFE_FALLBACK_RESPONSE,
+      usedFallback: true,
+    }).catch(() => {});
+
+    return {
+      id: `coach-fallback-${Date.now()}`,
+      message: SAFE_FALLBACK_RESPONSE.message,
+      coachResponse: SAFE_FALLBACK_RESPONSE,
+    };
+  }
+}
+
+/**
  * Helper to create standardized error responses
  */
 function errorResponse(code: AIErrorCode, message: string, status: number) {
@@ -474,6 +614,12 @@ export async function POST(request: Request) {
         break;
       case 'analyze':
         response = await handleAnalyzeMode(sanitizedMessage, context);
+        break;
+      case 'coach':
+        // Structured coaching mode - AI explains pre-computed scores
+        // Extract score explanation from context if available
+        const scoreExplanation = (body as { scoreExplanation?: ScoreExplanation | LTP2ScoreExplanation }).scoreExplanation || null;
+        response = await handleCoachMode(sanitizedMessage, context, conversationHistory, scoreExplanation);
         break;
       case 'chat':
       default:

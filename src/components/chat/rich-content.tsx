@@ -72,6 +72,13 @@ interface LessonCardProps {
 }
 
 function LessonCardComponent({ lesson }: LessonCardProps) {
+  // Use the lesson resolver route for AI/chat links
+  // If we have a courseSlug (3-part path), link directly to canonical route
+  // Otherwise, use the resolver which will look up the course
+  const href = lesson.courseSlug
+    ? `/learn/${lesson.courseSlug}/${lesson.moduleId}/${lesson.lessonId}`
+    : `/learn/lesson/${lesson.moduleId}/${lesson.lessonId}`;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -79,7 +86,7 @@ function LessonCardComponent({ lesson }: LessonCardProps) {
       transition={{ duration: 0.2 }}
     >
       <Link
-        href={`/learning/${lesson.moduleId}/${lesson.lessonId}`}
+        href={href}
         className="block group"
       >
         <div
@@ -390,7 +397,7 @@ function QuizCardComponent({ quiz }: QuizCardProps) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
     >
-      <Link href={`/learning/${quiz.moduleId}?quiz=true`} className="block group">
+      <Link href={`/learn/${quiz.moduleId}?quiz=true`} className="block group">
         <div
           className={cn(
             'bg-[var(--bg-primary)] border border-[var(--border-primary)]',

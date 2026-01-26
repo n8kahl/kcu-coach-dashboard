@@ -65,7 +65,13 @@ export type {
 export { DailyChallenges } from './DailyChallenge';
 export { AchievementPopup, AchievementBadge, AchievementList, type Achievement } from './AchievementPopup';
 export { Leaderboard, MiniLeaderboard } from './Leaderboard';
-export { WinCard } from './win-card';
+export {
+  AchievementCard,
+  AchievementCardModal,
+  useWinCardTrigger,
+  // Backwards compatibility alias
+  AchievementCard as WinCard,
+} from './AchievementCard';
 
 // Loading Skeletons
 export * from './LoadingSkeletons';

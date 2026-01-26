@@ -59,6 +59,27 @@ const config: Config = {
         'dark-border': '#334155',
         // Terminal-style borders
         'terminal-border': '#333333',
+        // Companion Mode colors (TradingView-compatible)
+        companion: {
+          bg: 'var(--companion-bg)',
+          sidebar: 'var(--companion-sidebar)',
+        },
+        // Chart colors (TradingView lightweight-charts)
+        chart: {
+          up: 'var(--chart-up)',
+          down: 'var(--chart-down)',
+        },
+        // Win Card theme colors
+        win: {
+          'gold-bg': 'var(--win-gold-bg)',
+          'gold-accent': 'var(--win-gold-accent)',
+          'platinum-bg': 'var(--win-platinum-bg)',
+          'platinum-accent': 'var(--win-platinum-accent)',
+          'emerald-bg': 'var(--win-emerald-bg)',
+          'emerald-accent': 'var(--win-emerald-accent)',
+          'ruby-bg': 'var(--win-ruby-bg)',
+          'ruby-accent': 'var(--win-ruby-accent)',
+        },
       },
       // SHARP CORNERS - Override default rounded utilities
       // Trading terminals have sharp, professional edges

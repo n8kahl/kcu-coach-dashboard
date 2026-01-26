@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getAuthenticatedUserId } from '@/lib/auth';
+import {
+  safeDivideValue,
+  safeWinRate,
+  safeProfitFactor,
+  safeAverage,
+} from '@/lib/number';
 
 export async function GET(request: Request) {
   try {
@@ -132,8 +138,8 @@ export async function GET(request: Request) {
       const emotionPnl = emotionTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
       emotionBreakdown[emotion] = {
         count: emotionTrades.length,
-        winRate: (emotionWins / emotionTrades.length) * 100,
-        avgPnl: emotionPnl / emotionTrades.length,
+        winRate: safeWinRate(emotionWins, emotionTrades.length),
+        avgPnl: safeAverage(emotionPnl, emotionTrades.length),
       };
     }
 
@@ -152,24 +158,26 @@ export async function GET(request: Request) {
       const setupPnl = setupTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
       setupBreakdown[setup] = {
         count: setupTrades.length,
-        winRate: (setupWins / setupTrades.length) * 100,
-        avgPnl: setupPnl / setupTrades.length,
+        winRate: safeWinRate(setupWins, setupTrades.length),
+        avgPnl: safeAverage(setupPnl, setupTrades.length),
       };
     }
 
     const stats = {
       totalTrades: trades.length,
-      winRate: (winners.length / trades.length) * 100,
+      winRate: safeWinRate(winners.length, trades.length),
       totalPnl,
-      avgPnl: totalPnl / trades.length,
-      profitFactor: totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0,
-      avgWin: winners.length > 0 ? totalWins / winners.length : 0,
-      avgLoss: losers.length > 0 ? totalLosses / losers.length : 0,
+      avgPnl: safeAverage(totalPnl, trades.length),
+      profitFactor: safeProfitFactor(totalWins, totalLosses),
+      avgWin: safeAverage(totalWins, winners.length),
+      avgLoss: safeAverage(totalLosses, losers.length),
       largestWin: winners.length > 0 ? Math.max(...winners.map((t) => t.pnl)) : 0,
       largestLoss: losers.length > 0 ? Math.min(...losers.map((t) => t.pnl)) : 0,
-      ltpCompliance: (ltpCompliantTrades.length / trades.length) * 100,
-      avgLtpScore:
-        trades.reduce((sum, t) => sum + (t.ltp_grade?.score || 0), 0) / trades.length,
+      ltpCompliance: safeWinRate(ltpCompliantTrades.length, trades.length),
+      avgLtpScore: safeAverage(
+        trades.reduce((sum, t) => sum + (t.ltp_grade?.score || 0), 0),
+        trades.length
+      ),
       winningStreak: maxWinStreak,
       losingStreak: maxLoseStreak,
       currentStreak,

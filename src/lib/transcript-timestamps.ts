@@ -111,7 +111,7 @@ export function generateLessonTimestampUrl(
   lessonSlug: string,
   startMs: number
 ): string {
-  return `/learning/${moduleSlug}/${lessonSlug}?t=${startMs}`;
+  return `/learn/${moduleSlug}/${lessonSlug}?t=${startMs}`;
 }
 
 /**

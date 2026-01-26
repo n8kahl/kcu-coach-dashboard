@@ -86,7 +86,7 @@ export function VideoTimestampCard({
 
   const handleNavigateToLesson = () => {
     if (relatedLesson) {
-      const url = `/learning/${relatedLesson.moduleSlug}/${relatedLesson.lessonSlug}?t=${startMs}`;
+      const url = `/learn/${relatedLesson.moduleSlug}/${relatedLesson.lessonSlug}?t=${startMs}`;
       window.location.href = url;
     }
   };

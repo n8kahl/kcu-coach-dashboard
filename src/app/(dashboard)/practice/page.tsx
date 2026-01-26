@@ -933,7 +933,7 @@ export default function PracticePage() {
                           <Button
                             variant="ghost"
                             icon={<BookOpen className="w-4 h-4" />}
-                            onClick={() => router.push(`/learning/${scenarioDetail.relatedLessonSlug}`)}
+                            onClick={() => router.push(`/learn/${scenarioDetail.relatedLessonSlug}`)}
                           >
                             Related Lesson
                           </Button>

@@ -6,6 +6,7 @@
  */
 
 import { supabaseAdmin } from './supabase';
+import { safeDivideValue, safeRiskReward, isPositiveFinite } from './number';
 
 // Types
 export interface Bar {
@@ -85,6 +86,42 @@ export interface LTPConfig {
 }
 
 /**
+ * ScoreExplanation provides a deterministic, human-readable breakdown
+ * of an LTP score calculation. This is passed to the AI coach for
+ * explanation - the AI must NEVER compute scores directly.
+ */
+export interface ScoreExplanation {
+  /** Component scores (0-100) */
+  scores: {
+    level: number;
+    trend: number;
+    patience: number;
+    overall: number;
+  };
+
+  /** Final letter grade */
+  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+
+  /** Human-readable explanations for each component */
+  reasons: {
+    level: string;
+    trend: string;
+    patience: string;
+  };
+
+  /** Input data used for calculation (audit trail) */
+  inputs: {
+    symbol: string;
+    direction: 'bullish' | 'bearish';
+    currentPrice: number;
+    levelUsed: { type: string; price: number } | null;
+    timeframesAnalyzed: string[];
+    patienceCandleCount: number;
+    timestamp: string;
+  };
+}
+
+/**
  * Calculate LTP score for a trade entry
  */
 export function calculateLTPScore(
@@ -113,10 +150,11 @@ export function calculateLTPScore(
  * Calculate EMA from price data
  */
 export function calculateEMA(data: number[], period: number): number {
+  if (data.length === 0 || period <= 0) return 0;
   if (data.length < period) return data[data.length - 1] || 0;
 
   const multiplier = 2 / (period + 1);
-  let ema = data.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let ema = safeDivideValue(data.slice(0, period).reduce((a, b) => a + b, 0), period, 0);
 
   for (let i = period; i < data.length; i++) {
     ema = (data[i] - ema) * multiplier + ema;
@@ -252,7 +290,11 @@ export function identifyPatienceCandles(bars: Bar[]): Bar[] {
   if (bars.length < 2) return [];
 
   const patienceCandles: Bar[] = [];
-  const avgSize = bars.reduce((sum, b) => sum + Math.abs(b.c - b.o), 0) / bars.length;
+  const avgSize = safeDivideValue(
+    bars.reduce((sum, b) => sum + Math.abs(b.c - b.o), 0),
+    bars.length,
+    1 // Fallback to 1 to avoid division by zero in comparison
+  );
 
   for (let i = 1; i < bars.length; i++) {
     const bar = bars[i];
@@ -287,8 +329,12 @@ export function detectPatienceCandle(
   let patienceCount = 0;
 
   for (const bar of recentBars) {
-    const candleSize = (Math.abs(bar.c - bar.o) / bar.o) * 100;
-    const distanceToLevel = (Math.abs(bar.c - levelPrice) / levelPrice) * 100;
+    const candleSize = isPositiveFinite(bar.o)
+      ? (Math.abs(bar.c - bar.o) / bar.o) * 100
+      : 0;
+    const distanceToLevel = isPositiveFinite(levelPrice)
+      ? (Math.abs(bar.c - levelPrice) / levelPrice) * 100
+      : 100; // Large distance if level price is invalid
 
     // Patience candle criteria:
     // 1. Small body (< maxCandleSize%)
@@ -315,13 +361,18 @@ export function scoreLevelProximity(
   let maxScore = 0;
   let bestLevel: KeyLevel | null = null;
 
+  // Guard against invalid inputs
+  if (!isPositiveFinite(currentPrice) || proximityThreshold <= 0) {
+    return { score: 0, level: null };
+  }
+
   for (const level of levels) {
     const distance = (Math.abs(currentPrice - level.price) / currentPrice) * 100;
 
     if (distance <= proximityThreshold) {
       // Score based on level strength and proximity
-      const proximityScore = (1 - distance / proximityThreshold) * 50;
-      const strengthScore = (level.strength / 100) * 50;
+      const proximityScore = safeDivideValue(1 - distance, proximityThreshold, 0) * 50;
+      const strengthScore = safeDivideValue(level.strength, 100, 0) * 50;
       const score = proximityScore + strengthScore;
 
       if (score > maxScore) {
@@ -429,7 +480,7 @@ export function calculateTradeParams(
 
   const risk = Math.abs(entry - stop);
   const reward = Math.abs(target2 - entry);
-  const riskReward = risk > 0 ? reward / risk : 0;
+  const riskReward = safeRiskReward(reward, risk);
 
   return {
     suggested_entry: Math.round(entry * 100) / 100,
@@ -444,12 +495,76 @@ export function calculateTradeParams(
 /**
  * Generate LTP grade from overall score
  */
-export function getLTPGrade(overallScore: number): string {
+export function getLTPGrade(overallScore: number): 'A' | 'B' | 'C' | 'D' | 'F' {
   if (overallScore >= 90) return 'A';
   if (overallScore >= 80) return 'B';
   if (overallScore >= 70) return 'C';
   if (overallScore >= 60) return 'D';
   return 'F';
+}
+
+/**
+ * Generate a deterministic ScoreExplanation for AI coaching.
+ * The AI must use this pre-computed explanation - it cannot calculate scores.
+ */
+export function generateScoreExplanation(
+  symbol: string,
+  direction: 'bullish' | 'bearish',
+  currentPrice: number,
+  levelResult: LevelResult,
+  trendScore: number,
+  patienceResult: PatienceResult,
+  mtfAnalyses: MTFAnalysis[]
+): ScoreExplanation {
+  const ltpScore = calculateLTPScore(
+    levelResult.score,
+    trendScore,
+    scorePatienceQuality(patienceResult)
+  );
+
+  const grade = getLTPGrade(ltpScore.overall);
+
+  // Generate human-readable reasons
+  const levelReason = levelResult.level
+    ? `Price within ${((Math.abs(currentPrice - levelResult.level.price) / currentPrice) * 100).toFixed(2)}% of ${levelResult.level.price.toFixed(2)} ${levelResult.level.type} (strength: ${levelResult.level.strength})`
+    : 'No key level nearby - price is in no-man\'s land';
+
+  const alignedTimeframes = mtfAnalyses
+    .filter(a => a.trend === direction)
+    .map(a => a.timeframe);
+  const trendReason = alignedTimeframes.length > 0
+    ? `${direction.charAt(0).toUpperCase() + direction.slice(1)} trend aligned on ${alignedTimeframes.join(', ')} timeframes`
+    : `Trend not aligned with ${direction} direction`;
+
+  const patienceReason = patienceResult.detected
+    ? `${patienceResult.count} patience candle(s) confirmed at level`
+    : 'No patience candles detected - waiting for confirmation';
+
+  return {
+    scores: {
+      level: ltpScore.level,
+      trend: ltpScore.trend,
+      patience: ltpScore.patience,
+      overall: ltpScore.overall,
+    },
+    grade,
+    reasons: {
+      level: levelReason,
+      trend: trendReason,
+      patience: patienceReason,
+    },
+    inputs: {
+      symbol,
+      direction,
+      currentPrice,
+      levelUsed: levelResult.level
+        ? { type: levelResult.level.type, price: levelResult.level.price }
+        : null,
+      timeframesAnalyzed: mtfAnalyses.map(a => a.timeframe),
+      patienceCandleCount: patienceResult.count,
+      timestamp: new Date().toISOString(),
+    },
+  };
 }
 
 /**

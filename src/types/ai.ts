@@ -341,7 +341,7 @@ export interface AIContext {
 // AI API Types
 // =============================================================================
 
-export type AIMode = 'chat' | 'search' | 'action' | 'analyze' | 'suggest';
+export type AIMode = 'chat' | 'search' | 'action' | 'analyze' | 'suggest' | 'coach';
 
 export interface AIMessage {
   id: string;

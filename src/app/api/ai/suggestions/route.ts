@@ -14,6 +14,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
+import { getLearnUrl } from '@/lib/learning/urls';
 import logger from '@/lib/logger';
 
 // ============================================
@@ -402,12 +403,12 @@ async function getMilestoneSuggestions(profile: Record<string, unknown>): Promis
     suggestions.push({
       id: `module-complete-${Date.now()}`,
       type: 'learning_milestone',
-      title: 'Almost done! 📚',
+      title: 'Almost done!',
       message: `You're ${moduleProgress[currentModule]}% through the ${currentModule} module. Finish strong!`,
       priority: 'medium',
       action: {
         label: 'Continue',
-        url: `/learning/${currentModule}`,
+        url: getLearnUrl(), // Link to learn hub - user can navigate to their module
       },
       dismissable: true,
       timestamp: now,

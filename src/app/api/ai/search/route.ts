@@ -14,6 +14,7 @@ import { NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getEnhancedRAGContext } from '@/lib/rag';
+import { getLessonUrl, getLessonResolverUrl } from '@/lib/learning/urls';
 import logger from '@/lib/logger';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -265,7 +266,96 @@ async function searchTrades(
   }
 }
 
+// Type for the Supabase query result with nested relations
+interface LessonQueryResult {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  duration_seconds: number | null;
+  key_takeaways: string[] | null;
+  course_modules: {
+    slug: string;
+    title: string;
+    courses: {
+      slug: string;
+      title: string;
+    };
+  };
+}
+
 async function searchLessons(
+  query: string,
+  interpretation: SearchInterpretation,
+  limit: number = 10
+): Promise<SearchResult[]> {
+  try {
+    // Query course_lessons with joins to get course and module slugs
+    const { data: lessons, error } = await supabaseAdmin
+      .from('course_lessons')
+      .select(`
+        id,
+        slug,
+        title,
+        description,
+        duration_seconds,
+        key_takeaways,
+        course_modules!inner (
+          slug,
+          title,
+          courses!inner (
+            slug,
+            title
+          )
+        )
+      `)
+      .eq('is_published', true)
+      .order('created_at', { ascending: false })
+      .limit(limit * 2);
+
+    if (error || !lessons) {
+      // Fallback to legacy lessons table if course_lessons fails
+      return searchLessonsLegacy(query, interpretation, limit);
+    }
+
+    const lowerQuery = query.toLowerCase();
+    return (lessons as unknown as LessonQueryResult[])
+      .map((lesson): SearchResult => {
+        let relevance = 50;
+
+        if (lesson.title?.toLowerCase().includes(lowerQuery)) relevance += 40;
+        if (lesson.description?.toLowerCase().includes(lowerQuery)) relevance += 20;
+        if (lesson.key_takeaways?.some((c: string) => c.toLowerCase().includes(lowerQuery))) relevance += 30;
+
+        const courseSlug = lesson.course_modules.courses.slug;
+        const moduleSlug = lesson.course_modules.slug;
+        const durationMinutes = lesson.duration_seconds ? Math.round(lesson.duration_seconds / 60) : 10;
+
+        return {
+          id: lesson.id,
+          type: 'lesson',
+          title: lesson.title,
+          description: `${lesson.course_modules.title} - ${durationMinutes} min`,
+          url: getLessonUrl(courseSlug, moduleSlug, lesson.slug),
+          relevance: Math.min(relevance, 100),
+          metadata: {
+            courseSlug,
+            moduleSlug,
+            lessonSlug: lesson.slug,
+            duration: durationMinutes,
+          },
+        };
+      })
+      .filter((r) => r.relevance > 40)
+      .slice(0, limit);
+  } catch (error) {
+    logger.error('Lesson search error', { error: error instanceof Error ? error.message : String(error) });
+    return [];
+  }
+}
+
+// Fallback for legacy lessons table
+async function searchLessonsLegacy(
   query: string,
   interpretation: SearchInterpretation,
   limit: number = 10
@@ -288,20 +378,21 @@ async function searchLessons(
         if (lesson.description?.toLowerCase().includes(lowerQuery)) relevance += 20;
         if (lesson.key_concepts?.some((c: string) => c.toLowerCase().includes(lowerQuery))) relevance += 30;
 
+        // Use resolver URL since we don't have course context in legacy table
         return {
           id: lesson.id,
           type: 'lesson',
           title: lesson.title,
           description: `${lesson.module_id} - ${lesson.duration || '10'} min`,
-          url: `/learning/${lesson.module_id}/${lesson.slug}`,
+          url: getLessonResolverUrl(lesson.module_id, lesson.slug),
           relevance: Math.min(relevance, 100),
-          metadata: { moduleId: lesson.module_id, duration: lesson.duration },
+          metadata: { moduleSlug: lesson.module_id, lessonSlug: lesson.slug, duration: lesson.duration },
         };
       })
       .filter((r) => r.relevance > 40)
       .slice(0, limit);
   } catch (error) {
-    logger.error('Lesson search error', { error: error instanceof Error ? error.message : String(error) });
+    logger.error('Legacy lesson search error', { error: error instanceof Error ? error.message : String(error) });
     return [];
   }
 }

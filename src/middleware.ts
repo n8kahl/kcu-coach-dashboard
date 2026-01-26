@@ -1,9 +1,27 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';
+import { generateRequestId } from '@/lib/logger';
+
+// =============================================================================
+// MOCK DATA SAFETY
+// =============================================================================
+
+/**
+ * Whether mock data routes are allowed.
+ * CRITICAL: This is ONLY true when USE_MOCK_DATA=true AND NOT in production.
+ */
+const MOCK_ROUTES_ENABLED =
+  process.env.USE_MOCK_DATA === 'true' && process.env.NODE_ENV !== 'production';
 
 // Routes that don't require authentication
+// NOTE: /companion/mock is conditionally added based on MOCK_ROUTES_ENABLED
 const publicRoutes = ['/login', '/api/auth', '/api/health', '/api/economic'];
+
+// Add mock route only if explicitly enabled in non-production
+if (MOCK_ROUTES_ENABLED) {
+  publicRoutes.push('/companion/mock');
+}
 
 // Check if a path is public (doesn't require auth)
 function isPublicRoute(pathname: string): boolean {
@@ -105,7 +123,7 @@ if (typeof setInterval !== 'undefined') {
 }
 
 /**
- * Add security headers to response
+ * Add security headers and request correlation ID to response
  *
  * CSP Notes:
  * - Next.js App Router requires 'unsafe-inline' for styles due to CSS-in-JS
@@ -113,7 +131,11 @@ if (typeof setInterval !== 'undefined') {
  * - For stricter CSP, consider implementing nonce-based script loading
  * - See: https://nextjs.org/docs/app/building-your-application/configuring/content-security-policy
  */
-function addSecurityHeaders(response: NextResponse): NextResponse {
+function addSecurityHeaders(response: NextResponse, requestId?: string): NextResponse {
+  // Add request correlation ID for distributed tracing
+  if (requestId) {
+    response.headers.set('X-Request-ID', requestId);
+  }
   const isDev = process.env.NODE_ENV === 'development';
 
   // Content Security Policy - stricter in production
@@ -184,6 +206,11 @@ function getClientIdentifier(request: NextRequest): string {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Generate or extract request correlation ID for distributed tracing
+  const requestId = request.headers.get('x-request-id') ||
+                    request.headers.get('x-correlation-id') ||
+                    generateRequestId();
+
   // Skip middleware for static files and Next.js internals
   if (
     pathname.startsWith('/_next') ||
@@ -191,6 +218,32 @@ export async function middleware(request: NextRequest) {
     pathname.includes('.') // Static files
   ) {
     return NextResponse.next();
+  }
+
+  // =============================================================================
+  // MOCK ROUTE PROTECTION
+  // =============================================================================
+  // Block mock routes in production - this is a CRITICAL security measure.
+  // Even if someone sets USE_MOCK_DATA=true in production, this will still block.
+  if (pathname.startsWith('/companion/mock')) {
+    if (process.env.NODE_ENV === 'production') {
+      // In production, return 404 for mock routes - they shouldn't exist
+      return NextResponse.json(
+        { error: 'Not Found', message: 'This route does not exist' },
+        { status: 404 }
+      );
+    }
+
+    if (!MOCK_ROUTES_ENABLED) {
+      // In development but mock not enabled, return helpful error
+      return NextResponse.json(
+        {
+          error: 'Mock Mode Disabled',
+          message: 'Set USE_MOCK_DATA=true in .env.local to enable mock mode',
+        },
+        { status: 403 }
+      );
+    }
   }
 
   // Check authentication for protected routes
@@ -253,7 +306,7 @@ export async function middleware(request: NextRequest) {
       response.headers.set('X-RateLimit-Remaining', '0');
       response.headers.set('X-RateLimit-Reset', String(rateLimitResult.resetTime));
 
-      return addSecurityHeaders(response);
+      return addSecurityHeaders(response, requestId);
     }
 
     // Continue with rate limit headers
@@ -262,12 +315,12 @@ export async function middleware(request: NextRequest) {
     response.headers.set('X-RateLimit-Remaining', String(rateLimitResult.remaining));
     response.headers.set('X-RateLimit-Reset', String(rateLimitResult.resetTime));
 
-    return addSecurityHeaders(response);
+    return addSecurityHeaders(response, requestId);
   }
 
   // Add security headers to all responses
   const response = NextResponse.next();
-  return addSecurityHeaders(response);
+  return addSecurityHeaders(response, requestId);
 }
 
 export const config = {

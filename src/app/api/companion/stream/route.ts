@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import { addConnection, removeConnection } from '@/lib/broadcast';
+import { addConnection, removeConnection, getBroadcastMode } from '@/lib/broadcast';
 import { priceBridge } from '@/lib/price-bridge';
 import { supabaseAdmin } from '@/lib/supabase';
 import logger from '@/lib/logger';
@@ -51,12 +51,27 @@ export async function GET(request: Request) {
         // Register connection
         addConnection(userId, controller);
 
-        // Send initial connection message
+        // Get honest broadcast mode status
+        const broadcastStatus = getBroadcastMode();
+
+        // Determine realtime capabilities honestly
+        // - Redis mode with symbols = full realtime ("redis")
+        // - Memory mode = degraded realtime, polling recommended ("memory")
+        // - No symbols = no price streaming, only setup alerts
+        const hasSymbols = symbols.length > 0;
+        const realtimeEnabled = hasSymbols && broadcastStatus.initialized;
+
+        // Send initial connection message with honest status
         const connectMessage = `event: connected\ndata: ${JSON.stringify({
           userId,
           timestamp: new Date().toISOString(),
           message: 'Connected to KCU Companion Mode',
-          realtimeEnabled: symbols.length > 0,
+          // Honest realtime status
+          realtimeEnabled,
+          // Mode indicates quality of realtime: "redis" = full, "memory" = degraded (single server)
+          mode: broadcastStatus.mode,
+          // Whether the broadcast system has initialized
+          initialized: broadcastStatus.initialized,
           symbols: symbols,
         })}\n\n`;
 

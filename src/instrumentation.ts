@@ -135,7 +135,17 @@ async function checkAndGenerateBriefings() {
 }
 
 export async function register() {
-  // Only run on server runtime (not edge)
+  // Initialize Sentry for server-side error tracking
+  if (process.env.SENTRY_DSN) {
+    if (process.env.NEXT_RUNTIME === 'nodejs') {
+      await import('../sentry.server.config');
+    }
+    if (process.env.NEXT_RUNTIME === 'edge') {
+      await import('../sentry.edge.config');
+    }
+  }
+
+  // Only run background services on server runtime (not edge)
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     const { startDetector, addSymbols } = await import('./lib/ltp-detector');
     const { marketDataService } = await import('./lib/market-data');

@@ -36,11 +36,6 @@ const envSchema = z.object({
   // Error tracking (optional)
   SENTRY_DSN: z.string().url().optional(),
 
-  // Thinkific LMS Integration (optional - for SSO deep-linking)
-  // Note: The API key is used both for REST API calls AND as the JWT signing secret for SSO
-  THINKIFIC_SUBDOMAIN: z.string().default('kaycapitals'),
-  THINKIFIC_API_KEY: z.string().optional(),
-
   // YouTube Channel Indexing (optional - for AI coach remediation)
   YOUTUBE_API_KEY: z.string().optional(),
   KAY_CAPITALS_CHANNEL_ID: z.string().optional(),
@@ -115,7 +110,7 @@ export function isDevelopment(): boolean {
 /**
  * Check if a feature is enabled based on env vars
  */
-export function isFeatureEnabled(feature: 'ai' | 'companion' | 'redis' | 'thinkific_sso' | 'youtube_indexer'): boolean {
+export function isFeatureEnabled(feature: 'ai' | 'companion' | 'redis' | 'youtube_indexer'): boolean {
   switch (feature) {
     case 'ai':
       return !!process.env.ANTHROPIC_API_KEY;
@@ -123,8 +118,6 @@ export function isFeatureEnabled(feature: 'ai' | 'companion' | 'redis' | 'thinki
       return !!process.env.MASSIVE_API_KEY;
     case 'redis':
       return !!process.env.REDIS_URL;
-    case 'thinkific_sso':
-      return !!(process.env.THINKIFIC_API_KEY && process.env.THINKIFIC_SUBDOMAIN);
     case 'youtube_indexer':
       return !!(process.env.YOUTUBE_API_KEY && process.env.KAY_CAPITALS_CHANNEL_ID);
     default:
@@ -143,9 +136,6 @@ export const env = {
   get SUPABASE_SERVICE_ROLE_KEY() { return process.env.SUPABASE_SERVICE_ROLE_KEY || ''; },
   get NEXT_PUBLIC_APP_URL() { return process.env.NEXT_PUBLIC_APP_URL || ''; },
   get ANTHROPIC_API_KEY() { return process.env.ANTHROPIC_API_KEY || ''; },
-  // Thinkific (API key is used for both REST API and SSO JWT signing)
-  get THINKIFIC_SUBDOMAIN() { return process.env.THINKIFIC_SUBDOMAIN || 'kaycapitals'; },
-  get THINKIFIC_API_KEY() { return process.env.THINKIFIC_API_KEY || ''; },
   // YouTube
   get YOUTUBE_API_KEY() { return process.env.YOUTUBE_API_KEY || ''; },
   get KAY_CAPITALS_CHANNEL_ID() { return process.env.KAY_CAPITALS_CHANNEL_ID || ''; },

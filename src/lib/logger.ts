@@ -1,18 +1,28 @@
 /**
- * Structured logging service for production readiness
- * Replaces scattered console.log calls with proper log levels and formatting
+ * Production Logger with Sentry Integration
+ *
+ * Features:
+ * - Structured JSON logging in production
+ * - Colored console output in development
+ * - Request correlation IDs for tracing
+ * - Sentry integration for error tracking
+ * - Log levels: debug, info, warn, error
  */
+
+import * as Sentry from '@sentry/nextjs';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 type AuthEvent = 'login' | 'logout' | 'session_refresh' | 'session_expired' | 'unauthorized';
 
-interface LogContext {
+export interface LogContext {
   userId?: string;
   requestId?: string;
   path?: string;
   method?: string;
   duration?: number;
   statusCode?: number;
+  traceId?: string;
+  spanId?: string;
   [key: string]: unknown;
 }
 
@@ -20,15 +30,17 @@ interface LogEntry {
   timestamp: string;
   level: LogLevel;
   message: string;
+  requestId?: string;
   context?: LogContext;
   error?: {
     name: string;
     message: string;
     stack?: string;
+    code?: string;
   };
 }
 
-// Logger interface definition (defined before implementation to avoid circular reference)
+// Logger interface definition
 export interface Logger {
   debug(message: string, context?: LogContext): void;
   info(message: string, context?: LogContext): void;
@@ -37,6 +49,7 @@ export interface Logger {
   request(method: string, path: string, statusCode: number, duration: number, context?: LogContext): void;
   auth(event: AuthEvent, userId?: string, context?: LogContext): void;
   security(event: string, context?: LogContext): void;
+  ai(operation: string, model: string, context?: LogContext): void;
   child(context: LogContext): Logger;
 }
 
@@ -48,14 +61,26 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   error: 3,
 };
 
+// Sentry severity mapping
+const SENTRY_LEVELS: Record<LogLevel, Sentry.SeverityLevel> = {
+  debug: 'debug',
+  info: 'info',
+  warn: 'warning',
+  error: 'error',
+};
+
 // Get minimum log level from environment
 function getMinLogLevel(): LogLevel {
   const envLevel = process.env.LOG_LEVEL?.toLowerCase() as LogLevel;
   if (envLevel && LOG_LEVELS[envLevel] !== undefined) {
     return envLevel;
   }
-  // Default: debug in development, info in production
   return process.env.NODE_ENV === 'development' ? 'debug' : 'info';
+}
+
+// Check if Sentry is configured
+function isSentryEnabled(): boolean {
+  return !!process.env.SENTRY_DSN || !!process.env.NEXT_PUBLIC_SENTRY_DSN;
 }
 
 // Format log entry for output
@@ -73,18 +98,29 @@ function formatLogEntry(entry: LogEntry): string {
     error: '\x1b[31m', // red
   };
   const reset = '\x1b[0m';
+  const dim = '\x1b[2m';
   const color = levelColors[entry.level];
 
-  let output = `${entry.timestamp} ${color}[${entry.level.toUpperCase()}]${reset} ${entry.message}`;
+  let output = `${dim}${entry.timestamp}${reset} ${color}[${entry.level.toUpperCase()}]${reset}`;
+
+  if (entry.requestId) {
+    output += ` ${dim}[${entry.requestId.slice(0, 8)}]${reset}`;
+  }
+
+  output += ` ${entry.message}`;
 
   if (entry.context && Object.keys(entry.context).length > 0) {
-    output += ` ${JSON.stringify(entry.context)}`;
+    // Filter out requestId from context since it's already shown
+    const { requestId, ...rest } = entry.context;
+    if (Object.keys(rest).length > 0) {
+      output += ` ${dim}${JSON.stringify(rest)}${reset}`;
+    }
   }
 
   if (entry.error) {
-    output += `\n  Error: ${entry.error.message}`;
+    output += `\n  ${color}Error: ${entry.error.message}${reset}`;
     if (entry.error.stack && process.env.NODE_ENV === 'development') {
-      output += `\n  Stack: ${entry.error.stack}`;
+      output += `\n  ${dim}Stack: ${entry.error.stack.split('\n').slice(1, 4).join('\n  ')}${reset}`;
     }
   }
 
@@ -106,10 +142,60 @@ function outputLog(entry: LogEntry): void {
       console.log(formatted);
   }
 
-  // TODO: Send to external logging service (e.g., Sentry, DataDog)
-  // if (process.env.NODE_ENV === 'production' && entry.level === 'error') {
-  //   sendToErrorTracking(entry);
-  // }
+  // Send to Sentry if enabled
+  if (isSentryEnabled()) {
+    sendToSentry(entry);
+  }
+}
+
+// Send log entry to Sentry
+function sendToSentry(entry: LogEntry): void {
+  // Set context for all Sentry events
+  if (entry.context) {
+    Sentry.setContext('log', {
+      requestId: entry.requestId || entry.context.requestId,
+      ...entry.context,
+    });
+  }
+
+  if (entry.requestId) {
+    Sentry.setTag('request_id', entry.requestId);
+  }
+
+  // Handle errors
+  if (entry.error) {
+    const error = new Error(entry.error.message);
+    error.name = entry.error.name;
+    if (entry.error.stack) {
+      error.stack = entry.error.stack;
+    }
+
+    Sentry.captureException(error, {
+      level: SENTRY_LEVELS[entry.level],
+      tags: {
+        request_id: entry.requestId,
+        log_level: entry.level,
+      },
+      extra: entry.context,
+    });
+  } else if (entry.level === 'error' || entry.level === 'warn') {
+    // Capture warnings and errors as breadcrumbs or messages
+    Sentry.addBreadcrumb({
+      category: 'log',
+      message: entry.message,
+      level: SENTRY_LEVELS[entry.level],
+      data: entry.context,
+    });
+
+    // Only capture error-level as actual Sentry events
+    if (entry.level === 'error') {
+      Sentry.captureMessage(entry.message, {
+        level: 'error',
+        tags: { request_id: entry.requestId },
+        extra: entry.context,
+      });
+    }
+  }
 }
 
 // Check if we should log at this level
@@ -136,9 +222,13 @@ function createLogEntry(
       name: contextOrError.name,
       message: contextOrError.message,
       stack: contextOrError.stack,
+      code: (contextOrError as NodeJS.ErrnoException).code,
     };
   } else if (contextOrError) {
     entry.context = contextOrError;
+    if (contextOrError.requestId) {
+      entry.requestId = contextOrError.requestId;
+    }
   }
 
   if (error) {
@@ -146,6 +236,7 @@ function createLogEntry(
       name: error.name,
       message: error.message,
       stack: error.stack,
+      code: (error as NodeJS.ErrnoException).code,
     };
   }
 
@@ -183,6 +274,9 @@ function createChildLogger(parentContext: LogContext): Logger {
     },
     security(event: string, context?: LogContext): void {
       logger.security(event, { ...parentContext, ...context });
+    },
+    ai(operation: string, model: string, context?: LogContext): void {
+      logger.ai(operation, model, { ...parentContext, ...context });
     },
     child(context: LogContext): Logger {
       return createChildLogger({ ...parentContext, ...context });
@@ -224,7 +318,7 @@ export const logger: Logger = {
   request(method: string, path: string, statusCode: number, duration: number, context?: LogContext): void {
     const level: LogLevel = statusCode >= 500 ? 'error' : statusCode >= 400 ? 'warn' : 'info';
     if (shouldLog(level)) {
-      outputLog(createLogEntry(level, `${method} ${path} ${statusCode}`, {
+      outputLog(createLogEntry(level, `${method} ${path} ${statusCode} ${duration}ms`, {
         ...context,
         method,
         path,
@@ -251,6 +345,15 @@ export const logger: Logger = {
   },
 
   /**
+   * Log AI operations (useful for debugging AI failures)
+   */
+  ai(operation: string, model: string, context?: LogContext): void {
+    if (shouldLog('info')) {
+      outputLog(createLogEntry('info', `AI: ${operation}`, { ...context, model, operation }));
+    }
+  },
+
+  /**
    * Create a child logger with preset context
    */
   child(context: LogContext): Logger {
@@ -259,3 +362,75 @@ export const logger: Logger = {
 };
 
 export default logger;
+
+// ============================================
+// Request Correlation ID Utilities
+// ============================================
+
+/**
+ * Generate a unique request ID
+ */
+export function generateRequestId(): string {
+  const timestamp = Date.now().toString(36);
+  const random = Math.random().toString(36).substring(2, 10);
+  return `${timestamp}-${random}`;
+}
+
+/**
+ * Extract request ID from headers or generate new one
+ */
+export function getRequestId(headers: Headers): string {
+  // Check for existing correlation ID from upstream
+  const existingId = headers.get('x-request-id') ||
+                     headers.get('x-correlation-id') ||
+                     headers.get('x-trace-id');
+
+  return existingId || generateRequestId();
+}
+
+// ============================================
+// Sentry Utilities
+// ============================================
+
+/**
+ * Wrap an async function with Sentry error tracking
+ */
+export function withSentrySpan<T>(
+  name: string,
+  operation: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  if (!isSentryEnabled()) {
+    return fn();
+  }
+
+  return Sentry.startSpan(
+    { name, op: operation },
+    async () => {
+      try {
+        return await fn();
+      } catch (error) {
+        Sentry.captureException(error);
+        throw error;
+      }
+    }
+  );
+}
+
+/**
+ * Set user context for Sentry
+ */
+export function setSentryUser(user: { id: string; username?: string; email?: string }): void {
+  if (isSentryEnabled()) {
+    Sentry.setUser(user);
+  }
+}
+
+/**
+ * Clear user context from Sentry (on logout)
+ */
+export function clearSentryUser(): void {
+  if (isSentryEnabled()) {
+    Sentry.setUser(null);
+  }
+}

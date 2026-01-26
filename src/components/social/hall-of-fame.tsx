@@ -36,6 +36,7 @@ import {
   WIN_CARD_THEMES,
   type AspectRatioName,
 } from '@/components/cards/win-card';
+import type { WinCardThemeName } from '@/types/win-card';
 
 // ============================================
 // Types
@@ -137,7 +138,7 @@ export function HallOfFame({ showToast }: HallOfFameProps) {
   const [previewWin, setPreviewWin] = useState<StudentWinData | null>(null);
   const [previewCaption, setPreviewCaption] = useState<WinCardCaption | null>(null);
   const [aspectRatio, setAspectRatio] = useState<AspectRatioName>('post');
-  const [theme, setTheme] = useState<string>('gold');
+  const [theme, setTheme] = useState<WinCardThemeName>('gold');
 
   // Fetch detected wins
   const fetchDetectedWins = useCallback(async () => {
