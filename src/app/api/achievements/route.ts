@@ -523,7 +523,7 @@ export async function GET(request: Request) {
     );
 
     // Category breakdown
-    const categories = [...new Set(allAchievements.map(a => a.category))];
+    const categories = Array.from(new Set(allAchievements.map(a => a.category)));
     const categoryStats = categories.map(cat => ({
       category: cat,
       total: allAchievements.filter(a => a.category === cat).length,

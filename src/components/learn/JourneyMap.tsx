@@ -265,7 +265,7 @@ function JourneyNode({ module, courseSlug, index, isFirst, isLast, prevStatus }:
                 </div>
 
                 {/* Quiz Score */}
-                {module.progress.bestQuizScore !== undefined && module.progress.bestQuizScore > 0 && (
+                {module.progress.bestQuizScore != null && module.progress.bestQuizScore > 0 && (
                   <div className="flex items-center gap-2 mt-3 text-sm">
                     <Trophy className={cn(
                       'w-4 h-4',

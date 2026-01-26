@@ -37,7 +37,7 @@ import type { Achievement } from '@/types';
 
 type RarityTier = 'common' | 'rare' | 'epic' | 'legendary';
 
-interface EnhancedAchievement extends Achievement {
+interface EnhancedAchievement extends Omit<Achievement, 'progress'> {
   rarity?: {
     tier: RarityTier;
     percentage: number;
@@ -126,16 +126,19 @@ function getRarityConfig(achievement: EnhancedAchievement): RarityConfig {
 // ============================================================================
 
 interface AchievementsGridProps {
-  achievements: EnhancedAchievement[];
+  achievements: Achievement[];
   almostThere?: EnhancedAchievement[];
   categoryStats?: Array<{ category: string; total: number; earned: number }>;
 }
 
 export function AchievementsGrid({
-  achievements,
+  achievements: rawAchievements,
   almostThere = [],
   categoryStats = [],
 }: AchievementsGridProps) {
+  // Cast achievements to enhanced type for internal use
+  const achievements = rawAchievements as EnhancedAchievement[];
+
   const [selectedAchievement, setSelectedAchievement] = useState<EnhancedAchievement | null>(null);
   const [filter, setFilter] = useState<'all' | 'earned' | 'locked'>('all');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -217,7 +220,7 @@ export function AchievementsGrid({
           {(['all', 'earned', 'locked'] as const).map((f) => (
             <Button
               key={f}
-              variant={filter === f ? 'default' : 'ghost'}
+              variant={filter === f ? 'primary' : 'ghost'}
               size="sm"
               onClick={() => setFilter(f)}
               className="capitalize"
@@ -244,15 +247,13 @@ export function AchievementsGrid({
               borderColor: 'rgba(245,158,11,0.3)',
             }}
           >
-            <CardHeader
-              title={
-                <div className="flex items-center gap-2">
-                  <Flame className="w-5 h-5 text-orange-500" />
-                  <span>Almost There!</span>
-                </div>
-              }
-              subtitle="You're so close to unlocking these achievements"
-            />
+            <CardHeader>
+              <div className="flex items-center gap-2 mb-1">
+                <Flame className="w-5 h-5 text-orange-500" />
+                <span className="font-semibold text-[var(--text-primary)]">Almost There!</span>
+              </div>
+              <p className="text-sm text-[var(--text-tertiary)]">You're so close to unlocking these achievements</p>
+            </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {almostThere.slice(0, 3).map((achievement, index) => (
@@ -570,7 +571,7 @@ function AlmostThereCard({ achievement, index, onClick }: AlmostThereCardProps) 
                       {progress.current} / {progress.target}
                     </span>
                   </div>
-                  <ProgressBar value={progress.percent} variant="warning" size="sm" />
+                  <ProgressBar value={progress.percent} variant="gold" size="sm" />
                 </div>
               )}
             </div>
@@ -786,10 +787,11 @@ function AchievementModal({ achievement, onClose }: AchievementModalProps) {
 // ============================================================================
 
 interface FeaturedAchievementProps {
-  achievement: EnhancedAchievement;
+  achievement: Achievement;
 }
 
-export function FeaturedAchievement({ achievement }: FeaturedAchievementProps) {
+export function FeaturedAchievement({ achievement: rawAchievement }: FeaturedAchievementProps) {
+  const achievement = rawAchievement as EnhancedAchievement;
   const display = getAchievementDisplay(achievement);
   const config = getRarityConfig(achievement);
   const isHolographic = config.holographic;

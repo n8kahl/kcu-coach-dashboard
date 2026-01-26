@@ -959,9 +959,9 @@ export default function QuizPage() {
                                       {currentQuestion.explanation}
                                     </p>
                                   )}
-                                  {currentQuestion.videoTimestamp && (
+                                  {(currentQuestion as { videoTimestamp?: number }).videoTimestamp && (
                                     <Link
-                                      href={`/learn/${data.courseSlug}/${data.module.slug}?t=${currentQuestion.videoTimestamp}`}
+                                      href={`/learn/${data.courseSlug}/${data.module.slug}?t=${(currentQuestion as { videoTimestamp?: number }).videoTimestamp}`}
                                       className="inline-flex items-center gap-2 text-sm font-medium text-[var(--accent-primary)] hover:underline"
                                     >
                                       <BookOpen className="w-4 h-4" />
