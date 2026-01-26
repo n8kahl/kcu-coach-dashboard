@@ -18,6 +18,7 @@ import logger from '@/lib/logger';
 export interface ContentSearchResult {
   id: string;
   title: string;
+  courseSlug: string;
   moduleTitle: string;
   moduleSlug: string;
   lessonSlug: string;
@@ -224,7 +225,10 @@ async function fallbackContentSearch(
       video_duration_seconds,
       course_modules!inner (
         title,
-        slug
+        slug,
+        courses!inner (
+          slug
+        )
       )
     `)
     .eq('is_published', true)
@@ -243,7 +247,7 @@ async function fallbackContentSearch(
   }
 
   const results: ContentSearchResult[] = (lessons || []).map((lesson) => {
-    const moduleData = lesson.course_modules as unknown as { title: string; slug: string };
+    const moduleData = lesson.course_modules as unknown as { title: string; slug: string; courses: { slug: string } };
 
     // Determine best match type and extract snippet
     let matchType: 'title' | 'description' | 'transcript' = 'description';
@@ -263,6 +267,7 @@ async function fallbackContentSearch(
     return {
       id: lesson.id,
       title: lesson.title,
+      courseSlug: moduleData?.courses?.slug || 'kcu-trading-mastery',
       moduleTitle: moduleData?.title || 'Unknown Module',
       moduleSlug: moduleData?.slug || '',
       lessonSlug: lesson.slug,
@@ -297,6 +302,7 @@ function processSearchResults(
     description: string | null;
     transcript_text: string | null;
     video_duration_seconds: number | null;
+    course_slug?: string;
     module_title: string;
     module_slug: string;
     rank: number;
@@ -308,6 +314,7 @@ function processSearchResults(
   const results: ContentSearchResult[] = data.map((row) => ({
     id: row.id,
     title: row.title,
+    courseSlug: row.course_slug || 'kcu-trading-mastery',
     moduleTitle: row.module_title,
     moduleSlug: row.module_slug,
     lessonSlug: row.slug,
@@ -349,7 +356,8 @@ function formatContentContext(
       ? ` (${Math.round(result.videoDurationSeconds / 60)} min)`
       : '';
 
-    const lessonPath = `${result.moduleSlug}/${result.lessonSlug}`;
+    // Use 3-part path (course/module/lesson) for direct linking without resolver
+    const lessonPath = `${result.courseSlug}/${result.moduleSlug}/${result.lessonSlug}`;
 
     let context = `[${index + 1}] "${result.title}"${duration}
    Module: ${result.moduleTitle}
@@ -416,7 +424,10 @@ export async function getLessonBySlug(
       video_duration_seconds,
       course_modules!inner (
         title,
-        slug
+        slug,
+        courses!inner (
+          slug
+        )
       )
     `)
     .eq('slug', lessonSlug)
@@ -427,11 +438,12 @@ export async function getLessonBySlug(
     return null;
   }
 
-  const moduleData = data.course_modules as unknown as { title: string; slug: string };
+  const moduleData = data.course_modules as unknown as { title: string; slug: string; courses: { slug: string } };
 
   return {
     id: data.id,
     title: data.title,
+    courseSlug: moduleData.courses?.slug || 'kcu-trading-mastery',
     moduleTitle: moduleData.title,
     moduleSlug: moduleData.slug,
     lessonSlug: data.slug,

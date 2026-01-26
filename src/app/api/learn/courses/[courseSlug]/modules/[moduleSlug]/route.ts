@@ -35,7 +35,11 @@ export async function GET(
       .single();
 
     if (courseError || !course) {
-      return NextResponse.json({ error: 'Course not found' }, { status: 404 });
+      console.error(`[Module API] Course not found: slug=${courseSlug}`, courseError);
+      return NextResponse.json({
+        error: 'Course not found',
+        details: `No published course with slug '${courseSlug}'`
+      }, { status: 404 });
     }
 
     // Fetch module
@@ -48,7 +52,24 @@ export async function GET(
       .single();
 
     if (moduleError || !module) {
-      return NextResponse.json({ error: 'Module not found' }, { status: 404 });
+      // Log more details to help debug
+      const { data: anyModule } = await supabaseAdmin
+        .from('course_modules')
+        .select('slug, is_published, course_id')
+        .eq('slug', moduleSlug)
+        .single();
+
+      console.error(`[Module API] Module not found: slug=${moduleSlug}, courseId=${course.id}`, {
+        moduleError,
+        foundModule: anyModule,
+      });
+
+      return NextResponse.json({
+        error: 'Module not found',
+        details: anyModule
+          ? `Module '${moduleSlug}' exists but is ${!anyModule.is_published ? 'not published' : 'in different course'}`
+          : `No module with slug '${moduleSlug}' in course '${courseSlug}'`
+      }, { status: 404 });
     }
 
     // Check if module is locked
