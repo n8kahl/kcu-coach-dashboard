@@ -166,6 +166,14 @@ const COLORS = {
  */
 const FAR_FUTURE_SECONDS = Math.floor(Date.now() / 1000) + 10 * 365 * 24 * 60 * 60;
 
+/**
+ * Far-past timestamp for horizontal level lines (10 years ago).
+ * This ensures level lines extend backward when the user pans left,
+ * not just starting from the first candle. Without this, levels
+ * disappear when panning past the first visible candle.
+ */
+const FAR_PAST_SECONDS = Math.floor(Date.now() / 1000) - 10 * 365 * 24 * 60 * 60;
+
 // =============================================================================
 // Utility Functions
 // =============================================================================
@@ -731,7 +739,8 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
     const pool = levelSeriesPool.current;
     if (pool.length === 0) return;
 
-    const startTime = toChartTime(data[0].time);
+    // Use far-past time so lines extend backward when panning left
+    const startTime = FAR_PAST_SECONDS as Time;
     // Use far-future time so lines extend into the right offset (empty space)
     // This prevents levels from stopping abruptly at the last candle edge
     const endTime = FAR_FUTURE_SECONDS as Time;
@@ -774,7 +783,8 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
     const pool = gammaSeriesPool.current;
     if (pool.length === 0) return;
 
-    const startTime = toChartTime(data[0].time);
+    // Use far-past time so gamma lines extend backward when panning left
+    const startTime = FAR_PAST_SECONDS as Time;
     // Use far-future time so gamma lines extend into the right offset (empty space)
     // This prevents gamma levels from stopping abruptly at the last candle edge
     const endTime = FAR_FUTURE_SECONDS as Time;
