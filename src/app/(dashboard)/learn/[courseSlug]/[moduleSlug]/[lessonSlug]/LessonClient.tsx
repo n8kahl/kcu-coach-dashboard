@@ -63,7 +63,8 @@ export function LessonClient({
   const urlTimestamp = searchParams.get('t');
   const startTimeFromUrl = urlTimestamp ? parseInt(urlTimestamp, 10) : null;
 
-  const [showTranscript, setShowTranscript] = useState(true);
+  // Default transcript to hidden - improves TTFF by not loading transcript on initial render
+  const [showTranscript, setShowTranscript] = useState(false);
   const [showLessonList, setShowLessonList] = useState(false);
   const [justCompleted, setJustCompleted] = useState(false);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
