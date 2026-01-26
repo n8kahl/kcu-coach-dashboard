@@ -219,7 +219,8 @@ export async function POST(request: Request) {
     // 6. Enqueue Transcript Job (Idempotent)
     // =========================================
     // Extract course/module info for job metadata
-    const moduleData = lesson.course_modules as { title: string; course_id: string; courses: { title: string; slug: string } };
+    // Supabase !inner join returns a single object, but TS infers array - cast through unknown
+    const moduleData = lesson.course_modules as unknown as { title: string; course_id: string; courses: { title: string; slug: string } } | null;
 
     const jobMetadata = {
       video_uid: webhook.uid,
