@@ -612,6 +612,34 @@ export default function CompanionTerminal() {
           });
         }
 
+        // Add levels from the nearest array (includes swing levels, support/resistance)
+        if (Array.isArray(data.levels?.nearest)) {
+          for (const level of data.levels.nearest) {
+            if (!isValidPrice(level.price)) continue;
+            // Skip types we already added explicitly above
+            const alreadyAdded = ['pdh', 'pdl', 'vwap', 'orb_high', 'orb_low', 'pmh', 'pml', 'sma200', 'ema9', 'ema21'];
+            if (alreadyAdded.includes(level.type)) continue;
+
+            // Format label based on type
+            let label = level.type?.replace(/_/g, ' ').toUpperCase() || 'LEVEL';
+            if (level.type === 'swing_high_4h') label = 'H4 SH';
+            else if (level.type === 'swing_low_4h') label = 'H4 SL';
+            else if (level.type === 'swing_high_1h') label = 'H1 SH';
+            else if (level.type === 'swing_low_1h') label = 'H1 SL';
+            else if (level.type === 'support') label = 'S/R';
+            else if (level.type === 'resistance') label = 'S/R';
+
+            levels.push({
+              price: level.price,
+              label,
+              color: getLevelColor(level.type || 'support'),
+              lineStyle: 'dashed',
+              type: level.type,
+              strength: level.strength,
+            });
+          }
+        }
+
         console.log('[Companion] Setting chart levels:', levels.length, levels.map(l => ({ label: l.label, price: l.price })));
         setChartLevels(levels);
       } else {

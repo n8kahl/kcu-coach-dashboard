@@ -1173,18 +1173,18 @@ export class MarketDataService {
           });
         }
 
-        // Get ORB levels from intraday data (Opening Range: 9:30-10:00 ET)
+        // Get ORB and PMH/PML levels from intraday data
+        // Uses most recent trading day (handles market closed scenarios)
         const intradayBars = await this.getIntradayBars(symbol, 1);
         if (intradayBars.length > 0) {
-          // Get today's date in ET timezone
-          const todayET = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+          // Find the most recent trading day from the bars
+          const mostRecentBar = intradayBars[intradayBars.length - 1];
+          const mostRecentDateET = new Date(mostRecentBar.t).toLocaleDateString('en-US', { timeZone: 'America/New_York' });
 
-          const orbBars = intradayBars.filter(bar => {
+          // Helper to parse ET time from bar
+          const parseBarTimeET = (bar: Bar) => {
             const barTime = new Date(bar.t);
-            // Check if this bar is from today
             const barDateET = barTime.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
-            if (barDateET !== todayET) return false;
-
             const etTime = barTime.toLocaleTimeString('en-US', {
               timeZone: 'America/New_York',
               hour: '2-digit',
@@ -1192,7 +1192,13 @@ export class MarketDataService {
               hour12: false,
             });
             const [hours, minutes] = etTime.split(':').map(Number);
-            // Opening Range is 9:30 to 10:00 ET (fixed: was only checking 9:30-9:59)
+            return { barDateET, hours, minutes };
+          };
+
+          // ORB Levels (Opening Range: 9:30-10:00 ET)
+          const orbBars = intradayBars.filter(bar => {
+            const { barDateET, hours, minutes } = parseBarTimeET(bar);
+            if (barDateET !== mostRecentDateET) return false;
             return (hours === 9 && minutes >= 30) || (hours === 10 && minutes === 0);
           });
 
@@ -1217,14 +1223,17 @@ export class MarketDataService {
               });
             }
           }
-        }
 
-        // Get PMH/PML (Premarket High/Low)
-        try {
-          const premarketBars = await this.getPremarketBars(symbol);
-          if (premarketBars.length > 0) {
-            const pmh = Math.max(...premarketBars.map(b => b.high));
-            const pml = Math.min(...premarketBars.map(b => b.low));
+          // PMH/PML (Premarket High/Low: 4:00-9:30 AM ET)
+          const pmBars = intradayBars.filter(bar => {
+            const { barDateET, hours, minutes } = parseBarTimeET(bar);
+            if (barDateET !== mostRecentDateET) return false;
+            return (hours >= 4 && hours < 9) || (hours === 9 && minutes < 30);
+          });
+
+          if (pmBars.length > 0) {
+            const pmh = Math.max(...pmBars.map(b => b.high));
+            const pml = Math.min(...pmBars.map(b => b.low));
 
             if (pmh > 0) {
               levels.push({
@@ -1243,8 +1252,6 @@ export class MarketDataService {
               });
             }
           }
-        } catch (err) {
-          console.warn(`[Market Data] Failed to fetch premarket for ${symbol}:`, err);
         }
 
         // Get Swing High/Low levels from 4H and 1H MTF charts
