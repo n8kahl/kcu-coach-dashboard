@@ -26,8 +26,10 @@ import {
   LineStyle,
   ColorType,
   SeriesMarker,
+  IPriceLine,
 } from 'lightweight-charts';
 import { isValidNumber, isValidPrice } from '@/lib/format-trade-data';
+import { KCU_COLORS, getLevelColor, getLevelStyle } from '@/lib/kcu-colors';
 
 // =============================================================================
 // Types
@@ -47,12 +49,18 @@ export interface ChartLevel {
   label: string;
   color: string;
   lineStyle?: 'solid' | 'dashed' | 'dotted';
+  lineWidth?: number;
+  strength?: number;
+  axisLabelVisible?: boolean;
+  type?: string;
 }
 
 export interface GammaLevel {
   price: number;
-  type: 'call_wall' | 'put_wall' | 'zero_gamma' | 'max_pain';
+  type: 'call_wall' | 'put_wall' | 'zero_gamma' | 'max_pain' | 'gamma_flip';
   label?: string;
+  strength?: number;
+  color?: string;
 }
 
 export interface ChartPatienceCandle {
@@ -111,68 +119,48 @@ export interface ProfessionalChartHandle {
 }
 
 // =============================================================================
-// Color Palette - Professional HFT Terminal
+// Color Palette - KCU Professional Trading (Somesh's Methodology)
 // =============================================================================
 
 const COLORS = {
   // Background
-  background: '#0b0e11',
+  background: KCU_COLORS.backgroundAlt,
 
   // Grid
-  gridLines: '#1e222d',
+  gridLines: KCU_COLORS.gridLines,
 
-  // Candles (TradingView professional colors)
-  candleUp: '#26a69a',
-  candleDown: '#ef5350',
-  wickUp: '#26a69a',
-  wickDown: '#ef5350',
+  // Candles (KCU Standard - Green/Red)
+  candleUp: KCU_COLORS.candleUp,
+  candleDown: KCU_COLORS.candleDown,
+  wickUp: KCU_COLORS.wickUp,
+  wickDown: KCU_COLORS.wickDown,
 
   // Volume
-  volumeUp: 'rgba(38, 166, 154, 0.4)',
-  volumeDown: 'rgba(239, 83, 80, 0.4)',
+  volumeUp: KCU_COLORS.volumeUp,
+  volumeDown: KCU_COLORS.volumeDown,
 
-  // Indicators
-  ema8: '#26a69a',
-  ema21: '#ef5350',
-  vwap: '#ab47bc',
+  // Indicators - KCU Methodology (EMA9=Green, EMA21=Red)
+  ema8: KCU_COLORS.ema8,   // Green - fast
+  ema21: KCU_COLORS.ema21, // Red - slow
+  vwap: KCU_COLORS.vwap,
 
   // Crosshair
-  crosshair: '#758696',
+  crosshair: KCU_COLORS.crosshair,
 
   // Text
-  text: '#d1d4dc',
-  textMuted: '#787b86',
+  text: KCU_COLORS.text,
+  textMuted: KCU_COLORS.textMuted,
 
   // Levels
-  support: '#26a69a',
-  resistance: '#ef5350',
+  support: KCU_COLORS.support,
+  resistance: KCU_COLORS.resistance,
 
   // Gamma
-  callWall: '#ef5350',
-  putWall: '#26a69a',
-  zeroGamma: '#ffeb3b',
-  maxPain: '#ab47bc',
+  callWall: KCU_COLORS.callWall,
+  putWall: KCU_COLORS.putWall,
+  zeroGamma: KCU_COLORS.zeroGamma,
+  maxPain: KCU_COLORS.maxPain,
 } as const;
-
-// =============================================================================
-// Constants
-// =============================================================================
-
-/**
- * Far-future timestamp for horizontal level lines (10 years from now).
- * This ensures level lines extend into the empty "right offset" space
- * on the chart, not just to the last candle. Without this, levels appear
- * to stop abruptly at the last candle edge.
- */
-const FAR_FUTURE_SECONDS = Math.floor(Date.now() / 1000) + 10 * 365 * 24 * 60 * 60;
-
-/**
- * Far-past timestamp for horizontal level lines (10 years ago).
- * This ensures level lines extend backward when the user pans left,
- * not just starting from the first candle. Without this, levels
- * disappear when panning past the first visible candle.
- */
-const FAR_PAST_SECONDS = Math.floor(Date.now() / 1000) - 10 * 365 * 24 * 60 * 60;
 
 // =============================================================================
 // Utility Functions
@@ -262,9 +250,6 @@ function calculateVWAP(candles: ChartCandle[]): (number | null)[] {
   return vwap;
 }
 
-// Series pool size
-const MAX_LEVEL_SERIES = 15;
-const MAX_GAMMA_SERIES = 5;
 
 // =============================================================================
 // Main Component (Memoized for Performance)
@@ -300,9 +285,8 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
   const ema21SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
 
-  // Pre-allocated series pools
-  const levelSeriesPool = useRef<ISeriesApi<'Line'>[]>([]);
-  const gammaSeriesPool = useRef<ISeriesApi<'Line'>[]>([]);
+  // Price lines for horizontal levels (attached to candle series)
+  const priceLinesRef = useRef<IPriceLine[]>([]);
 
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [isInitialized, setIsInitialized] = useState(false);
@@ -439,15 +423,15 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
       },
       rightPriceScale: {
         borderColor: COLORS.gridLines,
-        scaleMargins: { top: 0.05, bottom: showVolume ? 0.18 : 0.05 },
+        scaleMargins: { top: 0.08, bottom: showVolume ? 0.20 : 0.08 },
         autoScale: true,
       },
       timeScale: {
         borderColor: COLORS.gridLines,
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 12, // 12 bars of empty space for future price visualization
-        barSpacing: 8,
+        rightOffset: 6, // Less empty space on right for better use of screen real estate
+        barSpacing: 10, // Slightly wider bars for better visibility
         minBarSpacing: 4,
         tickMarkFormatter: (time: number) => {
           const date = new Date(time * 1000);
@@ -521,36 +505,6 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
       });
     }
 
-    // Pre-create level series pool
-    const levelPool: ISeriesApi<'Line'>[] = [];
-    for (let i = 0; i < MAX_LEVEL_SERIES; i++) {
-      const series = chart.addLineSeries({
-        color: '#6b7280',
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-      });
-      series.setData([]);
-      levelPool.push(series);
-    }
-    levelSeriesPool.current = levelPool;
-
-    // Pre-create gamma series pool
-    const gammaPool: ISeriesApi<'Line'>[] = [];
-    for (let i = 0; i < MAX_GAMMA_SERIES; i++) {
-      const series = chart.addLineSeries({
-        color: '#6b7280',
-        lineWidth: 2,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-      });
-      series.setData([]);
-      gammaPool.push(series);
-    }
-    gammaSeriesPool.current = gammaPool;
-
     // Crosshair move handler
     if (onCrosshairMove) {
       chart.subscribeCrosshairMove((param) => {
@@ -568,8 +522,8 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
     // Cleanup
     return () => {
       try {
-        levelSeriesPool.current.forEach((s) => { try { s.setData([]); } catch {} });
-        gammaSeriesPool.current.forEach((s) => { try { s.setData([]); } catch {} });
+        // Clear price lines
+        priceLinesRef.current = [];
         candleSeriesRef.current?.setData([]);
         volumeSeriesRef.current?.setData([]);
         ema8SeriesRef.current?.setData([]);
@@ -582,8 +536,6 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
       ema8SeriesRef.current = null;
       ema21SeriesRef.current = null;
       vwapSeriesRef.current = null;
-      levelSeriesPool.current = [];
-      gammaSeriesPool.current = [];
 
       setIsInitialized(false);
       try { chart.remove(); } catch {}
@@ -721,6 +673,10 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
       lastCandleTimeRef.current = validData[validData.length - 1].time;
 
       try {
+        // Auto-fit content first for optimal initial view
+        chartRef.current.timeScale().fitContent();
+
+        // Then set a reasonable visible range showing recent price action
         const visibleBars = Math.min(200, validData.length);
         chartRef.current.timeScale().setVisibleLogicalRange({
           from: validData.length - visibleBars,
@@ -731,94 +687,89 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
   }, [data, isInitialized, showVolume, showIndicators, patienceCandles]);
 
   // ==========================================================================
-  // Update Level Lines
+  // Update Level Lines - Using createPriceLine for persistence during pan/drag
   // ==========================================================================
   useEffect(() => {
-    if (!mountedRef.current || !isInitialized || data.length === 0) return;
+    if (!mountedRef.current || !isInitialized || !candleSeriesRef.current) return;
 
-    const pool = levelSeriesPool.current;
-    if (pool.length === 0) return;
+    const candleSeries = candleSeriesRef.current;
 
-    // Use far-past time so lines extend backward when panning left
-    const startTime = FAR_PAST_SECONDS as Time;
-    // Use far-future time so lines extend into the right offset (empty space)
-    // This prevents levels from stopping abruptly at the last candle edge
-    const endTime = FAR_FUTURE_SECONDS as Time;
-
-    const validLevels = levels.filter((l) => isValidPrice(l.price)).slice(0, MAX_LEVEL_SERIES);
-
-    pool.forEach((series, i) => {
-      const level = validLevels[i];
-      if (!level) {
-        try { series.setData([]); } catch {}
-        return;
-      }
-
+    // Remove existing price lines
+    priceLinesRef.current.forEach((priceLine) => {
       try {
-        series.applyOptions({
-          color: level.color || COLORS.text,
-          lineStyle:
-            level.lineStyle === 'dotted'
-              ? LineStyle.Dotted
-              : level.lineStyle === 'dashed'
-              ? LineStyle.Dashed
-              : LineStyle.Solid,
+        candleSeries.removePriceLine(priceLine);
+      } catch {
+        // Price line may already be removed
+      }
+    });
+    priceLinesRef.current = [];
+
+    // Combine all levels - key levels and gamma levels
+    const allLevels: Array<{
+      price: number;
+      label: string;
+      color: string;
+      lineWidth: 1 | 2 | 3 | 4;
+      lineStyle: LineStyle;
+      isGamma?: boolean;
+    }> = [];
+
+    // Add key levels using KCU colors
+    levels.filter((l) => isValidPrice(l.price)).forEach((level) => {
+      const style = level.type
+        ? getLevelStyle(level.type, level.strength)
+        : {
+            color: level.color || COLORS.text,
+            lineWidth: (level.lineWidth || (level.strength && level.strength >= 80 ? 2 : 1)) as 1 | 2 | 3 | 4,
+            lineStyle:
+              level.lineStyle === 'dotted'
+                ? LineStyle.Dotted
+                : level.lineStyle === 'dashed'
+                ? LineStyle.Dashed
+                : LineStyle.Solid,
+          };
+
+      allLevels.push({
+        price: level.price,
+        label: level.label,
+        color: level.color || style.color,
+        lineWidth: style.lineWidth,
+        lineStyle: style.lineStyle,
+      });
+    });
+
+    // Add gamma levels using KCU colors
+    gammaLevels.filter((g) => isValidPrice(g.price)).forEach((gamma) => {
+      const color = gamma.color || getLevelColor(gamma.type);
+      const style = getLevelStyle(gamma.type, gamma.strength);
+
+      allLevels.push({
+        price: gamma.price,
+        label: gamma.label || gamma.type.replace('_', ' ').toUpperCase(),
+        color,
+        lineWidth: 2,
+        lineStyle: LineStyle.Dashed,
+        isGamma: true,
+      });
+    });
+
+    // Create price lines for each level
+    allLevels.forEach((level) => {
+      try {
+        const priceLine = candleSeries.createPriceLine({
+          price: level.price,
+          color: level.color,
+          lineWidth: level.lineWidth,
+          lineStyle: level.lineStyle,
+          axisLabelVisible: true,
           title: level.label,
         });
-
-        series.setData([
-          { time: startTime, value: level.price },
-          { time: endTime, value: level.price },
-        ]);
-      } catch {}
-    });
-  }, [levels, data, isInitialized]);
-
-  // ==========================================================================
-  // Update Gamma Levels
-  // ==========================================================================
-  useEffect(() => {
-    if (!mountedRef.current || !isInitialized || data.length === 0) return;
-
-    const pool = gammaSeriesPool.current;
-    if (pool.length === 0) return;
-
-    // Use far-past time so gamma lines extend backward when panning left
-    const startTime = FAR_PAST_SECONDS as Time;
-    // Use far-future time so gamma lines extend into the right offset (empty space)
-    // This prevents gamma levels from stopping abruptly at the last candle edge
-    const endTime = FAR_FUTURE_SECONDS as Time;
-
-    const validGamma = gammaLevels.filter((g) => isValidPrice(g.price)).slice(0, MAX_GAMMA_SERIES);
-
-    pool.forEach((series, i) => {
-      const gamma = validGamma[i];
-      if (!gamma) {
-        try { series.setData([]); } catch {}
-        return;
+        priceLinesRef.current.push(priceLine);
+      } catch {
+        // Silently handle errors creating price lines
       }
-
-      let color: string = COLORS.textMuted;
-      if (gamma.type === 'call_wall') color = COLORS.callWall;
-      else if (gamma.type === 'put_wall') color = COLORS.putWall;
-      else if (gamma.type === 'zero_gamma') color = COLORS.zeroGamma;
-      else if (gamma.type === 'max_pain') color = COLORS.maxPain;
-
-      try {
-        series.applyOptions({
-          color,
-          lineWidth: 2,
-          lineStyle: LineStyle.Dashed,
-          title: gamma.label || gamma.type.replace('_', ' ').toUpperCase(),
-        });
-
-        series.setData([
-          { time: startTime, value: gamma.price },
-          { time: endTime, value: gamma.price },
-        ]);
-      } catch {}
     });
-  }, [gammaLevels, data, isInitialized]);
+  }, [levels, gammaLevels, isInitialized]);
 
   // ==========================================================================
   // Update dimensions
@@ -847,13 +798,13 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
     >
       {/* Loading state */}
       {(!isInitialized || data.length === 0) && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#0b0e11]">
+        <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: COLORS.background }}>
           <div className="text-center">
-            <div className="w-8 h-8 border-2 border-[#26a69a] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-sm text-[#787b86] font-mono">
+            <div className="w-8 h-8 border-2 border-[#10b981] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+            <p className="text-sm font-mono" style={{ color: COLORS.textMuted }}>
               {data.length === 0 ? 'Waiting for data...' : 'Initializing chart...'}
             </p>
-            {symbol && <p className="text-xs text-[#787b86] mt-1">{symbol}</p>}
+            {symbol && <p className="text-xs mt-1" style={{ color: COLORS.textMuted }}>{symbol}</p>}
           </div>
         </div>
       )}
