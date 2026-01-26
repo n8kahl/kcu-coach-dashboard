@@ -99,6 +99,20 @@ export function useShareableCard({
     }
   }, [ref, pixelRatio, backgroundColor]);
 
+  // Download image helper (inline to avoid closure issues)
+  const performDownload = useCallback(async (): Promise<boolean> => {
+    const dataUrl = await generateDataUrl();
+    if (!dataUrl) {
+      return false;
+    }
+
+    const link = document.createElement('a');
+    link.download = `${fileName}.png`;
+    link.href = dataUrl;
+    link.click();
+    return true;
+  }, [fileName, generateDataUrl]);
+
   // Native mobile share (Instagram/TikTok/Messages)
   const shareNative = useCallback(async () => {
     if (!ref.current) {
@@ -134,12 +148,26 @@ export function useShareableCard({
         });
       } else {
         // Fallback for Desktop or unsupported browsers
-        await downloadImageInternal();
+        const success = await performDownload();
+        if (success) {
+          showToast({
+            type: 'success',
+            title: 'Downloaded!',
+            message: 'Image saved to your device',
+          });
+        } else {
+          showToast({
+            type: 'error',
+            title: 'Download Failed',
+            message: 'Could not generate image',
+          });
+        }
       }
     } catch (err) {
       console.error('Share failed:', err);
       // User cancelled the share - not an error
       if ((err as Error).name === 'AbortError') {
+        setIsSharing(false);
         return;
       }
       // Any other error - fall back to download
@@ -148,35 +176,18 @@ export function useShareableCard({
         title: 'Downloading instead',
         message: 'Web share unavailable, saving to your device',
       });
-      await downloadImageInternal();
+      const success = await performDownload();
+      if (!success) {
+        showToast({
+          type: 'error',
+          title: 'Download Failed',
+          message: 'Could not generate image',
+        });
+      }
     } finally {
       setIsSharing(false);
     }
-  }, [ref, fileName, title, text, generateBlob, showToast]);
-
-  // Internal download function
-  const downloadImageInternal = useCallback(async () => {
-    const dataUrl = await generateDataUrl();
-    if (!dataUrl) {
-      showToast({
-        type: 'error',
-        title: 'Download Failed',
-        message: 'Could not generate image',
-      });
-      return;
-    }
-
-    const link = document.createElement('a');
-    link.download = `${fileName}.png`;
-    link.href = dataUrl;
-    link.click();
-
-    showToast({
-      type: 'success',
-      title: 'Downloaded!',
-      message: 'Image saved to your device',
-    });
-  }, [fileName, generateDataUrl, showToast]);
+  }, [ref, fileName, title, text, generateBlob, performDownload, showToast]);
 
   // Public download function with loading state
   const downloadImage = useCallback(async () => {
@@ -191,11 +202,24 @@ export function useShareableCard({
 
     setIsSharing(true);
     try {
-      await downloadImageInternal();
+      const success = await performDownload();
+      if (success) {
+        showToast({
+          type: 'success',
+          title: 'Downloaded!',
+          message: 'Image saved to your device',
+        });
+      } else {
+        showToast({
+          type: 'error',
+          title: 'Download Failed',
+          message: 'Could not generate image',
+        });
+      }
     } finally {
       setIsSharing(false);
     }
-  }, [ref, downloadImageInternal, showToast]);
+  }, [ref, performDownload, showToast]);
 
   // Copy image to clipboard
   const copyToClipboard = useCallback(async () => {

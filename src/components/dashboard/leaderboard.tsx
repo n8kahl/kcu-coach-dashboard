@@ -64,6 +64,24 @@ interface LeaderboardContentProps {
 }
 
 function LeaderboardContent({ top3, rest, currentUserId }: LeaderboardContentProps) {
+  // Empty state when no entries
+  if (top3.length === 0) {
+    return (
+      <Card>
+        <CardContent className="text-center py-12">
+          <Trophy className="w-12 h-12 mx-auto mb-4 text-[var(--accent-primary)] opacity-50" />
+          <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">
+            No Leaderboard Data Yet
+          </h3>
+          <p className="text-sm text-[var(--text-tertiary)] max-w-md mx-auto">
+            The leaderboard will populate as traders log their trades and earn points.
+            Start logging trades to climb the ranks!
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Top 3 Podium */}
@@ -97,18 +115,20 @@ function LeaderboardContent({ top3, rest, currentUserId }: LeaderboardContentPro
       </div>
 
       {/* Rest of Leaderboard */}
-      <Card>
-        <CardContent className="p-0">
-          {rest.map((entry, index) => (
-            <LeaderboardRow
-              key={entry.user_id}
-              entry={entry}
-              index={index}
-              isCurrentUser={entry.user_id === currentUserId}
-            />
-          ))}
-        </CardContent>
-      </Card>
+      {rest.length > 0 && (
+        <Card>
+          <CardContent className="p-0">
+            {rest.map((entry, index) => (
+              <LeaderboardRow
+                key={entry.user_id}
+                entry={entry}
+                index={index}
+                isCurrentUser={entry.user_id === currentUserId}
+              />
+            ))}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
