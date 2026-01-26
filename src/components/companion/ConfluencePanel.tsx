@@ -94,8 +94,8 @@ export function ConfluencePanel({
   return (
     <div
       className={cn(
-        'flex flex-col gap-2 p-2 bg-[#0d0d0d]/95 border-l border-[#2a2e39]',
-        'min-w-[60px] w-[60px]',
+        'flex flex-col gap-3 p-3 bg-[#0d0d0d] border-l border-[#2a2e39]',
+        'w-[80px] shrink-0',
         className
       )}
     >
@@ -221,20 +221,20 @@ function ConfluenceBar({ icon, label, value, color }: ConfluenceBarProps) {
   const clampedValue = Math.min(100, Math.max(0, value));
 
   return (
-    <div className="flex flex-col items-center gap-0.5">
+    <div className="flex flex-col items-center gap-1">
       {/* Label */}
-      <span className={cn('text-[8px] font-bold', colors.text)}>{label}</span>
+      <span className={cn('text-[10px] font-bold', colors.text)}>{label}</span>
 
       {/* Vertical Bar */}
-      <div className={cn('w-4 h-16 rounded-full overflow-hidden relative', colors.track)}>
+      <div className={cn('w-5 h-20 rounded-sm overflow-hidden relative', colors.track)}>
         <div
-          className={cn('absolute bottom-0 left-0 right-0 rounded-full transition-all duration-500', colors.bg)}
+          className={cn('absolute bottom-0 left-0 right-0 transition-all duration-500', colors.bg)}
           style={{ height: `${clampedValue}%` }}
         />
       </div>
 
       {/* Value */}
-      <span className="text-[8px] text-gray-500 tabular-nums">{Math.round(clampedValue)}</span>
+      <span className="text-[9px] text-gray-400 font-mono tabular-nums">{Math.round(clampedValue)}</span>
     </div>
   );
 }
