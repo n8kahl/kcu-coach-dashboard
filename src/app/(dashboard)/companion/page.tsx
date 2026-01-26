@@ -55,6 +55,7 @@ import {
   isValidNumber,
   isValidPrice,
 } from '@/lib/format-trade-data';
+import { getLevelColor, getRoundNumberLevels } from '@/lib/kcu-colors';
 import {
   Eye,
   Zap,
@@ -516,26 +517,98 @@ export default function CompanionTerminal() {
         setLtpAnalysis(data);
 
         const levels: ChartLevel[] = [];
+
+        // Previous Day Levels - Gold (#fbbf24)
         if (isValidPrice(data.levels?.pdh)) {
-          levels.push({ price: data.levels.pdh, label: 'PDH', color: '#ef5350' });
+          levels.push({
+            price: data.levels.pdh,
+            label: 'PDH',
+            color: getLevelColor('pdh'),
+            type: 'pdh',
+          });
         }
         if (isValidPrice(data.levels?.pdl)) {
-          levels.push({ price: data.levels.pdl, label: 'PDL', color: '#26a69a' });
+          levels.push({
+            price: data.levels.pdl,
+            label: 'PDL',
+            color: getLevelColor('pdl'),
+            type: 'pdl',
+          });
         }
+
+        // VWAP - Purple (#8b5cf6)
         if (isValidPrice(data.levels?.vwap)) {
-          levels.push({ price: data.levels.vwap, label: 'VWAP', color: '#ab47bc' });
+          levels.push({
+            price: data.levels.vwap,
+            label: 'VWAP',
+            color: getLevelColor('vwap'),
+            type: 'vwap',
+          });
         }
+
+        // ORB Levels - Cyan (#06b6d4)
         if (isValidPrice(data.levels?.orbHigh)) {
-          levels.push({ price: data.levels.orbHigh, label: 'ORB High', color: '#29b6f6', lineStyle: 'dashed' });
+          levels.push({
+            price: data.levels.orbHigh,
+            label: 'ORB High',
+            color: getLevelColor('orb_high'),
+            lineStyle: 'dashed',
+            type: 'orb_high',
+          });
         }
         if (isValidPrice(data.levels?.orbLow)) {
-          levels.push({ price: data.levels.orbLow, label: 'ORB Low', color: '#29b6f6', lineStyle: 'dashed' });
+          levels.push({
+            price: data.levels.orbLow,
+            label: 'ORB Low',
+            color: getLevelColor('orb_low'),
+            lineStyle: 'dashed',
+            type: 'orb_low',
+          });
         }
+
+        // Pre-Market Levels - Pink (#ec4899)
         if (isValidPrice(data.levels?.pmh)) {
-          levels.push({ price: data.levels.pmh, label: 'PMH', color: '#ec407a', lineStyle: 'dashed' });
+          levels.push({
+            price: data.levels.pmh,
+            label: 'PMH',
+            color: getLevelColor('pmh'),
+            lineStyle: 'dashed',
+            type: 'pmh',
+          });
         }
         if (isValidPrice(data.levels?.pml)) {
-          levels.push({ price: data.levels.pml, label: 'PML', color: '#ec407a', lineStyle: 'dashed' });
+          levels.push({
+            price: data.levels.pml,
+            label: 'PML',
+            color: getLevelColor('pml'),
+            lineStyle: 'dashed',
+            type: 'pml',
+          });
+        }
+
+        // SMA 200 - White (#ffffff)
+        if (isValidPrice(data.levels?.sma200)) {
+          levels.push({
+            price: data.levels.sma200,
+            label: 'SMA 200',
+            color: getLevelColor('sma_200'),
+            type: 'sma_200',
+          });
+        }
+
+        // Add round number levels near current price
+        const currentPrice = data.currentPrice || data.levels?.vwap;
+        if (isValidPrice(currentPrice)) {
+          const roundNumbers = getRoundNumberLevels(currentPrice, 5);
+          roundNumbers.forEach((price) => {
+            levels.push({
+              price,
+              label: `$${price}`,
+              color: getLevelColor('round_number'),
+              lineStyle: 'dotted',
+              type: 'round_number',
+            });
+          });
         }
 
         setChartLevels(levels);
@@ -549,13 +622,28 @@ export default function CompanionTerminal() {
             const fallbackLevels: ChartLevel[] = [];
 
             if (isValidPrice(quote?.prevHigh)) {
-              fallbackLevels.push({ price: quote.prevHigh, label: 'PDH', color: '#ef5350' });
+              fallbackLevels.push({
+                price: quote.prevHigh,
+                label: 'PDH',
+                color: getLevelColor('pdh'),
+                type: 'pdh',
+              });
             }
             if (isValidPrice(quote?.prevLow)) {
-              fallbackLevels.push({ price: quote.prevLow, label: 'PDL', color: '#26a69a' });
+              fallbackLevels.push({
+                price: quote.prevLow,
+                label: 'PDL',
+                color: getLevelColor('pdl'),
+                type: 'pdl',
+              });
             }
             if (isValidPrice(quote?.vwap)) {
-              fallbackLevels.push({ price: quote.vwap, label: 'VWAP', color: '#ab47bc' });
+              fallbackLevels.push({
+                price: quote.vwap,
+                label: 'VWAP',
+                color: getLevelColor('vwap'),
+                type: 'vwap',
+              });
             }
 
             setChartLevels(fallbackLevels);

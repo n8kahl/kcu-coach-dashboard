@@ -42,6 +42,7 @@ import {
   Bar,
   Timeframe,
 } from '@/lib/practice/indicators';
+import { KCU_COLORS, getLevelColor } from '@/lib/kcu-colors';
 import {
   useCandleReplay,
   type AnimatingCandle,
@@ -102,124 +103,77 @@ export interface PracticeChartProps {
 
 // =============================================================================
 // KCU Professional Trading Chart Color Scheme
+// Imported from shared KCU color system for consistency
 // Following Somesh's methodology: EMA9 = Green, EMA21 = Red
 // =============================================================================
 
 const CHART_COLORS = {
   // Background
-  background: '#0a0a0a',
-  backgroundAlt: '#111111',
-  text: '#9ca3af',
-  textStrong: '#f3f4f6',
-  grid: '#1f2937',
-  border: '#374151',
+  background: KCU_COLORS.background,
+  backgroundAlt: KCU_COLORS.backgroundAlt,
+  text: KCU_COLORS.textMuted,
+  textStrong: KCU_COLORS.textStrong,
+  grid: KCU_COLORS.gridLines,
+  border: KCU_COLORS.border,
 
-  // Candle colors
-  upColor: '#10b981',
-  downColor: '#ef4444',
-  wickUp: '#10b981',
-  wickDown: '#ef4444',
+  // Candle colors - KCU Standard (Green/Red)
+  upColor: KCU_COLORS.candleUp,
+  downColor: KCU_COLORS.candleDown,
+  wickUp: KCU_COLORS.wickUp,
+  wickDown: KCU_COLORS.wickDown,
 
   // Volume colors
   volumeUp: 'rgba(16, 185, 129, 0.35)',
   volumeDown: 'rgba(239, 68, 68, 0.35)',
 
-  // Indicator colors - KCU Methodology (CORRECTED)
-  ema9: '#22c55e',   // GREEN - Fast EMA (EMA 9)
-  ema21: '#ef4444',  // RED - Slow EMA (EMA 21)
-  ema8: '#22c55e',   // GREEN - For Ripster Clouds (EMA 8)
-  vwap: '#8b5cf6',   // PURPLE - VWAP
-  vwapBand1: 'rgba(139, 92, 246, 0.25)', // +/- 1 SD band
-  vwapBand2: 'rgba(139, 92, 246, 0.12)', // +/- 2 SD band
-  ema50: '#eab308',  // Yellow - 50 EMA
-  sma200: '#ffffff', // White - 200 SMA
+  // Indicator colors - KCU Methodology
+  ema9: KCU_COLORS.ema9,     // GREEN - Fast EMA (EMA 9)
+  ema21: KCU_COLORS.ema21,   // RED - Slow EMA (EMA 21)
+  ema8: KCU_COLORS.ema8,     // GREEN - For Ripster Clouds (EMA 8)
+  vwap: KCU_COLORS.vwap,     // PURPLE - VWAP
+  vwapBand1: KCU_COLORS.vwapBand1,
+  vwapBand2: KCU_COLORS.vwapBand2,
+  ema50: KCU_COLORS.ema50,   // Yellow - 50 EMA
+  sma200: KCU_COLORS.sma200, // White - 200 SMA
 
   // Ripster Clouds - Fill between EMA 8 and EMA 21
-  ribbonBullish: 'rgba(34, 197, 94, 0.25)',  // Green cloud when EMA8 > EMA21
-  ribbonBearish: 'rgba(239, 68, 68, 0.25)',  // Red cloud when EMA8 < EMA21
-  ribbonNeutral: 'rgba(107, 114, 128, 0.1)',
+  ribbonBullish: KCU_COLORS.ribbonBullish,
+  ribbonBearish: KCU_COLORS.ribbonBearish,
+  ribbonNeutral: KCU_COLORS.ribbonNeutral,
 
   // Level colors
-  support: '#10b981',
-  resistance: '#ef4444',
+  support: KCU_COLORS.support,
+  resistance: KCU_COLORS.resistance,
 
   // Pre-market levels
-  premarketHigh: '#ec4899',
-  premarketLow: '#ec4899',
+  premarketHigh: KCU_COLORS.pmh,
+  premarketLow: KCU_COLORS.pml,
 
   // ORB levels
-  orbHigh: '#06b6d4',
-  orbLow: '#06b6d4',
+  orbHigh: KCU_COLORS.orbHigh,
+  orbLow: KCU_COLORS.orbLow,
 
   // Gamma levels
-  callWall: '#ef4444',
-  putWall: '#10b981',
-  zeroGamma: '#f59e0b',
-  maxGamma: '#a855f7',
+  callWall: KCU_COLORS.callWall,
+  putWall: KCU_COLORS.putWall,
+  zeroGamma: KCU_COLORS.zeroGamma,
+  maxGamma: KCU_COLORS.maxPain,
 
   // Special
-  crosshair: '#6b7280',
-  decisionPoint: '#f59e0b',
-  entry: '#3b82f6',
-  stop: '#ef4444',
-  target: '#10b981',
+  crosshair: KCU_COLORS.crosshair,
+  decisionPoint: KCU_COLORS.decisionPoint,
+  entry: KCU_COLORS.entry,
+  stop: KCU_COLORS.stop,
+  target: KCU_COLORS.target,
 } as const;
 
-const LEVEL_COLORS: Record<string, string> = {
-  support: CHART_COLORS.support,
-  resistance: CHART_COLORS.resistance,
-  vwap: CHART_COLORS.vwap,
-  ema: CHART_COLORS.ema9,
-  ema9: CHART_COLORS.ema9,
-  ema21: CHART_COLORS.ema21,
-  ema8: CHART_COLORS.ema8,
-  daily_support: CHART_COLORS.support,
-  daily_resistance: CHART_COLORS.resistance,
-  demand_zone: CHART_COLORS.support,
-  supply_zone: CHART_COLORS.resistance,
-  premarket_high: CHART_COLORS.premarketHigh,
-  premarket_low: CHART_COLORS.premarketLow,
-  pm_high: CHART_COLORS.premarketHigh,
-  pm_low: CHART_COLORS.premarketLow,
-  pdh: '#fbbf24',
-  pdl: '#fbbf24',
-  previous_day_high: '#fbbf24',
-  previous_day_low: '#fbbf24',
-  gap_high: '#06b6d4',
-  gap_low: '#06b6d4',
-  gap_top: '#06b6d4',
-  previous_close: '#a855f7',
-  orb_high: CHART_COLORS.orbHigh,
-  orb_low: CHART_COLORS.orbLow,
-  opening_range_high: CHART_COLORS.orbHigh,
-  opening_range_low: CHART_COLORS.orbLow,
-  round_number: '#6b7280',
-  weekly_high: '#3b82f6',
-  weekly_low: '#3b82f6',
-  sma_200: CHART_COLORS.sma200,
-  sma200: CHART_COLORS.sma200,
-  neckline: '#f97316',
-  double_bottom: CHART_COLORS.support,
-  fib_50: '#a78bfa',
-  extension: '#a78bfa',
-  max_pain: '#f59e0b',
-  call_wall: CHART_COLORS.callWall,
-  put_wall: CHART_COLORS.putWall,
-  zero_gamma: CHART_COLORS.zeroGamma,
-  max_gamma: CHART_COLORS.maxGamma,
-  liquidity: '#ef4444',
-  sweep_high: '#ef4444',
-  trap_low: CHART_COLORS.support,
-  broken_resistance: CHART_COLORS.support,
-  breakout_high: CHART_COLORS.resistance,
-  spike_high: '#f97316',
-  range_high: CHART_COLORS.resistance,
-  range_low: CHART_COLORS.support,
-  // Trade levels
-  entry: CHART_COLORS.entry,
-  stop: CHART_COLORS.stop,
-  target: CHART_COLORS.target,
-  default: CHART_COLORS.text,
+// Use getLevelColor from shared KCU color system
+// This ensures consistency across all charts
+const getLevelColorForType = (type: string): string => {
+  // Get color from shared KCU color system
+  const color = getLevelColor(type);
+  // If no specific color found, return default text color
+  return color !== KCU_COLORS.textMuted ? color : CHART_COLORS.text;
 };
 
 // =============================================================================
@@ -757,7 +711,7 @@ export function PracticeChart({
 
     // Add each level as a price line attached to candle series
     allLevels.forEach((level) => {
-      const color = LEVEL_COLORS[level.type] || LEVEL_COLORS.default;
+      const color = getLevelColorForType(level.type);
       const strength = level.strength || 50;
 
       const priceLine = candleSeries.createPriceLine({
@@ -978,7 +932,7 @@ export function PracticeChart({
                 <div className="flex items-center gap-1">
                   <div
                     className="w-3 h-0.5"
-                    style={{ backgroundColor: LEVEL_COLORS[level.type] || LEVEL_COLORS.default }}
+                    style={{ backgroundColor: getLevelColorForType(level.type) }}
                   />
                   <span className="text-[var(--text-secondary)] truncate">{level.label}</span>
                 </div>
