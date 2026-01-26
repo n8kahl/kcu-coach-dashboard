@@ -1104,11 +1104,11 @@ export default function CompanionTerminal() {
       </div>
 
       {/* MAIN CONTENT - Chart + Confluence Panel + HUD */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* LEFT: Chart Area (flex-1) */}
-        <div className="flex-1 h-full flex bg-[#0b0e11]">
-          {/* Chart */}
-          <div className="flex-1 h-full relative">
+      <div className="flex-1 flex min-h-0">
+        {/* LEFT: Chart Area */}
+        <div className="flex-1 h-full flex min-w-0">
+          {/* Chart Container */}
+          <div className="flex-1 h-full relative min-w-0">
             {selectedSymbol ? (
               <>
                 {!chartLoading && chartData.length > 0 && (
