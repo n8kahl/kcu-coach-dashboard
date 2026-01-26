@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '@/components/layout/header';
 import { PageShell } from '@/components/layout/page-shell';
@@ -151,6 +151,52 @@ export function LessonClient({
 
   // Determine video source - prefer HLS for adaptive streaming
   const videoSrc = lesson.videoPlaybackHls || lesson.videoUrl;
+
+  // Prefetch next lesson manifest at 75% progress for instant navigation
+  const prefetchedRef = useRef(false);
+
+  useEffect(() => {
+    // Skip if already prefetched, no next lesson, or no video duration
+    if (prefetchedRef.current || !nextLesson || !lesson.videoDurationSeconds) {
+      return;
+    }
+
+    const currentProgress = videoProgress.currentTime;
+    const progressPercent = (currentProgress / lesson.videoDurationSeconds) * 100;
+
+    // Prefetch at 75% progress
+    if (progressPercent >= 75) {
+      // Check if user has data saver mode enabled
+      const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+      if (connection?.saveData) {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[LessonClient] Skipping prefetch - saveData mode enabled');
+        }
+        return;
+      }
+
+      // Find the next lesson to get its HLS URL
+      const nextLessonData = allLessons.find(l => l.slug === nextLesson.slug);
+      const nextHlsUrl = nextLessonData?.videoPlaybackHls;
+
+      if (nextHlsUrl) {
+        prefetchedRef.current = true;
+
+        // Prefetch the HLS manifest with a HEAD request
+        // This warms up DNS, TCP connection, and caches the manifest
+        fetch(nextHlsUrl, { method: 'HEAD', mode: 'no-cors' })
+          .then(() => {
+            if (process.env.NODE_ENV === 'development') {
+              console.log('[LessonClient] Prefetched next lesson manifest:', nextLesson.slug);
+            }
+          })
+          .catch(() => {
+            // Silently fail - prefetch is just an optimization
+            prefetchedRef.current = false; // Allow retry
+          });
+      }
+    }
+  }, [videoProgress.currentTime, lesson.videoDurationSeconds, nextLesson, allLessons]);
 
   return (
     <>
