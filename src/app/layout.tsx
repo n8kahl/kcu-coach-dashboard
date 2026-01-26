@@ -46,6 +46,9 @@ export const metadata: Metadata = {
   },
 };
 
+// Cloudflare Stream domain from environment
+const cloudflareStreamDomain = process.env.NEXT_PUBLIC_CLOUDFLARE_STREAM_DOMAIN;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -53,6 +56,19 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`dark ${inter.variable} ${jetbrainsMono.variable}`}>
+      <head>
+        {/* Preconnect to Cloudflare Stream for faster video loading */}
+        <link rel="preconnect" href="https://iframe.cloudflarestream.com" />
+        <link rel="dns-prefetch" href="https://iframe.cloudflarestream.com" />
+
+        {/* Preconnect to configured Cloudflare Stream domain if set */}
+        {cloudflareStreamDomain && (
+          <>
+            <link rel="preconnect" href={`https://${cloudflareStreamDomain}`} />
+            <link rel="dns-prefetch" href={`https://${cloudflareStreamDomain}`} />
+          </>
+        )}
+      </head>
       <body className={`${inter.className} antialiased`}>
         {children}
       </body>
