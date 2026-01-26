@@ -5,6 +5,5 @@ export { ContinueLearning } from './ContinueLearning';
 export { AchievementGrid } from './AchievementGrid';
 export { LessonList } from './LessonList';
 export { VideoPlayer } from './VideoPlayer';
-export type { VideoPlayerRef } from './VideoPlayer';
 export { TranscriptPanel } from './TranscriptPanel';
 export { JourneyMap } from './JourneyMap';
