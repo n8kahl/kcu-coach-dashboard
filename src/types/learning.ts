@@ -72,7 +72,7 @@ export interface CourseModule {
   unlockAfterModuleId: string | null;
   unlockAfterDays: number | null;
   requiresQuizPass: boolean;
-  minQuizScore: number;
+  minQuizScore: number | null;
   isRequired: boolean;
   createdAt: string;
 }

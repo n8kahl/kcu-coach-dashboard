@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ProgressBar } from '@/components/ui/progress';
-import { JourneyMap, ContinueLearning } from '@/components/learn';
+import { ContinueLearning } from '@/components/learn';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Loader2,
@@ -23,6 +23,11 @@ import {
   Play,
   CheckCircle2,
   Lock,
+  Sparkles,
+  Star,
+  ChevronRight,
+  RotateCcw,
+  Target,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { Course, CourseModule, CourseProgress, ModuleProgress, CourseLesson, LessonProgress } from '@/types/learning';
@@ -142,6 +147,13 @@ export default function CourseDetailPage() {
   // Find the first available module for starting
   const firstAvailableModule = modules.find(m => !m.progress.isLocked);
 
+  // Build resume URL
+  const resumeUrl = resumeLesson
+    ? `/learn/${courseSlug}/${resumeLesson.module.slug}/${resumeLesson.lesson.slug}`
+    : firstAvailableModule
+    ? `/learn/${courseSlug}/${firstAvailableModule.slug}`
+    : null;
+
   return (
     <>
       <Header
@@ -162,114 +174,130 @@ export default function CourseDetailPage() {
         }
       />
 
-      <PageShell>
-        <div className="space-y-8">
-          {/* Course Progress Card */}
+      <PageShell maxWidth="full" padding="sm">
+        <div className="space-y-8 pb-24">
+          {/* Course Hero Header */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
           >
-            <Card>
-              <CardContent className="p-6">
-                <div className="flex flex-col md:flex-row md:items-center gap-6">
-                  {/* Thumbnail */}
-                  <div className="w-full md:w-48 aspect-video rounded-lg overflow-hidden bg-[var(--bg-tertiary)] flex-shrink-0">
-                    {course.thumbnailUrl ? (
-                      <img
-                        src={course.thumbnailUrl}
-                        alt={course.title}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <GraduationCap className="w-12 h-12 text-[var(--text-muted)]" />
-                      </div>
-                    )}
-                  </div>
+            <div className="relative overflow-hidden rounded-2xl">
+              {/* Background */}
+              <div className="absolute inset-0">
+                {course.thumbnailUrl ? (
+                  <img
+                    src={course.thumbnailUrl}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-br from-[var(--bg-secondary)] to-[var(--bg-tertiary)]" />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/70 to-black/50" />
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    backdropFilter: 'blur(8px)',
+                    WebkitBackdropFilter: 'blur(8px)',
+                  }}
+                />
+              </div>
 
-                  {/* Progress Info */}
+              {/* Content */}
+              <div className="relative p-6 md:p-10">
+                <div className="flex flex-col md:flex-row md:items-start gap-8">
+                  {/* Left: Course Info */}
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-4">
                       {isComplete ? (
-                        <Badge variant="success">
+                        <Badge variant="success" className="shadow-lg">
                           <CheckCircle2 className="w-3 h-3 mr-1" />
                           Course Complete
                         </Badge>
                       ) : isStarted ? (
-                        <Badge variant="primary">
+                        <Badge variant="gold" className="shadow-lg">
                           <Play className="w-3 h-3 mr-1" />
                           In Progress
                         </Badge>
                       ) : (
-                        <Badge variant="default">Not Started</Badge>
+                        <Badge variant="default" className="shadow-lg">New</Badge>
                       )}
                     </div>
 
+                    <h1 className="text-3xl md:text-4xl font-bold text-white mb-4">
+                      {course.title}
+                    </h1>
+
+                    {course.description && (
+                      <p className="text-white/70 text-sm md:text-base mb-6 max-w-2xl">
+                        {course.description}
+                      </p>
+                    )}
+
                     {/* Stats Grid */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                      <div>
-                        <p className="text-2xl font-bold text-[var(--text-primary)]">
-                          {progress.completedLessons}/{progress.totalLessons}
-                        </p>
-                        <p className="text-xs text-[var(--text-tertiary)]">Lessons</p>
-                      </div>
-                      <div>
-                        <p className="text-2xl font-bold text-[var(--text-primary)]">
-                          {progress.completedModules}/{progress.totalModules}
-                        </p>
-                        <p className="text-xs text-[var(--text-tertiary)]">Modules</p>
-                      </div>
-                      <div>
-                        <p className="text-2xl font-bold text-[var(--text-primary)]">
-                          {formatWatchTime(progress.totalWatchTimeSeconds)}
-                        </p>
-                        <p className="text-xs text-[var(--text-tertiary)]">Watch Time</p>
-                      </div>
-                      <div>
-                        <p className="text-2xl font-bold text-[var(--text-primary)]">
-                          {progress.totalQuizAttempts}
-                        </p>
-                        <p className="text-xs text-[var(--text-tertiary)]">Quizzes Taken</p>
-                      </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                      <StatBadge
+                        value={`${progress.completedLessons}/${progress.totalLessons}`}
+                        label="Lessons"
+                        icon={<BookOpen className="w-4 h-4" />}
+                      />
+                      <StatBadge
+                        value={`${progress.completedModules}/${progress.totalModules}`}
+                        label="Modules"
+                        icon={<GraduationCap className="w-4 h-4" />}
+                      />
+                      <StatBadge
+                        value={formatWatchTime(progress.totalWatchTimeSeconds)}
+                        label="Watch Time"
+                        icon={<Clock className="w-4 h-4" />}
+                      />
+                      <StatBadge
+                        value={progress.totalQuizAttempts.toString()}
+                        label="Quizzes"
+                        icon={<Target className="w-4 h-4" />}
+                      />
                     </div>
 
                     {/* Progress Bar */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-[var(--text-secondary)]">Overall Progress</span>
-                        <span className={`font-bold ${isComplete ? 'text-[var(--profit)]' : 'text-[var(--text-primary)]'}`}>
+                    <div className="max-w-md">
+                      <div className="flex items-center justify-between text-sm mb-2">
+                        <span className="text-white/70">Course Progress</span>
+                        <span className={`font-bold ${isComplete ? 'text-[var(--profit)]' : 'text-[var(--accent-primary)]'}`}>
                           {Math.round(progress.completionPercent)}%
                         </span>
                       </div>
-                      <ProgressBar
-                        value={progress.completionPercent}
-                        variant={isComplete ? 'success' : 'gold'}
-                        size="md"
-                      />
+                      <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${progress.completionPercent}%` }}
+                          transition={{ delay: 0.3, duration: 0.8 }}
+                          className={`h-full rounded-full ${
+                            isComplete
+                              ? 'bg-gradient-to-r from-[var(--profit)] to-emerald-400'
+                              : 'bg-gradient-to-r from-[var(--accent-primary)] to-amber-400'
+                          }`}
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  {/* CTA Button */}
-                  <div className="flex-shrink-0">
-                    {resumeLesson ? (
-                      <Link href={`/learn/${courseSlug}/${resumeLesson.module.slug}/${resumeLesson.lesson.slug}`}>
-                        <Button size="lg">
-                          <Play className="w-5 h-5 mr-2" />
-                          Continue Learning
+                  {/* Right: CTA */}
+                  {resumeUrl && (
+                    <div className="flex-shrink-0">
+                      <Link href={resumeUrl}>
+                        <Button
+                          size="lg"
+                          className="bg-white text-black hover:bg-white/90 font-semibold px-8 shadow-xl"
+                        >
+                          <Play className="w-5 h-5 mr-2 fill-current" />
+                          {resumeLesson ? 'Resume Learning' : isStarted ? 'Continue' : 'Start Course'}
                         </Button>
                       </Link>
-                    ) : firstAvailableModule ? (
-                      <Link href={`/learn/${courseSlug}/${firstAvailableModule.slug}`}>
-                        <Button size="lg">
-                          <Play className="w-5 h-5 mr-2" />
-                          {isStarted ? 'Continue' : 'Start Course'}
-                        </Button>
-                      </Link>
-                    ) : null}
-                  </div>
+                    </div>
+                  )}
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           </motion.div>
 
           {/* Resume Learning Card */}
@@ -288,29 +316,45 @@ export default function CourseDetailPage() {
             </motion.div>
           )}
 
-          {/* Journey Map - Premium Timeline Visualization */}
+          {/* Journey Map - Timeline Visualization */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
           >
-            <JourneyMap
-              modules={modules}
-              courseSlug={courseSlug}
-            />
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold text-[var(--text-primary)]">Your Learning Journey</h2>
+              <p className="text-sm text-[var(--text-tertiary)] mt-1">
+                Complete each module to unlock the next
+              </p>
+            </div>
+
+            <JourneyMap modules={modules} courseSlug={courseSlug} />
           </motion.div>
         </div>
 
-        {/* Sticky Resume Button - Appears when scrolling */}
+        {/* Sticky Resume Button */}
         <AnimatePresence>
-          {resumeLesson && (
-            <StickyResumeButton
-              courseSlug={courseSlug}
-              moduleSlug={resumeLesson.module.slug}
-              lessonSlug={resumeLesson.lesson.slug}
-              lessonTitle={resumeLesson.lesson.title}
-              lessonNumber={resumeLesson.lesson.lessonNumber}
-            />
+          {resumeUrl && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="fixed bottom-6 right-6 z-50"
+            >
+              <Link href={resumeUrl}>
+                <Button
+                  size="lg"
+                  className="shadow-2xl bg-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/90 text-black font-semibold px-6"
+                  style={{
+                    boxShadow: '0 8px 32px rgba(245, 158, 11, 0.4)',
+                  }}
+                >
+                  <Play className="w-5 h-5 mr-2 fill-current" />
+                  {resumeLesson ? 'Resume' : 'Start'}
+                </Button>
+              </Link>
+            </motion.div>
           )}
         </AnimatePresence>
       </PageShell>
@@ -318,62 +362,292 @@ export default function CourseDetailPage() {
   );
 }
 
-/**
- * Sticky Resume Button - Floats at bottom right when user scrolls down
- */
-function StickyResumeButton({
-  courseSlug,
-  moduleSlug,
-  lessonSlug,
-  lessonTitle,
-  lessonNumber,
+// Stat Badge for hero section
+function StatBadge({
+  value,
+  label,
+  icon,
 }: {
-  courseSlug: string;
-  moduleSlug: string;
-  lessonSlug: string;
-  lessonTitle: string;
-  lessonNumber: string;
+  value: string;
+  label: string;
+  icon: React.ReactNode;
 }) {
-  const [isVisible, setIsVisible] = useState(false);
-
-  useEffect(() => {
-    const handleScroll = () => {
-      // Show button after scrolling 300px
-      setIsVisible(window.scrollY > 300);
-    };
-
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
   return (
-    <AnimatePresence>
-      {isVisible && (
-        <motion.div
-          initial={{ opacity: 0, y: 20, scale: 0.9 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 20, scale: 0.9 }}
-          className="fixed bottom-6 right-6 z-50"
-        >
-          <Link href={`/learn/${courseSlug}/${moduleSlug}/${lessonSlug}`}>
+    <div
+      className="p-3 rounded-xl"
+      style={{
+        background: 'rgba(255,255,255,0.1)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+      }}
+    >
+      <div className="flex items-center gap-2 text-white/50 mb-1">
+        {icon}
+        <span className="text-xs">{label}</span>
+      </div>
+      <p className="text-xl font-bold text-white">{value}</p>
+    </div>
+  );
+}
+
+// Journey Map Visualization
+function JourneyMap({
+  modules,
+  courseSlug,
+}: {
+  modules: ModuleWithProgress[];
+  courseSlug: string;
+}) {
+  return (
+    <div className="relative">
+      {/* Timeline line */}
+      <div className="absolute left-8 top-0 bottom-0 w-0.5 bg-[var(--border-primary)]" />
+
+      {/* Modules */}
+      <div className="space-y-6">
+        {modules.map((module, index) => {
+          const isLocked = module.progress.isLocked;
+          const isComplete = module.progress.completionPercent >= 100;
+          const isMastered = isComplete && module.progress.quizPassed;
+          const isInProgress = !isComplete && module.progress.completedLessons > 0;
+
+          return (
             <motion.div
-              className="flex items-center gap-3 px-5 py-3 rounded-full bg-[var(--accent-primary)] text-black font-semibold shadow-lg hover:shadow-xl transition-shadow cursor-pointer"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.98 }}
-              style={{
-                boxShadow: '0 8px 32px rgba(212, 175, 55, 0.4)',
-              }}
+              key={module.id}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: index * 0.1 }}
+              className="relative"
             >
-              <Play className="w-5 h-5" />
-              <div className="text-left">
-                <div className="text-xs opacity-80">Resume Lesson {lessonNumber}</div>
-                <div className="text-sm font-bold truncate max-w-[200px]">{lessonTitle}</div>
+              {/* Timeline Node */}
+              <div
+                className={`absolute left-5 top-6 w-7 h-7 rounded-full border-4 flex items-center justify-center z-10 ${
+                  isLocked
+                    ? 'bg-[var(--bg-tertiary)] border-[var(--border-primary)]'
+                    : isMastered
+                    ? 'bg-[var(--accent-primary)] border-[var(--accent-primary)]'
+                    : isComplete
+                    ? 'bg-[var(--profit)] border-[var(--profit)]'
+                    : isInProgress
+                    ? 'bg-[var(--warning)] border-[var(--warning)]'
+                    : 'bg-[var(--bg-secondary)] border-[var(--border-secondary)]'
+                }`}
+                style={
+                  isMastered
+                    ? { boxShadow: '0 0 20px rgba(245, 158, 11, 0.5)' }
+                    : isComplete
+                    ? { boxShadow: '0 0 15px rgba(16, 185, 129, 0.4)' }
+                    : undefined
+                }
+              >
+                {isLocked ? (
+                  <Lock className="w-3 h-3 text-[var(--text-muted)]" />
+                ) : isMastered ? (
+                  <Star className="w-3 h-3 text-black fill-current" />
+                ) : isComplete ? (
+                  <CheckCircle2 className="w-3 h-3 text-white" />
+                ) : isInProgress ? (
+                  <Play className="w-3 h-3 text-black fill-current" />
+                ) : (
+                  <span className="text-xs font-bold text-[var(--text-tertiary)]">{index + 1}</span>
+                )}
+              </div>
+
+              {/* Module Card */}
+              <div className="ml-16">
+                <JourneyModuleCard
+                  module={module}
+                  courseSlug={courseSlug}
+                  index={index}
+                  isLocked={isLocked}
+                  isComplete={isComplete}
+                  isMastered={isMastered}
+                  isInProgress={isInProgress}
+                />
               </div>
             </motion.div>
-          </Link>
-        </motion.div>
-      )}
-    </AnimatePresence>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Journey Module Card with Glassmorphism
+function JourneyModuleCard({
+  module,
+  courseSlug,
+  index,
+  isLocked,
+  isComplete,
+  isMastered,
+  isInProgress,
+}: {
+  module: ModuleWithProgress;
+  courseSlug: string;
+  index: number;
+  isLocked: boolean;
+  isComplete: boolean;
+  isMastered: boolean;
+  isInProgress: boolean;
+}) {
+  const cardContent = (
+    <Card
+      className={`overflow-hidden transition-all duration-300 ${
+        isLocked
+          ? 'cursor-not-allowed'
+          : 'cursor-pointer hover:scale-[1.01] hover:shadow-lg'
+      } ${
+        isMastered
+          ? 'border-[var(--accent-primary)]/50 hover:border-[var(--accent-primary)]'
+          : isComplete
+          ? 'border-[var(--profit)]/50 hover:border-[var(--profit)]'
+          : ''
+      }`}
+      style={
+        isLocked
+          ? {
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              background: 'rgba(var(--bg-secondary-rgb), 0.5)',
+            }
+          : isMastered
+          ? {
+              boxShadow: '0 4px 20px rgba(245, 158, 11, 0.15)',
+            }
+          : undefined
+      }
+    >
+      <CardContent className="p-5">
+        <div className="flex flex-col md:flex-row md:items-center gap-4">
+          {/* Module Info */}
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <Badge
+                variant={
+                  isLocked
+                    ? 'default'
+                    : isMastered
+                    ? 'gold'
+                    : isComplete
+                    ? 'success'
+                    : isInProgress
+                    ? 'primary'
+                    : 'default'
+                }
+              >
+                {isLocked ? (
+                  <>
+                    <Lock className="w-3 h-3 mr-1" />
+                    Locked
+                  </>
+                ) : isMastered ? (
+                  <>
+                    <Sparkles className="w-3 h-3 mr-1" />
+                    Mastered
+                  </>
+                ) : isComplete ? (
+                  <>
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    Complete
+                  </>
+                ) : isInProgress ? (
+                  <>
+                    <Play className="w-3 h-3 mr-1" />
+                    In Progress
+                  </>
+                ) : (
+                  'Ready'
+                )}
+              </Badge>
+
+              {module.progress.bestQuizScore != null && module.progress.bestQuizScore > 0 && (
+                <Badge variant="default" className="text-xs">
+                  <Trophy className="w-3 h-3 mr-1 text-[var(--accent-primary)]" />
+                  Quiz: {Math.round(module.progress.bestQuizScore)}%
+                </Badge>
+              )}
+            </div>
+
+            <h3
+              className={`text-lg font-semibold mb-1 ${
+                isLocked
+                  ? 'text-[var(--text-muted)]'
+                  : 'text-[var(--text-primary)] group-hover:text-[var(--accent-primary)]'
+              }`}
+            >
+              Module {module.moduleNumber}: {module.title}
+            </h3>
+
+            {module.description && (
+              <p
+                className={`text-sm line-clamp-2 ${
+                  isLocked ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'
+                }`}
+              >
+                {module.description}
+              </p>
+            )}
+
+            {/* Unlock reason for locked modules */}
+            {isLocked && module.progress.unlockReason && (
+              <p className="text-xs text-[var(--text-muted)] mt-2 italic">
+                {module.progress.unlockReason}
+              </p>
+            )}
+          </div>
+
+          {/* Progress and CTA */}
+          <div className="flex items-center gap-4">
+            {/* Progress */}
+            <div className="text-center">
+              <p
+                className={`text-2xl font-bold ${
+                  isLocked
+                    ? 'text-[var(--text-muted)]'
+                    : isMastered
+                    ? 'text-[var(--accent-primary)]'
+                    : isComplete
+                    ? 'text-[var(--profit)]'
+                    : 'text-[var(--text-primary)]'
+                }`}
+              >
+                {Math.round(module.progress.completionPercent)}%
+              </p>
+              <p className="text-xs text-[var(--text-tertiary)]">
+                {module.progress.completedLessons}/{module.progress.totalLessons} lessons
+              </p>
+            </div>
+
+            {/* CTA Arrow */}
+            {!isLocked && (
+              <ChevronRight className="w-5 h-5 text-[var(--text-tertiary)] group-hover:text-[var(--accent-primary)] group-hover:translate-x-1 transition-all" />
+            )}
+          </div>
+        </div>
+
+        {/* Progress Bar */}
+        {!isLocked && (
+          <div className="mt-4">
+            <ProgressBar
+              value={module.progress.completionPercent}
+              variant={isMastered ? 'gold' : isComplete ? 'success' : 'default'}
+              size="sm"
+            />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  if (isLocked) {
+    return <div>{cardContent}</div>;
+  }
+
+  return (
+    <Link href={`/learn/${courseSlug}/${module.slug}`}>
+      {cardContent}
+    </Link>
   );
 }
 

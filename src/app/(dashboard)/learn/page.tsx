@@ -26,7 +26,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import Link from 'next/link';
-import type { Course, CourseProgress } from '@/types/learning';
+import type { Course, CourseProgress, CourseLesson, CourseModule, LessonProgress } from '@/types/learning';
 
 interface CourseWithProgress extends Course {
   progress?: CourseProgress;
@@ -34,11 +34,10 @@ interface CourseWithProgress extends Course {
   lessonsCount: number;
   totalDurationMinutes: number;
   resumeLesson?: {
-    slug: string;
-    title: string;
-    moduleSlug: string;
-    lessonNumber: number;
-  };
+    lesson: CourseLesson;
+    module: CourseModule;
+    progress: LessonProgress;
+  } | null;
 }
 
 export default function LearnPage() {
@@ -121,12 +120,11 @@ export default function LearnPage() {
 
   // Categorize courses
   const inProgressCourses = courses.filter(c => c.progress && c.progress.completedLessons > 0 && c.progress.completionPercent < 100);
-  const completedCourses = courses.filter(c => c.progress?.completionPercent === 100);
-  const notStartedCourses = courses.filter(c => !c.progress || c.progress.completedLessons === 0);
+  const newCourses = courses.filter(c => !c.progress || c.progress.completedLessons === 0);
+  const completedCourses = courses.filter(c => c.progress && c.progress.completionPercent >= 100);
 
-  // Get most recently active course for hero
-  const heroCourseCandidates = inProgressCourses.length > 0 ? inProgressCourses : notStartedCourses;
-  const heroCourse = heroCourseCandidates[0];
+  // Find the most recently active course with progress
+  const continueCourse = inProgressCourses.length > 0 ? inProgressCourses[0] : null;
 
   return (
     <>
@@ -149,17 +147,18 @@ export default function LearnPage() {
 
       <PageShell maxWidth="full" padding="sm">
         <div className="space-y-10">
-          {/* Continue Watching Hero Section */}
-          {heroCourse && (
-            <motion.div
+          {/* Hero Section - Continue Watching */}
+          {continueCourse && (
+            <motion.section
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
+              className="relative overflow-hidden rounded-2xl"
             >
-              <ContinueWatchingHero course={heroCourse} />
-            </motion.div>
+              <HeroSection course={continueCourse} />
+            </motion.section>
           )}
 
-          {/* Quick Stats */}
+          {/* Quick Stats - Glassmorphism style */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -184,59 +183,58 @@ export default function LearnPage() {
             <QuickStatCard
               icon={<Trophy className="w-5 h-5" />}
               label="Certificates"
-              value={completedCourses.length}
+              value={courses.filter(c => c.progress?.completionPercent === 100).length}
             />
           </motion.div>
 
           {/* In Progress Swimlane */}
           {inProgressCourses.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+            <motion.section
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
             >
-              <CourseSwimLane
+              <Swimlane
                 title="Continue Learning"
-                subtitle="Pick up where you left off"
+                subtitle={`${inProgressCourses.length} course${inProgressCourses.length > 1 ? 's' : ''} in progress`}
                 courses={inProgressCourses}
-                icon={<Play className="w-5 h-5" />}
+                icon={<Play className="w-5 h-5 text-[var(--accent-primary)]" />}
               />
-            </motion.div>
+            </motion.section>
           )}
 
-          {/* New Arrivals / Not Started Swimlane */}
-          {notStartedCourses.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+          {/* New Courses Swimlane */}
+          {newCourses.length > 0 && (
+            <motion.section
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 }}
             >
-              <CourseSwimLane
-                title="Start Learning"
-                subtitle="Begin your trading journey"
-                courses={notStartedCourses}
-                icon={<Sparkles className="w-5 h-5" />}
+              <Swimlane
+                title="Start New Course"
+                subtitle="Ready to learn something new?"
+                courses={newCourses}
+                icon={<Sparkles className="w-5 h-5 text-[var(--accent-primary)]" />}
               />
-            </motion.div>
+            </motion.section>
           )}
 
           {/* Completed Swimlane */}
           {completedCourses.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+            <motion.section
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.4 }}
             >
-              <CourseSwimLane
-                title="Completed"
-                subtitle="Review your achievements"
+              <Swimlane
+                title="Completed Courses"
+                subtitle={`${completedCourses.length} course${completedCourses.length > 1 ? 's' : ''} mastered`}
                 courses={completedCourses}
-                icon={<CheckCircle2 className="w-5 h-5" />}
+                icon={<CheckCircle2 className="w-5 h-5 text-[var(--profit)]" />}
               />
-            </motion.div>
+            </motion.section>
           )}
 
-          {/* Empty State */}
           {courses.length === 0 && (
             <Card className="col-span-full">
               <CardContent className="py-12">
@@ -258,239 +256,201 @@ export default function LearnPage() {
   );
 }
 
-/**
- * Continue Watching Hero - Cinematic hero section for the most active course
- */
-function ContinueWatchingHero({ course }: { course: CourseWithProgress }) {
-  const isStarted = course.progress && course.progress.completedLessons > 0;
-  const progressPercent = course.progress?.completionPercent || 0;
-
-  // Build resume link
-  let resumeLink = `/learn/${course.slug}`;
-  let resumeText = 'Start Course';
-
-  if (course.resumeLesson) {
-    resumeLink = `/learn/${course.slug}/${course.resumeLesson.moduleSlug}/${course.resumeLesson.slug}`;
-    resumeText = `Resume Lesson ${course.resumeLesson.lessonNumber}`;
-  } else if (isStarted) {
-    resumeText = 'Continue Learning';
-  }
+// Hero Section - Cinematic Continue Watching
+function HeroSection({ course }: { course: CourseWithProgress }) {
+  const progress = course.progress;
 
   return (
-    <div className="relative rounded-2xl overflow-hidden">
-      {/* Background with blur effect */}
+    <div className="relative h-[320px] md:h-[380px] overflow-hidden">
+      {/* Background Image with Blur */}
       <div className="absolute inset-0">
         {course.thumbnailUrl ? (
-          <>
-            <img
-              src={course.thumbnailUrl}
-              alt=""
-              className="w-full h-full object-cover scale-110"
-            />
-            <div className="absolute inset-0 backdrop-blur-xl" />
-          </>
+          <img
+            src={course.thumbnailUrl}
+            alt=""
+            className="w-full h-full object-cover"
+          />
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-[var(--bg-secondary)] to-[var(--bg-tertiary)]" />
         )}
-        {/* Dark overlay gradient */}
-        <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/70 to-black/40" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+        {/* Gradient overlays for depth */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/70 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30" />
+        {/* Glassmorphism accent */}
+        <div
+          className="absolute inset-0"
+          style={{
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            background: 'rgba(0,0,0,0.4)',
+          }}
+        />
       </div>
 
       {/* Content */}
-      <div className="relative z-10 p-8 md:p-12 flex flex-col md:flex-row items-start md:items-center gap-8">
-        {/* Left: Text Content */}
-        <div className="flex-1 space-y-4">
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-          >
-            <Badge variant="gold" className="mb-3">
-              {isStarted ? 'Continue Watching' : 'Featured Course'}
-            </Badge>
-          </motion.div>
+      <div className="relative h-full flex flex-col justify-end p-6 md:p-10 max-w-4xl">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <Badge variant="gold" className="mb-3">
+            <Play className="w-3 h-3 mr-1" />
+            Continue Watching
+          </Badge>
+        </motion.div>
 
-          <motion.h1
-            className="text-3xl md:text-4xl font-bold text-white"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            {course.title}
-          </motion.h1>
+        <motion.h2
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="text-3xl md:text-4xl font-bold text-white mb-2"
+          style={{
+            textShadow: '0 2px 10px rgba(0,0,0,0.5)',
+          }}
+        >
+          {course.title}
+        </motion.h2>
 
-          {course.description && (
-            <motion.p
-              className="text-lg text-white/70 max-w-xl line-clamp-2"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-            >
-              {course.description}
-            </motion.p>
-          )}
-
-          {/* Stats */}
-          <motion.div
-            className="flex items-center gap-6 text-sm text-white/60"
-            initial={{ opacity: 0, y: 10 }}
+        {course.description && (
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
+            className="text-white/70 text-sm md:text-base mb-4 line-clamp-2 max-w-2xl"
           >
-            <span className="flex items-center gap-2">
-              <BookOpen className="w-4 h-4" />
-              {course.modulesCount} modules
-            </span>
-            <span className="flex items-center gap-2">
-              <Clock className="w-4 h-4" />
-              {Math.round(course.totalDurationMinutes / 60)}h
-            </span>
-            <span className="flex items-center gap-2">
-              <GraduationCap className="w-4 h-4" />
-              {course.lessonsCount} lessons
-            </span>
-          </motion.div>
+            {course.description}
+          </motion.p>
+        )}
 
-          {/* Progress Bar */}
-          {isStarted && (
-            <motion.div
-              className="space-y-2 max-w-md"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.5 }}
-            >
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-white/60">Progress</span>
-                <span className="text-white font-medium">{Math.round(progressPercent)}%</span>
-              </div>
-              <div className="h-2 bg-white/20 rounded-full overflow-hidden">
-                <motion.div
-                  className="h-full bg-[var(--accent-primary)] rounded-full"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${progressPercent}%` }}
-                  transition={{ delay: 0.6, duration: 0.8, ease: 'easeOut' }}
-                />
-              </div>
-            </motion.div>
-          )}
-
-          {/* CTA Button */}
+        {/* Progress Bar */}
+        {progress && (
           <motion.div
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6 }}
+            transition={{ delay: 0.5 }}
+            className="mb-4"
           >
-            <Link href={resumeLink}>
-              <Button size="lg" className="mt-4 bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] text-black font-semibold">
-                <Play className="w-5 h-5 mr-2" />
-                {resumeText}
-              </Button>
-            </Link>
-          </motion.div>
-        </div>
-
-        {/* Right: Course Thumbnail */}
-        <motion.div
-          className="hidden lg:block w-80 flex-shrink-0"
-          initial={{ opacity: 0, scale: 0.95, x: 20 }}
-          animate={{ opacity: 1, scale: 1, x: 0 }}
-          transition={{ delay: 0.3 }}
-        >
-          <div className="relative rounded-xl overflow-hidden shadow-2xl group">
-            {course.thumbnailUrl ? (
-              <img
-                src={course.thumbnailUrl}
-                alt={course.title}
-                className="w-full aspect-video object-cover group-hover:scale-105 transition-transform duration-500"
-              />
-            ) : (
-              <div className="w-full aspect-video bg-[var(--bg-tertiary)] flex items-center justify-center">
-                <GraduationCap className="w-16 h-16 text-[var(--text-muted)]" />
-              </div>
-            )}
-            {/* Play overlay */}
-            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-              <div className="w-16 h-16 rounded-full bg-[var(--accent-primary)] flex items-center justify-center">
-                <Play className="w-8 h-8 text-black ml-1" />
-              </div>
+            <div className="flex items-center gap-4 text-sm text-white/70 mb-2">
+              <span>{progress.completedLessons} of {progress.totalLessons} lessons</span>
+              <span className="text-[var(--accent-primary)] font-semibold">
+                {Math.round(progress.completionPercent)}% Complete
+              </span>
             </div>
-            {/* Glass border effect */}
-            <div className="absolute inset-0 border-2 border-white/10 rounded-xl pointer-events-none" />
-          </div>
+            <div className="h-1.5 bg-white/20 rounded-full overflow-hidden max-w-md">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${progress.completionPercent}%` }}
+                transition={{ delay: 0.6, duration: 0.8 }}
+                className="h-full bg-gradient-to-r from-[var(--accent-primary)] to-[var(--profit)] rounded-full"
+              />
+            </div>
+          </motion.div>
+        )}
+
+        {/* CTA Buttons */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+          className="flex items-center gap-3"
+        >
+          <Link href={`/learn/${course.slug}`}>
+            <Button
+              size="lg"
+              className="bg-white text-black hover:bg-white/90 font-semibold px-8"
+            >
+              <Play className="w-5 h-5 mr-2 fill-current" />
+              Resume Learning
+            </Button>
+          </Link>
+          <Link href={`/learn/${course.slug}`}>
+            <Button
+              variant="ghost"
+              size="lg"
+              className="text-white/80 hover:text-white hover:bg-white/10"
+            >
+              <BookOpen className="w-5 h-5 mr-2" />
+              View Course
+            </Button>
+          </Link>
         </motion.div>
       </div>
     </div>
   );
 }
 
-/**
- * Course Swimlane - Horizontal scrolling row of course cards
- */
-function CourseSwimLane({
+// Horizontal Scroll Swimlane
+function Swimlane({
   title,
   subtitle,
   courses,
   icon,
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   courses: CourseWithProgress[];
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(true);
+  const [canScrollRight, setCanScrollRight] = useState(false);
 
-  const updateScrollButtons = () => {
-    if (scrollRef.current) {
-      const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
-      setCanScrollLeft(scrollLeft > 0);
-      setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 10);
+  const checkScroll = () => {
+    const el = scrollRef.current;
+    if (el) {
+      setCanScrollLeft(el.scrollLeft > 0);
+      setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 10);
     }
   };
 
   useEffect(() => {
-    updateScrollButtons();
-    const ref = scrollRef.current;
-    if (ref) {
-      ref.addEventListener('scroll', updateScrollButtons);
-      return () => ref.removeEventListener('scroll', updateScrollButtons);
-    }
+    checkScroll();
+    const el = scrollRef.current;
+    el?.addEventListener('scroll', checkScroll);
+    window.addEventListener('resize', checkScroll);
+    return () => {
+      el?.removeEventListener('scroll', checkScroll);
+      window.removeEventListener('resize', checkScroll);
+    };
   }, [courses]);
 
   const scroll = (direction: 'left' | 'right') => {
-    if (scrollRef.current) {
-      const scrollAmount = 320; // Card width + gap
-      scrollRef.current.scrollBy({
-        left: direction === 'left' ? -scrollAmount : scrollAmount,
-        behavior: 'smooth',
-      });
+    const el = scrollRef.current;
+    if (el) {
+      const cardWidth = 320;
+      const scrollAmount = direction === 'left' ? -cardWidth : cardWidth;
+      el.scrollBy({ left: scrollAmount, behavior: 'smooth' });
     }
   };
 
   return (
-    <div className="space-y-4">
+    <div className="relative">
       {/* Header */}
-      <div className="flex items-center justify-between px-2">
+      <div className="flex items-center justify-between mb-4 px-1">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
-            {icon}
-          </div>
+          {icon && (
+            <div className="p-2 rounded-lg bg-[var(--accent-primary)]/10">
+              {icon}
+            </div>
+          )}
           <div>
-            <h2 className="text-xl font-bold text-[var(--text-primary)]">{title}</h2>
-            <p className="text-sm text-[var(--text-tertiary)]">{subtitle}</p>
+            <h3 className="text-xl font-bold text-[var(--text-primary)]">{title}</h3>
+            {subtitle && (
+              <p className="text-sm text-[var(--text-tertiary)]">{subtitle}</p>
+            )}
           </div>
         </div>
+
         {/* Scroll Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="hidden md:flex items-center gap-2">
           <button
             onClick={() => scroll('left')}
             disabled={!canScrollLeft}
             className={`p-2 rounded-full transition-all ${
               canScrollLeft
                 ? 'bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
-                : 'opacity-30 cursor-not-allowed text-[var(--text-muted)]'
+                : 'text-[var(--text-muted)] cursor-not-allowed'
             }`}
           >
             <ChevronLeft className="w-5 h-5" />
@@ -501,7 +461,7 @@ function CourseSwimLane({
             className={`p-2 rounded-full transition-all ${
               canScrollRight
                 ? 'bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
-                : 'opacity-30 cursor-not-allowed text-[var(--text-muted)]'
+                : 'text-[var(--text-muted)] cursor-not-allowed'
             }`}
           >
             <ChevronRight className="w-5 h-5" />
@@ -509,10 +469,10 @@ function CourseSwimLane({
         </div>
       </div>
 
-      {/* Scrolling Container */}
+      {/* Scrollable Container */}
       <div
         ref={scrollRef}
-        className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-hide"
+        className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide snap-x snap-mandatory"
         style={{
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
@@ -521,12 +481,12 @@ function CourseSwimLane({
         {courses.map((course, index) => (
           <motion.div
             key={course.id}
-            className="flex-shrink-0 w-72 snap-start"
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: index * 0.05 }}
+            className="flex-shrink-0 w-[280px] md:w-[320px] snap-start"
           >
-            <SwimLaneCourseCard course={course} />
+            <SwimlaneCourseCard course={course} />
           </motion.div>
         ))}
       </div>
@@ -534,27 +494,31 @@ function CourseSwimLane({
   );
 }
 
-/**
- * SwimLane Course Card - Compact card for horizontal scrolling
- */
-function SwimLaneCourseCard({ course }: { course: CourseWithProgress }) {
+// Swimlane Course Card with Glassmorphism
+function SwimlaneCourseCard({ course }: { course: CourseWithProgress }) {
   const progress = course.progress;
   const isStarted = progress && progress.completedLessons > 0;
   const isComplete = progress && progress.completionPercent >= 100;
 
   return (
     <Link href={`/learn/${course.slug}`}>
-      <Card className="h-full hover:border-[var(--accent-primary)] transition-all cursor-pointer group overflow-hidden backdrop-blur-sm bg-[var(--bg-card)]/80">
+      <Card
+        className="h-full overflow-hidden group cursor-pointer transition-all duration-300 hover:scale-[1.02] hover:shadow-xl hover:shadow-[var(--accent-primary)]/10"
+        style={{
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+        }}
+      >
         {/* Thumbnail */}
         <div className="relative aspect-video bg-[var(--bg-tertiary)] overflow-hidden">
           {course.thumbnailUrl ? (
             <img
               src={course.thumbnailUrl}
               alt={course.title}
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center">
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[var(--bg-secondary)] to-[var(--bg-tertiary)]">
               <GraduationCap className="w-12 h-12 text-[var(--text-muted)]" />
             </div>
           )}
@@ -562,43 +526,64 @@ function SwimLaneCourseCard({ course }: { course: CourseWithProgress }) {
           {/* Status Badge */}
           <div className="absolute top-2 right-2">
             {isComplete ? (
-              <Badge variant="success" size="sm">
+              <Badge variant="success" className="shadow-lg">
                 <CheckCircle2 className="w-3 h-3 mr-1" />
                 Complete
               </Badge>
             ) : isStarted ? (
-              <Badge variant="primary" size="sm">
-                {Math.round(progress.completionPercent)}%
+              <Badge variant="primary" className="shadow-lg">
+                {Math.round(progress!.completionPercent)}%
               </Badge>
-            ) : null}
+            ) : (
+              <Badge variant="default" className="shadow-lg">New</Badge>
+            )}
           </div>
 
-          {/* Glassmorphism Play overlay */}
-          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[2px]">
-            <div className="w-12 h-12 rounded-full bg-[var(--accent-primary)] flex items-center justify-center transform group-hover:scale-110 transition-transform">
-              <Play className="w-6 h-6 text-black ml-0.5" />
-            </div>
+          {/* Play Overlay */}
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center">
+            <motion.div
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              className="w-14 h-14 rounded-full bg-[var(--accent-primary)] flex items-center justify-center shadow-xl"
+            >
+              <Play className="w-7 h-7 text-black ml-1 fill-current" />
+            </motion.div>
           </div>
 
-          {/* Progress bar at bottom of thumbnail */}
+          {/* Progress bar at bottom */}
           {isStarted && !isComplete && (
             <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
               <div
                 className="h-full bg-[var(--accent-primary)]"
-                style={{ width: `${progress.completionPercent}%` }}
+                style={{ width: `${progress!.completionPercent}%` }}
               />
             </div>
           )}
         </div>
 
+        {/* Content */}
         <CardContent className="p-4">
-          <h3 className="font-semibold text-[var(--text-primary)] line-clamp-1 group-hover:text-[var(--accent-primary)] transition-colors">
+          <h4 className="font-semibold text-[var(--text-primary)] line-clamp-1 group-hover:text-[var(--accent-primary)] transition-colors">
             {course.title}
-          </h3>
+          </h4>
+
           <div className="flex items-center gap-3 mt-2 text-xs text-[var(--text-tertiary)]">
-            <span>{course.modulesCount} modules</span>
-            <span>•</span>
-            <span>{Math.round(course.totalDurationMinutes / 60)}h</span>
+            <span className="flex items-center gap-1">
+              <BookOpen className="w-3.5 h-3.5" />
+              {course.modulesCount} modules
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5" />
+              {Math.round(course.totalDurationMinutes / 60)}h
+            </span>
+          </div>
+
+          {/* CTA */}
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-[var(--border-primary)]">
+            <span className="text-xs font-medium text-[var(--accent-primary)]">
+              {isComplete ? 'Review Course' : isStarted ? 'Continue' : 'Start Learning'}
+            </span>
+            <ArrowRight className="w-4 h-4 text-[var(--accent-primary)] group-hover:translate-x-1 transition-transform" />
           </div>
         </CardContent>
       </Card>
@@ -608,7 +593,12 @@ function SwimLaneCourseCard({ course }: { course: CourseWithProgress }) {
 
 function QuickStatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | number }) {
   return (
-    <Card>
+    <Card
+      style={{
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+      }}
+    >
       <CardContent className="p-4">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
@@ -621,108 +611,5 @@ function QuickStatCard({ icon, label, value }: { icon: React.ReactNode; label: s
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-function CourseCard({ course }: { course: CourseWithProgress }) {
-  const progress = course.progress;
-  const isStarted = progress && progress.completedLessons > 0;
-  const isComplete = progress && progress.completionPercent >= 100;
-
-  return (
-    <Link href={`/learn/${course.slug}`}>
-      <Card className="h-full hover:border-[var(--accent-primary)] transition-all cursor-pointer group">
-        {/* Thumbnail */}
-        <div className="relative aspect-video bg-[var(--bg-tertiary)] overflow-hidden">
-          {course.thumbnailUrl ? (
-            <img
-              src={course.thumbnailUrl}
-              alt={course.title}
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center">
-              <GraduationCap className="w-16 h-16 text-[var(--text-muted)]" />
-            </div>
-          )}
-
-          {/* Status Badge */}
-          <div className="absolute top-3 right-3">
-            {isComplete ? (
-              <Badge variant="success">
-                <CheckCircle2 className="w-3 h-3 mr-1" />
-                Complete
-              </Badge>
-            ) : isStarted ? (
-              <Badge variant="primary">
-                <Play className="w-3 h-3 mr-1" />
-                In Progress
-              </Badge>
-            ) : (
-              <Badge variant="default">New</Badge>
-            )}
-          </div>
-
-          {/* Play overlay */}
-          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-            <div className="w-16 h-16 rounded-full bg-[var(--accent-primary)] flex items-center justify-center">
-              <Play className="w-8 h-8 text-black ml-1" />
-            </div>
-          </div>
-        </div>
-
-        <CardHeader className="pb-3">
-          <h3 className="font-semibold text-lg text-[var(--text-primary)] line-clamp-2">
-            {course.title}
-          </h3>
-          {course.description && (
-            <p className="text-sm text-[var(--text-secondary)] line-clamp-2 mt-1">
-              {course.description}
-            </p>
-          )}
-        </CardHeader>
-
-        <CardContent className="pt-0">
-          {/* Stats */}
-          <div className="flex items-center gap-4 text-sm text-[var(--text-tertiary)] mb-3">
-            <span className="flex items-center gap-1">
-              <BookOpen className="w-4 h-4" />
-              {course.modulesCount} modules
-            </span>
-            <span className="flex items-center gap-1">
-              <Clock className="w-4 h-4" />
-              {Math.round(course.totalDurationMinutes / 60)}h
-            </span>
-          </div>
-
-          {/* Progress */}
-          {progress && isStarted && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-[var(--text-tertiary)]">
-                  {progress.completedLessons}/{progress.totalLessons} lessons
-                </span>
-                <span className={`font-medium ${isComplete ? 'text-[var(--profit)]' : 'text-[var(--text-secondary)]'}`}>
-                  {Math.round(progress.completionPercent)}%
-                </span>
-              </div>
-              <ProgressBar
-                value={progress.completionPercent}
-                variant={isComplete ? 'success' : 'gold'}
-                size="sm"
-              />
-            </div>
-          )}
-
-          {/* CTA */}
-          <div className="flex items-center justify-between mt-4">
-            <span className="text-sm font-medium text-[var(--accent-primary)] group-hover:underline">
-              {isComplete ? 'Review Course' : isStarted ? 'Continue Learning' : 'Start Course'}
-            </span>
-            <ArrowRight className="w-4 h-4 text-[var(--accent-primary)] group-hover:translate-x-1 transition-transform" />
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -20,13 +20,148 @@ import {
   X,
 } from 'lucide-react';
 
-/**
- * Next lesson info for auto-advance PostRoll
- */
-interface NextLessonInfo {
-  title: string;
-  slug: string;
-  thumbnail?: string;
+// PostRoll overlay component for "Up Next" display
+interface PostRollProps {
+  nextLessonTitle: string;
+  countdownSeconds?: number;
+  onPlayNow: () => void;
+  onCancel: () => void;
+  isVisible: boolean;
+}
+
+function PostRollOverlay({
+  nextLessonTitle,
+  countdownSeconds = 5,
+  onPlayNow,
+  onCancel,
+  isVisible,
+}: PostRollProps) {
+  const [countdown, setCountdown] = useState(countdownSeconds);
+  const [isPaused, setIsPaused] = useState(false);
+
+  useEffect(() => {
+    if (!isVisible) {
+      setCountdown(countdownSeconds);
+      setIsPaused(false);
+      return;
+    }
+
+    if (isPaused) return;
+
+    const timer = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          onPlayNow();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isVisible, isPaused, countdownSeconds, onPlayNow]);
+
+  // Calculate circular progress
+  const progress = ((countdownSeconds - countdown) / countdownSeconds) * 100;
+  const circumference = 2 * Math.PI * 45; // radius = 45
+  const strokeDashoffset = circumference - (progress / 100) * circumference;
+
+  return (
+    <AnimatePresence>
+      {isVisible && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.3 }}
+          className="absolute inset-0 flex items-center justify-center z-20"
+          style={{
+            background: 'linear-gradient(135deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.95) 100%)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+          }}
+        >
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            transition={{ delay: 0.1, type: 'spring', stiffness: 300, damping: 25 }}
+            className="text-center p-8 rounded-2xl max-w-md"
+            style={{
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+            }}
+          >
+            <p className="text-[var(--text-tertiary)] text-sm mb-2 uppercase tracking-wider">
+              Up Next
+            </p>
+            <h3 className="text-xl font-semibold text-white mb-6 line-clamp-2">
+              {nextLessonTitle}
+            </h3>
+
+            {/* Circular Countdown Progress */}
+            <div className="relative w-28 h-28 mx-auto mb-6">
+              <svg className="w-full h-full transform -rotate-90">
+                {/* Background circle */}
+                <circle
+                  cx="56"
+                  cy="56"
+                  r="45"
+                  fill="none"
+                  stroke="rgba(255,255,255,0.1)"
+                  strokeWidth="4"
+                />
+                {/* Progress circle */}
+                <motion.circle
+                  cx="56"
+                  cy="56"
+                  r="45"
+                  fill="none"
+                  stroke="var(--accent-primary)"
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                  style={{
+                    strokeDasharray: circumference,
+                    strokeDashoffset,
+                  }}
+                  initial={{ strokeDashoffset: circumference }}
+                  animate={{ strokeDashoffset }}
+                  transition={{ duration: 0.3 }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-3xl font-bold text-white">{countdown}</span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <Button
+                onClick={onPlayNow}
+                className="bg-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/90 text-black font-semibold px-6"
+              >
+                <Play className="w-4 h-4 mr-2" />
+                Play Now
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setIsPaused(true);
+                  onCancel();
+                }}
+                className="text-white/70 hover:text-white hover:bg-white/10"
+              >
+                <X className="w-4 h-4 mr-2" />
+                Cancel
+              </Button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
 }
 
 interface VideoPlayerProps {
@@ -43,26 +178,13 @@ interface VideoPlayerProps {
   minWatchPercent?: number;
   allowSkip?: boolean;
   className?: string;
-  /** Next lesson for auto-advance feature */
-  nextLesson?: NextLessonInfo | null;
-  /** Callback when auto-advance to next lesson */
+  // New props for Netflix-style experience
+  nextLessonTitle?: string;
   onAutoAdvance?: () => void;
-  /** Auto-advance countdown duration in seconds (default: 5) */
-  autoAdvanceDelay?: number;
-  /** Callback when lights-out mode changes */
-  onLightsOutChange?: (active: boolean) => void;
-  /** External control for lights-out mode */
-  lightsOutActive?: boolean;
-}
-
-/**
- * Ref handle for external video player control
- */
-export interface VideoPlayerRef {
-  getCurrentTime: () => number;
-  seekTo: (time: number) => void;
-  play: () => void;
-  pause: () => void;
+  autoAdvanceEnabled?: boolean;
+  onLightsOutChange?: (enabled: boolean) => void;
+  lightsOutEnabled?: boolean;
+  children?: ReactNode;
 }
 
 const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -120,7 +242,7 @@ function usePlaybackMetrics() {
   return { onLoadedMetadata, onFirstPlaying, reset };
 }
 
-export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(function VideoPlayer({
+export function VideoPlayer({
   src,
   poster,
   title,
@@ -134,12 +256,14 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(function
   minWatchPercent = 90,
   allowSkip = true,
   className = '',
-  nextLesson,
+  // New props for Netflix-style experience
+  nextLessonTitle,
   onAutoAdvance,
-  autoAdvanceDelay = 5,
+  autoAdvanceEnabled = true,
   onLightsOutChange,
-  lightsOutActive: externalLightsOut,
-}: VideoPlayerProps, ref) {
+  lightsOutEnabled = false,
+  children,
+}: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
@@ -158,33 +282,11 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(function
   const [isLoading, setIsLoading] = useState(true);
   const [maxWatchedTime, setMaxWatchedTime] = useState(initialTime);
   const [hlsError, setHlsError] = useState<string | null>(null);
-
-  // New state for Netflix-style features
   const [showPostRoll, setShowPostRoll] = useState(false);
-  const [postRollCountdown, setPostRollCountdown] = useState(autoAdvanceDelay);
-  const [lightsOutMode, setLightsOutMode] = useState(false);
-  const [postRollCancelled, setPostRollCancelled] = useState(false);
+  const [isLightsOut, setIsLightsOut] = useState(lightsOutEnabled);
 
   const hideControlsTimeout = useRef<NodeJS.Timeout>();
   const lastReportedTime = useRef(0);
-  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Expose video player controls via ref
-  useImperativeHandle(ref, () => ({
-    getCurrentTime: () => videoRef.current?.currentTime || 0,
-    seekTo: (time: number) => {
-      if (videoRef.current) videoRef.current.currentTime = time;
-    },
-    play: () => videoRef.current?.play(),
-    pause: () => videoRef.current?.pause(),
-  }), []);
-
-  // Sync lights out mode with external control
-  useEffect(() => {
-    if (externalLightsOut !== undefined) {
-      setLightsOutMode(externalLightsOut);
-    }
-  }, [externalLightsOut]);
 
   // Playback metrics
   const metrics = usePlaybackMetrics();
@@ -317,11 +419,9 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(function
     const handleEnded = () => {
       setIsPlaying(false);
       onComplete?.();
-
-      // Show PostRoll overlay if there's a next lesson and auto-advance is allowed
-      if (nextLesson && allowSkip && !postRollCancelled) {
+      // Show PostRoll overlay if there's a next lesson and auto-advance is enabled
+      if (nextLessonTitle && autoAdvanceEnabled && onAutoAdvance) {
         setShowPostRoll(true);
-        setPostRollCountdown(autoAdvanceDelay);
       }
     };
 
@@ -439,53 +539,6 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(function
     }
   }, [playbackSpeed]);
 
-  // PostRoll countdown effect
-  useEffect(() => {
-    if (showPostRoll && postRollCountdown > 0) {
-      countdownIntervalRef.current = setInterval(() => {
-        setPostRollCountdown(prev => {
-          if (prev <= 1) {
-            // Auto-advance when countdown reaches 0
-            clearInterval(countdownIntervalRef.current!);
-            onAutoAdvance?.();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
-      return () => {
-        if (countdownIntervalRef.current) {
-          clearInterval(countdownIntervalRef.current);
-        }
-      };
-    }
-  }, [showPostRoll, onAutoAdvance]);
-
-  // Cancel PostRoll countdown
-  const cancelPostRoll = useCallback(() => {
-    setShowPostRoll(false);
-    setPostRollCancelled(true);
-    if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-    }
-  }, []);
-
-  // Play next immediately
-  const playNextNow = useCallback(() => {
-    if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-    }
-    onAutoAdvance?.();
-  }, [onAutoAdvance]);
-
-  // Toggle lights-out mode
-  const toggleLightsOut = useCallback(() => {
-    const newState = !lightsOutMode;
-    setLightsOutMode(newState);
-    onLightsOutChange?.(newState);
-  }, [lightsOutMode, onLightsOutChange]);
-
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -559,6 +612,21 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(function
     setShowSettings(false);
     onSpeedChange?.(speed);
   };
+
+  const handleAutoAdvance = useCallback(() => {
+    setShowPostRoll(false);
+    onAutoAdvance?.();
+  }, [onAutoAdvance]);
+
+  const handleCancelAutoAdvance = useCallback(() => {
+    setShowPostRoll(false);
+  }, []);
+
+  const toggleLightsOut = useCallback(() => {
+    const newValue = !isLightsOut;
+    setIsLightsOut(newValue);
+    onLightsOutChange?.(newValue);
+  }, [isLightsOut, onLightsOutChange]);
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const maxWatchedPercent = duration > 0 ? (maxWatchedTime / duration) * 100 : 0;
@@ -710,13 +778,13 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(function
             <button
               onClick={toggleLightsOut}
               className={`p-2 transition-colors ${
-                lightsOutMode
+                isLightsOut
                   ? 'text-[var(--accent-primary)]'
                   : 'text-white hover:text-[var(--accent-primary)]'
               }`}
-              title={lightsOutMode ? 'Lights On' : 'Lights Out (Cinema Mode)'}
+              title={isLightsOut ? 'Lights On' : 'Lights Out'}
             >
-              {lightsOutMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              {isLightsOut ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
 
             {/* Settings (speed) */}
@@ -762,117 +830,23 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(function
           </div>
         </motion.div>
 
-        {/* Netflix-style PostRoll Overlay */}
-        <AnimatePresence>
-          {showPostRoll && nextLesson && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 flex items-center justify-center z-20"
-              style={{
-                background: 'linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.7) 50%, rgba(0,0,0,0.5) 100%)',
-                backdropFilter: 'blur(8px)',
-              }}
-            >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                transition={{ delay: 0.1, type: 'spring', stiffness: 300, damping: 25 }}
-                className="text-center max-w-md px-6"
-              >
-                {/* Up Next Label */}
-                <motion.p
-                  className="text-sm text-[var(--text-tertiary)] uppercase tracking-wider mb-2"
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 }}
-                >
-                  Up Next
-                </motion.p>
+        {/* PostRoll Overlay for Auto-Advance */}
+        {nextLessonTitle && onAutoAdvance && (
+          <PostRollOverlay
+            nextLessonTitle={nextLessonTitle}
+            countdownSeconds={5}
+            onPlayNow={handleAutoAdvance}
+            onCancel={handleCancelAutoAdvance}
+            isVisible={showPostRoll}
+          />
+        )}
 
-                {/* Next Lesson Title */}
-                <motion.h3
-                  className="text-2xl font-bold text-white mb-6"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.3 }}
-                >
-                  {nextLesson.title}
-                </motion.h3>
-
-                {/* Circular Countdown Timer */}
-                <motion.div
-                  className="relative w-24 h-24 mx-auto mb-6"
-                  initial={{ opacity: 0, scale: 0.5 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.4, type: 'spring' }}
-                >
-                  {/* Background circle */}
-                  <svg className="w-full h-full transform -rotate-90">
-                    <circle
-                      cx="48"
-                      cy="48"
-                      r="44"
-                      fill="none"
-                      stroke="rgba(255,255,255,0.2)"
-                      strokeWidth="4"
-                    />
-                    {/* Progress circle */}
-                    <motion.circle
-                      cx="48"
-                      cy="48"
-                      r="44"
-                      fill="none"
-                      stroke="var(--accent-primary)"
-                      strokeWidth="4"
-                      strokeLinecap="round"
-                      strokeDasharray={2 * Math.PI * 44}
-                      initial={{ strokeDashoffset: 0 }}
-                      animate={{
-                        strokeDashoffset: (1 - postRollCountdown / autoAdvanceDelay) * 2 * Math.PI * 44,
-                      }}
-                      transition={{ duration: 0.3 }}
-                    />
-                  </svg>
-                  {/* Countdown number */}
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-3xl font-bold text-white">{postRollCountdown}</span>
-                  </div>
-                </motion.div>
-
-                {/* Action Buttons */}
-                <motion.div
-                  className="flex items-center justify-center gap-3"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.5 }}
-                >
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={cancelPostRoll}
-                    className="bg-white/10 hover:bg-white/20 border-white/20"
-                  >
-                    <X className="w-4 h-4 mr-1" />
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="primary"
-                    size="lg"
-                    onClick={playNextNow}
-                    className="bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)]"
-                  >
-                    <Play className="w-5 h-5 mr-2" />
-                    Play Now
-                  </Button>
-                </motion.div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Custom children (for additional overlays) */}
+        {children}
       </div>
     </Card>
   );
-});
+}
+
+// Export for use in LessonClient
+export { PostRollOverlay };

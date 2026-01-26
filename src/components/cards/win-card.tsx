@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { cn, formatPercent, formatCurrency } from '@/lib/utils';
 import { motion } from 'framer-motion';
-// import { toPng } from 'html-to-image'; // TODO: Install html-to-image
+import { useShareableCard } from '@/hooks/useShareableCard';
 import {
   Share2,
   Download,
@@ -60,13 +60,24 @@ export function WinCard({
 }: WinCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
-  const [downloading, setDownloading] = useState(false);
 
   // Get aspect ratio config
   const aspectConfig = ASPECT_RATIOS.find(ar => ar.name === aspectRatio) || ASPECT_RATIOS[3];
 
   // Get theme config
   const themeConfig = WIN_CARD_THEMES[theme] || WIN_CARD_THEMES.gold;
+
+  // Generate safe filename
+  const safeFilename = `kcu-win-${card.type}-${new Date().toISOString().split('T')[0]}`;
+
+  // Use the shareable card hook for image generation and sharing
+  const { shareNative, downloadImage, shareToTwitter, isSharing, canShareFiles } = useShareableCard({
+    ref: cardRef,
+    fileName: safeFilename,
+    title: card.title,
+    text: `Just hit a milestone on KCU! ${card.title} 🚀 #KCUTrading #LTP #DayTrading`,
+    backgroundColor: themeConfig.backgroundColor,
+  });
 
   // Responsive sizes for non-export mode
   const sizes = {
@@ -92,21 +103,6 @@ export function WinCard({
 
   const TypeIcon = typeIcons[card.type];
 
-  const handleDownload = async () => {
-    if (!cardRef.current) return;
-    setDownloading(true);
-
-    try {
-      // TODO: Implement with html-to-image when installed
-      console.log('Download functionality requires html-to-image package');
-      alert('Download functionality coming soon!');
-    } catch (err) {
-      console.error('Failed to download:', err);
-    } finally {
-      setDownloading(false);
-    }
-  };
-
   const handleCopyLink = async () => {
     const url = `${window.location.origin}/share/${card.id}`;
     await navigator.clipboard.writeText(url);
@@ -116,8 +112,7 @@ export function WinCard({
 
   const handleShareTwitter = () => {
     const text = `Just hit ${card.title} on @KCUTrading! 🔥\n\n${card.stats.map(s => `${s.label}: ${s.value}`).join('\n')}\n\n#TradingWins #LTP #DayTrading`;
-    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
-    window.open(url, '_blank');
+    shareToTwitter(text);
   };
 
   // Determine card dimensions based on mode
@@ -267,16 +262,31 @@ export function WinCard({
 
       {/* Action Buttons */}
       {showActions && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          {/* Primary Share Button - Smart (Mobile native share, Desktop download) */}
           <Button
             variant="primary"
             size="sm"
-            icon={<Download className="w-4 h-4" />}
-            loading={downloading}
-            onClick={handleDownload}
+            className="w-full sm:w-auto"
+            icon={canShareFiles ? <Share2 className="w-4 h-4" /> : <Download className="w-4 h-4" />}
+            loading={isSharing}
+            onClick={shareNative}
           >
-            Download
+            {canShareFiles ? 'Share Card' : 'Download'}
           </Button>
+
+          {/* Explicit Download (Desktop backup when share is available) */}
+          {canShareFiles && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Download className="w-4 h-4" />}
+              disabled={isSharing}
+              onClick={downloadImage}
+              title="Download image"
+            />
+          )}
+
           <Button
             variant="secondary"
             size="sm"

@@ -12,10 +12,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useShareableCard } from '@/hooks/useShareableCard';
 import type { LTP2Score } from '@/lib/ltp-gamma-engine';
 import {
   X,
   Share2,
+  Download,
   Trophy,
   Target,
   TrendingUp,
@@ -106,6 +108,24 @@ export function PracticeWinCard({
   const [copied, setCopied] = useState(false);
   const [animatedXP, setAnimatedXP] = useState(0);
   const confettiRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Use LTP 2.0 data if available, otherwise fall back to props
+  const displayGrade = ltp2Score?.grade || grade || (isCorrect ? 'B' : 'D');
+
+  // Generate share text for the card
+  const shareText = `Just scored a ${displayGrade} on $${symbol} in the KCU Simulator! 🎯${
+    currentStreak >= 3 ? ` 🔥 ${currentStreak} streak` : ''
+  } #KCU #LTPFramework`;
+
+  // Use shareable card hook for image export
+  const { shareNative, downloadImage, isSharing, canShareFiles } = useShareableCard({
+    ref: cardRef,
+    fileName: `kcu-practice-${symbol}-${displayGrade}`,
+    title: `${displayGrade} on $${symbol}!`,
+    text: shareText,
+    backgroundColor: '#0a0a0a',
+  });
 
   // Calculate XP if not provided
   const calculatedXP = xpEarned ?? (() => {
@@ -187,8 +207,7 @@ export function PracticeWinCard({
 
   if (!isOpen) return null;
 
-  // Use LTP 2.0 data if available, otherwise fall back to props
-  const displayGrade = ltp2Score?.grade || grade || (isCorrect ? 'B' : 'D');
+  // Score and direction derived from LTP 2.0 or fallback
   const displayScore = ltp2Score?.score ?? score ?? (isCorrect ? 65 : 35);
   const displayDirection = ltp2Score?.direction || (direction === 'long' ? 'bullish' : direction === 'short' ? 'bearish' : 'neutral');
 
@@ -261,18 +280,22 @@ export function PracticeWinCard({
         }
       `}</style>
 
-      <div className={cn(
-        'relative w-full max-w-md mx-4 bg-gradient-to-br rounded-lg overflow-hidden',
-        theme.bg,
-        'border',
-        theme.border,
-        theme.glow,
-        'animate-in zoom-in-95 duration-300'
-      )}>
-        {/* Close Button */}
+      <div
+        ref={cardRef}
+        className={cn(
+          'relative w-full max-w-md mx-4 bg-gradient-to-br rounded-lg overflow-hidden',
+          theme.bg,
+          'border',
+          theme.border,
+          theme.glow,
+          'animate-in zoom-in-95 duration-300'
+        )}
+      >
+        {/* Close Button - Hidden from screenshot */}
         <button
           onClick={onClose}
           className="absolute top-3 right-3 p-1 hover:bg-white/10 rounded-full transition-colors z-10"
+          data-html2canvas-ignore="true"
         >
           <X className="w-5 h-5 text-[var(--text-tertiary)]" />
         </button>
@@ -474,19 +497,50 @@ export function PracticeWinCard({
           </div>
         )}
 
-        {/* Actions */}
-        <div className="p-6 pt-2 border-t border-white/10 space-y-3">
+        {/* Actions - Hidden from screenshot capture */}
+        <div
+          className="p-6 pt-2 border-t border-white/10 space-y-3"
+          data-html2canvas-ignore="true"
+        >
           {showShareOptions ? (
             <div className="space-y-2">
+              {/* Primary: Native Share (mobile) or Download (desktop) */}
               <Button
-                variant="secondary"
+                variant="primary"
+                size="sm"
+                className="w-full"
+                onClick={shareNative}
+                loading={isSharing}
+                icon={canShareFiles ? <Share2 className="w-4 h-4" /> : <Download className="w-4 h-4" />}
+              >
+                {canShareFiles ? 'Share Image' : 'Download Image'}
+              </Button>
+
+              {/* Secondary download option when native share is available */}
+              {canShareFiles && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full"
+                  onClick={downloadImage}
+                  disabled={isSharing}
+                  icon={<Download className="w-4 h-4" />}
+                >
+                  Save to Device
+                </Button>
+              )}
+
+              {/* Copy text fallback */}
+              <Button
+                variant="ghost"
                 size="sm"
                 className="w-full"
                 onClick={copyToClipboard}
                 icon={copied ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               >
-                {copied ? 'Copied!' : 'Copy to Clipboard'}
+                {copied ? 'Copied!' : 'Copy Text'}
               </Button>
+
               <Button
                 variant="ghost"
                 size="sm"
