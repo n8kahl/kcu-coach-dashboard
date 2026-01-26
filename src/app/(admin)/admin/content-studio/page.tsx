@@ -1012,12 +1012,14 @@ function CourseEditorModal({
 function ModuleEditorModal({
   module,
   courseId,
+  allModules,
   isOpen,
   onClose,
   onSave,
 }: {
   module: CourseModule | null;
   courseId: string;
+  allModules: ModuleWithLessons[];
   isOpen: boolean;
   onClose: () => void;
   onSave: (module: Partial<CourseModule>) => Promise<void>;
@@ -1031,6 +1033,7 @@ function ModuleEditorModal({
     isRequired: true,
     requiresQuizPass: false,
     minQuizScore: 70,
+    unlockAfterModuleId: null,
   });
   const [saving, setSaving] = useState(false);
 
@@ -1048,6 +1051,7 @@ function ModuleEditorModal({
         isRequired: true,
         requiresQuizPass: false,
         minQuizScore: 70,
+        unlockAfterModuleId: null,
       });
     }
   }, [module, courseId, isOpen]);
@@ -1174,6 +1178,34 @@ function ModuleEditorModal({
             </h4>
 
             <div className="space-y-4">
+              {/* Unlock After Module (Sequential Unlock) */}
+              <div>
+                <label className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
+                  Unlock After Module (Sequential)
+                </label>
+                <select
+                  value={formData.unlockAfterModuleId || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    unlockAfterModuleId: e.target.value || null
+                  })}
+                  className="w-full px-3 py-2 rounded-md bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-sm text-[var(--text-primary)]"
+                >
+                  <option value="">No prerequisite (always unlocked)</option>
+                  {allModules
+                    .filter(m => m.id !== module?.id) // Can't require itself
+                    .map(m => (
+                      <option key={m.id} value={m.id}>
+                        Module {m.moduleNumber}: {m.title}
+                      </option>
+                    ))
+                  }
+                </select>
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                  Users must complete all required lessons in the selected module first.
+                </p>
+              </div>
+
               {/* Unlock After Days (Drip Content) */}
               <div>
                 <label className="text-sm font-medium text-[var(--text-secondary)] mb-1 block">
@@ -2657,6 +2689,7 @@ export default function ContentStudioPage() {
         <ModuleEditorModal
           module={editingModule}
           courseId={selectedCourse.id}
+          allModules={modules}
           isOpen={moduleModalOpen}
           onClose={() => setModuleModalOpen(false)}
           onSave={handleSaveModule}
