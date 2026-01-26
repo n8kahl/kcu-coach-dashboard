@@ -1,5 +1,8 @@
 'use client';
 
+// Force dynamic rendering to prevent navigation caching issues
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect } from 'react';
 import { Header } from '@/components/layout/header';
 import { PageShell } from '@/components/layout/page-shell';

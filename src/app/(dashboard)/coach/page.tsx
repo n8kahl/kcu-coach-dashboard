@@ -1,5 +1,8 @@
 'use client';
 
+// Force dynamic rendering to prevent navigation caching issues
+export const dynamic = 'force-dynamic';
+
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAIContext } from '@/components/ai/AIContextProvider';
