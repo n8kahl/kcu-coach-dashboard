@@ -212,8 +212,10 @@ function InlineChartComponent({ chart }: InlineChartProps) {
           src={widgetUrl}
           className="w-full h-full border-0"
           onLoad={() => setIsLoading(false)}
+          onError={() => setIsLoading(false)}
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          sandbox="allow-scripts allow-same-origin allow-popups"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-presentation"
+          title={`TradingView Chart - ${chart.symbol}`}
         />
       </div>
 
