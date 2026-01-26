@@ -85,30 +85,10 @@ export async function GET(request: Request) {
           .limit(1)
           .single();
 
-        // Check if module is locked
-        const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
-          p_user_id: user.id,
-          p_module_id: module.id,
-        });
-
-        // Determine unlock reason if locked
-        let unlockReason: string | undefined;
-        if (!canAccess) {
-          if (module.unlock_after_module_id) {
-            const { data: prevModule } = await supabaseAdmin
-              .from('course_modules')
-              .select('title')
-              .eq('id', module.unlock_after_module_id)
-              .single();
-            unlockReason = `Complete ${prevModule?.title || 'previous module'} first`;
-
-            if (module.requires_quiz_pass) {
-              unlockReason += ` and pass the quiz with ${module.min_quiz_score}%`;
-            }
-          } else if (module.unlock_after_days) {
-            unlockReason = `Unlocks ${module.unlock_after_days} days after enrollment`;
-          }
-        }
+        // Module access check disabled - all modules unlocked for development
+        // TODO: Re-enable when gating is properly configured with user_course_access records
+        const canAccess = true;
+        const unlockReason: string | undefined = undefined;
 
         const total = totalLessons || 0;
         const completed = completedLessons || 0;

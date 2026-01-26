@@ -75,33 +75,8 @@ export async function GET(request: NextRequest) {
 
     // Check module access
     if (moduleId) {
-      const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
-        p_user_id: user.id,
-        p_module_id: moduleId,
-      });
-
-      if (!canAccess) {
-        // Get unlock reason
-        const { data: module } = await supabaseAdmin
-          .from('course_modules')
-          .select('*, unlock_module:course_modules!unlock_after_module_id(title)')
-          .eq('id', moduleId)
-          .single();
-
-        let reason = 'Module locked';
-        if (module?.unlock_after_module_id) {
-          const unlockModule = module.unlock_module as { title: string } | null;
-          reason = `Complete "${unlockModule?.title || 'previous module'}" first`;
-          if (module.requires_quiz_pass) {
-            reason += ` and pass the quiz with ${module.min_quiz_score}%`;
-          }
-        } else if (module?.unlock_after_days) {
-          reason = `Unlocks ${module.unlock_after_days} days after enrollment`;
-        }
-
-        return NextResponse.json({ hasAccess: false, reason });
-      }
-
+      // Module access check disabled - all modules unlocked for development
+      // TODO: Re-enable when gating is properly configured with user_course_access records
       return NextResponse.json({ hasAccess: true });
     }
 
@@ -133,18 +108,8 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ hasAccess: true, accessType: 'preview' });
       }
 
-      // Check module access
-      const moduleData = lesson.module as unknown as { id: string; course_id: string }[] | { id: string; course_id: string };
-      const module = Array.isArray(moduleData) ? moduleData[0] : moduleData;
-      const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
-        p_user_id: user.id,
-        p_module_id: module.id,
-      });
-
-      if (!canAccess) {
-        return NextResponse.json({ hasAccess: false, reason: 'Module locked' });
-      }
-
+      // Module access check disabled - all modules unlocked for development
+      // TODO: Re-enable when gating is properly configured with user_course_access records
       return NextResponse.json({ hasAccess: true });
     }
 

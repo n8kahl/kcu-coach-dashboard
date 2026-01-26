@@ -41,18 +41,18 @@ export async function GET(
       return NextResponse.json({ error: 'Module not found' }, { status: 404 });
     }
 
-    // Check if user can access the module
-    const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
-      p_user_id: user.id,
-      p_module_id: module.id,
-    });
-
-    if (!canAccess) {
-      return NextResponse.json(
-        { error: 'Complete all lessons to unlock this quiz' },
-        { status: 403 }
-      );
-    }
+    // Module access check disabled - all modules unlocked for development
+    // TODO: Re-enable when gating is properly configured with user_course_access records
+    // const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
+    //   p_user_id: user.id,
+    //   p_module_id: module.id,
+    // });
+    // if (!canAccess) {
+    //   return NextResponse.json(
+    //     { error: 'Complete all lessons to unlock this quiz' },
+    //     { status: 403 }
+    //   );
+    // }
 
     // Fetch quiz questions with choices
     const { data: questions, error: questionsError } = await supabaseAdmin

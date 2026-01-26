@@ -96,18 +96,9 @@ export async function GET(
 
         const completionPercent = totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0;
 
-        // Check if module is locked
-        let canAccess = true;
-        try {
-          const { data } = await supabaseAdmin.rpc('can_access_module', {
-            p_user_id: user.id,
-            p_module_id: module.id,
-          });
-          canAccess = data !== false;
-        } catch {
-          // If RPC doesn't exist, assume accessible
-          canAccess = true;
-        }
+        // Module access check disabled - all modules unlocked for development
+        // TODO: Re-enable when gating is properly configured with user_course_access records
+        const canAccess = true;
 
         // Get quiz best score
         const { data: bestQuiz } = await supabaseAdmin

@@ -72,15 +72,16 @@ export async function GET(
       }, { status: 404 });
     }
 
-    // Check if module is locked
-    const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
-      p_user_id: user.id,
-      p_module_id: module.id,
-    });
-
-    if (!canAccess) {
-      return NextResponse.json({ error: 'This module is locked' }, { status: 403 });
-    }
+    // Module access check disabled - all modules unlocked for development
+    // TODO: Re-enable when gating is properly configured with user_course_access records
+    // const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
+    //   p_user_id: user.id,
+    //   p_module_id: module.id,
+    // });
+    // if (!canAccess) {
+    //   return NextResponse.json({ error: 'This module is locked' }, { status: 403 });
+    // }
+    const canAccess = true; // All modules unlocked
 
     // Fetch lessons with progress
     const { data: lessons, error: lessonsError } = await supabaseAdmin
@@ -196,15 +197,8 @@ export async function GET(
     const prevModule = currentIndex > 0 ? allModules![currentIndex - 1] : null;
     const nextModule = currentIndex < (allModules?.length || 0) - 1 ? allModules![currentIndex + 1] : null;
 
-    // Check if next module is locked
-    let nextModuleLocked = false;
-    if (nextModule) {
-      const { data: canAccessNext } = await supabaseAdmin.rpc('can_access_module', {
-        p_user_id: user.id,
-        p_module_id: nextModule.id,
-      });
-      nextModuleLocked = !canAccessNext;
-    }
+    // Next module access check disabled - all modules unlocked for development
+    const nextModuleLocked = false;
 
     return NextResponse.json({
       module: {
