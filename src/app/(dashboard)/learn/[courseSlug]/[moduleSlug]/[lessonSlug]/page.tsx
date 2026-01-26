@@ -1,440 +1,266 @@
-'use client';
+import { notFound, redirect } from 'next/navigation';
+import { getSession } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase';
+import { LessonClient } from './LessonClient';
+import type { CourseLesson, CourseModule, LessonProgress } from '@/types/learning';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { Header } from '@/components/layout/header';
-import { PageShell } from '@/components/layout/page-shell';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { VideoPlayer, TranscriptPanel, LessonList } from '@/components/learn';
-import { useVideoProgress } from '@/hooks/useVideoProgress';
-import { motion } from 'framer-motion';
-import {
-  Loader2,
-  AlertCircle,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  MessageSquare,
-  BookOpen,
-  Play,
-  Trophy,
-} from 'lucide-react';
-import Link from 'next/link';
-import type { CourseModule, CourseLesson, LessonProgress } from '@/types/learning';
+interface LessonPageProps {
+  params: Promise<{
+    courseSlug: string;
+    moduleSlug: string;
+    lessonSlug: string;
+  }>;
+}
 
 interface LessonWithProgress extends CourseLesson {
   progress?: LessonProgress;
 }
 
-interface LessonPageData {
-  lesson: CourseLesson;
-  module: CourseModule;
-  progress: LessonProgress | null;
-  allLessons: LessonWithProgress[];
-  prevLesson: { slug: string; title: string } | null;
-  nextLesson: { slug: string; title: string } | null;
-  courseTitle: string;
-}
+async function getLessonData(courseSlug: string, moduleSlug: string, lessonSlug: string) {
+  const session = await getSession();
 
-interface TranscriptSegment {
-  text: string;
-  startTime: number;
-  endTime?: number;
-  startFormatted?: string;
-}
-
-export default function LessonPage() {
-  const params = useParams();
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const courseSlug = params.courseSlug as string;
-  const moduleSlug = params.moduleSlug as string;
-  const lessonSlug = params.lessonSlug as string;
-
-  // Get timestamp from URL query param (e.g., ?t=120)
-  const urlTimestamp = searchParams.get('t');
-  const startTimeFromUrl = urlTimestamp ? parseInt(urlTimestamp, 10) : null;
-
-  const [data, setData] = useState<LessonPageData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showTranscript, setShowTranscript] = useState(true);
-  const [showLessonList, setShowLessonList] = useState(false);
-  const [justCompleted, setJustCompleted] = useState(false);
-  const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
-
-  // Determine initial time: prefer URL timestamp, fall back to saved progress
-  const effectiveInitialTime = startTimeFromUrl !== null && startTimeFromUrl > 0
-    ? startTimeFromUrl
-    : (data?.progress?.progressSeconds || 0);
-
-  // Video progress hook
-  const videoProgress = useVideoProgress({
-    lessonId: data?.lesson.id || '',
-    videoDuration: data?.lesson.videoDurationSeconds || 0,
-    initialProgress: effectiveInitialTime,
-    minWatchPercent: data?.lesson.minWatchPercent || 90,
-    onComplete: () => {
-      setJustCompleted(true);
-      // Show completion toast or animation
-    },
-  });
-
-  useEffect(() => {
-    if (courseSlug && moduleSlug && lessonSlug) {
-      fetchLessonData();
-    }
-  }, [courseSlug, moduleSlug, lessonSlug]);
-
-  const fetchLessonData = async () => {
-    try {
-      setLoading(true);
-      setJustCompleted(false);
-      setTranscriptSegments([]);
-
-      const response = await fetch(
-        `/api/learn/courses/${courseSlug}/modules/${moduleSlug}/lessons/${lessonSlug}`
-      );
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error('Lesson not found');
-        }
-        if (response.status === 403) {
-          throw new Error('This lesson is locked');
-        }
-        throw new Error('Failed to fetch lesson');
-      }
-
-      const lessonData = await response.json();
-      setData(lessonData);
-
-      // Fetch transcript segments (non-blocking)
-      fetchTranscriptSegments();
-    } catch (err) {
-      console.error('Error fetching lesson:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load lesson');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchTranscriptSegments = async () => {
-    try {
-      const response = await fetch(
-        `/api/learn/courses/${courseSlug}/modules/${moduleSlug}/lessons/${lessonSlug}/transcript-segments`
-      );
-      if (response.ok) {
-        const data = await response.json();
-        if (data.segments && data.segments.length > 0) {
-          setTranscriptSegments(data.segments);
-        }
-      }
-    } catch (err) {
-      // Silently fail - transcript will fall back to text-only mode
-      console.warn('Failed to fetch transcript segments:', err);
-    }
-  };
-
-  const handleVideoTimeUpdate = useCallback(
-    (currentTime: number, duration: number) => {
-      if (data?.lesson.id) {
-        videoProgress.updateTime(currentTime);
-      }
-    },
-    [data?.lesson.id, videoProgress]
-  );
-
-  const navigateToNext = useCallback(() => {
-    if (data?.nextLesson) {
-      router.push(`/learn/${courseSlug}/${moduleSlug}/${data.nextLesson.slug}`);
-    }
-  }, [data?.nextLesson, courseSlug, moduleSlug, router]);
-
-  if (loading) {
-    return (
-      <>
-        <Header
-          title="Loading..."
-          breadcrumbs={[
-            { label: 'Dashboard' },
-            { label: 'Learn', href: '/learn' },
-            { label: 'Course', href: `/learn/${courseSlug}` },
-            { label: 'Module', href: `/learn/${courseSlug}/${moduleSlug}` },
-            { label: 'Lesson' },
-          ]}
-        />
-        <PageShell maxWidth="full" padding="none">
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-primary)]" />
-            <span className="ml-3 text-[var(--text-secondary)]">
-              Loading lesson...
-            </span>
-          </div>
-        </PageShell>
-      </>
-    );
+  if (!session?.user?.discordId) {
+    redirect('/login');
   }
 
-  if (error || !data) {
-    return (
-      <>
-        <Header
-          title="Error"
-          breadcrumbs={[
-            { label: 'Dashboard' },
-            { label: 'Learn', href: '/learn' },
-            { label: 'Course', href: `/learn/${courseSlug}` },
-            { label: 'Module', href: `/learn/${courseSlug}/${moduleSlug}` },
-            { label: 'Lesson' },
-          ]}
-        />
-        <PageShell>
-          <Card className="border-[var(--error)] bg-[var(--error)]/10">
-            <CardContent className="py-8">
-              <div className="flex flex-col items-center gap-4 text-center">
-                <AlertCircle className="w-12 h-12 text-[var(--error)]" />
-                <div>
-                  <p className="font-medium text-[var(--text-primary)]">{error}</p>
-                  <div className="flex gap-2 mt-4">
-                    <Button variant="secondary" onClick={fetchLessonData}>
-                      Try Again
-                    </Button>
-                    <Link href={`/learn/${courseSlug}/${moduleSlug}`}>
-                      <Button variant="ghost">Back to Module</Button>
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </PageShell>
-      </>
-    );
+  // Get user profile
+  const { data: user } = await supabaseAdmin
+    .from('user_profiles')
+    .select('id')
+    .eq('discord_id', session.user.discordId)
+    .single();
+
+  if (!user) {
+    redirect('/login');
   }
 
-  const { lesson, module, progress, allLessons, prevLesson, nextLesson, courseTitle } = data;
-  const isCompleted = progress?.completed || videoProgress.isCompleted || justCompleted;
+  // Fetch course
+  const { data: course, error: courseError } = await supabaseAdmin
+    .from('courses')
+    .select('id, title')
+    .eq('slug', courseSlug)
+    .eq('is_published', true)
+    .single();
+
+  if (courseError || !course) {
+    notFound();
+  }
+
+  // Fetch module
+  const { data: module, error: moduleError } = await supabaseAdmin
+    .from('course_modules')
+    .select('*')
+    .eq('course_id', course.id)
+    .eq('slug', moduleSlug)
+    .eq('is_published', true)
+    .single();
+
+  if (moduleError || !module) {
+    notFound();
+  }
+
+  // Fetch lesson
+  const { data: lesson, error: lessonError } = await supabaseAdmin
+    .from('course_lessons')
+    .select('*')
+    .eq('module_id', module.id)
+    .eq('slug', lessonSlug)
+    .eq('is_published', true)
+    .single();
+
+  if (lessonError || !lesson) {
+    notFound();
+  }
+
+  // Check if lesson is accessible (preview or module unlocked)
+  if (!lesson.is_preview) {
+    const { data: canAccess } = await supabaseAdmin.rpc('can_access_module', {
+      p_user_id: user.id,
+      p_module_id: module.id,
+    });
+
+    if (!canAccess) {
+      // Return locked status instead of error
+      return { locked: true, courseSlug, moduleSlug };
+    }
+  }
+
+  // Get lesson progress
+  const { data: progress } = await supabaseAdmin
+    .from('course_lesson_progress')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('lesson_id', lesson.id)
+    .single();
+
+  // Get all lessons in module for navigation and sidebar
+  const { data: allLessons } = await supabaseAdmin
+    .from('course_lessons')
+    .select('*')
+    .eq('module_id', module.id)
+    .eq('is_published', true)
+    .order('sort_order');
+
+  // Get progress for all lessons
+  const lessonIds = (allLessons || []).map(l => l.id);
+  const { data: allProgress } = await supabaseAdmin
+    .from('course_lesson_progress')
+    .select('*')
+    .eq('user_id', user.id)
+    .in('lesson_id', lessonIds);
+
+  const progressMap = new Map((allProgress || []).map(p => [p.lesson_id, p]));
+
+  const allLessonsWithProgress: LessonWithProgress[] = (allLessons || []).map(l => ({
+    id: l.id,
+    moduleId: l.module_id,
+    title: l.title,
+    slug: l.slug,
+    description: l.description,
+    lessonNumber: l.lesson_number,
+    videoUrl: l.video_url,
+    videoUid: l.video_uid,
+    videoPlaybackHls: l.video_playback_hls,
+    videoPlaybackDash: l.video_playback_dash,
+    videoThumbnailAnimated: l.video_thumbnail_animated,
+    videoDurationSeconds: l.video_duration_seconds,
+    videoStatus: l.video_status || 'ready',
+    thumbnailUrl: l.thumbnail_url,
+    transcriptUrl: l.transcript_url,
+    transcriptText: null, // Don't include in list
+    resources: l.resources || [],
+    requireSignedUrls: l.require_signed_urls || false,
+    sortOrder: l.sort_order,
+    isPreview: l.is_preview,
+    isPublished: l.is_published,
+    isRequired: l.is_required,
+    minWatchPercent: l.min_watch_percent,
+    allowSkip: l.allow_skip,
+    createdAt: l.created_at,
+    progress: progressMap.has(l.id) ? {
+      id: progressMap.get(l.id).id,
+      lessonId: l.id,
+      progressSeconds: progressMap.get(l.id).progress_seconds,
+      progressPercent: progressMap.get(l.id).progress_percent,
+      completed: progressMap.get(l.id).completed,
+      completedAt: progressMap.get(l.id).completed_at,
+      totalWatchTimeSeconds: progressMap.get(l.id).total_watch_time_seconds,
+      uniqueWatchTimeSeconds: progressMap.get(l.id).unique_watch_time_seconds || 0,
+      watchCount: progressMap.get(l.id).watch_count,
+      pauseCount: progressMap.get(l.id).pause_count || 0,
+      seekCount: progressMap.get(l.id).seek_count || 0,
+      playbackSpeedChanges: progressMap.get(l.id).playback_speed_changes || 0,
+      lastPlaybackSpeed: progressMap.get(l.id).last_playback_speed || 1,
+      firstWatchedAt: progressMap.get(l.id).first_watched_at,
+      lastWatchedAt: progressMap.get(l.id).last_watched_at,
+    } : undefined,
+  }));
+
+  // Find prev/next lessons
+  const currentIndex = allLessonsWithProgress.findIndex(l => l.id === lesson.id);
+  const prevLesson = currentIndex > 0 ? allLessonsWithProgress[currentIndex - 1] : null;
+  const nextLesson = currentIndex < allLessonsWithProgress.length - 1 ? allLessonsWithProgress[currentIndex + 1] : null;
+
+  // Transform lesson to match the expected format
+  const lessonData: CourseLesson = {
+    id: lesson.id,
+    moduleId: lesson.module_id,
+    title: lesson.title,
+    slug: lesson.slug,
+    description: lesson.description,
+    lessonNumber: lesson.lesson_number,
+    videoUrl: lesson.video_url,
+    videoUid: lesson.video_uid,
+    videoPlaybackHls: lesson.video_playback_hls,
+    videoPlaybackDash: lesson.video_playback_dash,
+    videoThumbnailAnimated: lesson.video_thumbnail_animated,
+    videoDurationSeconds: lesson.video_duration_seconds,
+    videoStatus: lesson.video_status || 'ready',
+    thumbnailUrl: lesson.thumbnail_url,
+    transcriptUrl: lesson.transcript_url,
+    transcriptText: null, // Loaded separately via /transcript endpoint
+    resources: lesson.resources || [],
+    requireSignedUrls: lesson.require_signed_urls || false,
+    sortOrder: lesson.sort_order,
+    isPreview: lesson.is_preview,
+    isPublished: lesson.is_published,
+    isRequired: lesson.is_required,
+    minWatchPercent: lesson.min_watch_percent,
+    allowSkip: lesson.allow_skip,
+    createdAt: lesson.created_at,
+  };
+
+  const moduleData: CourseModule = {
+    id: module.id,
+    courseId: module.course_id,
+    title: module.title,
+    slug: module.slug,
+    description: module.description,
+    moduleNumber: module.module_number,
+    thumbnailUrl: module.thumbnail_url,
+    sortOrder: module.sort_order,
+    isPublished: module.is_published,
+    unlockAfterModuleId: module.unlock_after_module_id,
+    unlockAfterDays: module.unlock_after_days,
+    requiresQuizPass: module.requires_quiz_pass,
+    minQuizScore: module.min_quiz_score,
+    isRequired: module.is_required,
+    createdAt: module.created_at,
+  };
+
+  const progressData: LessonProgress | null = progress ? {
+    id: progress.id,
+    lessonId: progress.lesson_id,
+    progressSeconds: progress.progress_seconds,
+    progressPercent: progress.progress_percent,
+    completed: progress.completed,
+    completedAt: progress.completed_at,
+    totalWatchTimeSeconds: progress.total_watch_time_seconds,
+    uniqueWatchTimeSeconds: progress.unique_watch_time_seconds || 0,
+    watchCount: progress.watch_count,
+    pauseCount: progress.pause_count || 0,
+    seekCount: progress.seek_count || 0,
+    playbackSpeedChanges: progress.playback_speed_changes || 0,
+    lastPlaybackSpeed: progress.last_playback_speed || 1,
+    firstWatchedAt: progress.first_watched_at,
+    lastWatchedAt: progress.last_watched_at,
+  } : null;
+
+  return {
+    locked: false,
+    lesson: lessonData,
+    module: moduleData,
+    progress: progressData,
+    allLessons: allLessonsWithProgress,
+    prevLesson: prevLesson ? { slug: prevLesson.slug, title: prevLesson.title } : null,
+    nextLesson: nextLesson ? { slug: nextLesson.slug, title: nextLesson.title } : null,
+    courseTitle: course.title,
+    courseSlug,
+    moduleSlug,
+  };
+}
+
+export default async function LessonPage({ params }: LessonPageProps) {
+  const { courseSlug, moduleSlug, lessonSlug } = await params;
+
+  const data = await getLessonData(courseSlug, moduleSlug, lessonSlug);
+
+  if (data.locked) {
+    // Redirect to module page with locked message
+    redirect(`/learn/${data.courseSlug}/${data.moduleSlug}?locked=true`);
+  }
 
   return (
-    <>
-      <Header
-        title={`${lesson.lessonNumber} ${lesson.title}`}
-        breadcrumbs={[
-          { label: 'Dashboard' },
-          { label: 'Learn', href: '/learn' },
-          { label: courseTitle, href: `/learn/${courseSlug}` },
-          { label: `Module ${module.moduleNumber}`, href: `/learn/${courseSlug}/${moduleSlug}` },
-          { label: `Lesson ${lesson.lessonNumber}` },
-        ]}
-        actions={
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowLessonList(!showLessonList)}
-            >
-              <BookOpen className="w-4 h-4 mr-2" />
-              Lessons
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowTranscript(!showTranscript)}
-            >
-              <MessageSquare className="w-4 h-4 mr-2" />
-              Transcript
-            </Button>
-          </div>
-        }
-      />
-
-      <PageShell maxWidth="full" padding="sm">
-        <div className="flex flex-col lg:flex-row gap-6">
-          {/* Lesson List Sidebar (mobile: slide-over, desktop: side column) */}
-          {showLessonList && (
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="lg:w-80 flex-shrink-0"
-            >
-              <LessonList
-                lessons={allLessons}
-                courseSlug={courseSlug}
-                moduleSlug={moduleSlug}
-                currentLessonId={lesson.id}
-              />
-            </motion.div>
-          )}
-
-          {/* Main Content */}
-          <div className="flex-1 min-w-0 space-y-6">
-            {/* Completion Banner */}
-            {justCompleted && (
-              <motion.div
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-              >
-                <Card className="border-[var(--profit)] bg-[var(--profit)]/10">
-                  <CardContent className="py-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-[var(--profit)]/20 flex items-center justify-center">
-                          <Trophy className="w-5 h-5 text-[var(--profit)]" />
-                        </div>
-                        <div>
-                          <p className="font-medium text-[var(--text-primary)]">
-                            Lesson Complete!
-                          </p>
-                          <p className="text-sm text-[var(--text-secondary)]">
-                            Great job! Keep up the momentum.
-                          </p>
-                        </div>
-                      </div>
-                      {nextLesson && (
-                        <Button onClick={navigateToNext}>
-                          Next Lesson
-                          <ChevronRight className="w-4 h-4 ml-1" />
-                        </Button>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
-
-            {/* Video Player */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              {lesson.videoUrl ? (
-                <VideoPlayer
-                  src={lesson.videoUrl}
-                  poster={lesson.thumbnailUrl || undefined}
-                  title={lesson.title}
-                  initialTime={effectiveInitialTime}
-                  onTimeUpdate={handleVideoTimeUpdate}
-                  onComplete={videoProgress.handleComplete}
-                  onPlay={videoProgress.handlePlay}
-                  onPause={videoProgress.handlePause}
-                  onSeek={videoProgress.handleSeek}
-                  onSpeedChange={videoProgress.handleSpeedChange}
-                  minWatchPercent={lesson.minWatchPercent}
-                  allowSkip={lesson.allowSkip}
-                />
-              ) : (
-                <Card className="aspect-video flex items-center justify-center bg-[var(--bg-tertiary)]">
-                  <div className="text-center">
-                    <AlertCircle className="w-12 h-12 text-[var(--text-muted)] mx-auto mb-3" />
-                    <p className="text-[var(--text-secondary)]">Video not available</p>
-                  </div>
-                </Card>
-              )}
-            </motion.div>
-
-            {/* Lesson Info */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-            >
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Badge variant="default">Lesson {lesson.lessonNumber}</Badge>
-                      {isCompleted && (
-                        <Badge variant="success">
-                          <CheckCircle2 className="w-3 h-3 mr-1" />
-                          Completed
-                        </Badge>
-                      )}
-                      {lesson.isPreview && (
-                        <Badge variant="primary">Preview</Badge>
-                      )}
-                    </div>
-                    {lesson.videoDurationSeconds && (
-                      <span className="text-sm text-[var(--text-tertiary)]">
-                        {Math.floor(lesson.videoDurationSeconds / 60)}m {lesson.videoDurationSeconds % 60}s
-                      </span>
-                    )}
-                  </div>
-                  <CardTitle className="mt-2">{lesson.title}</CardTitle>
-                </CardHeader>
-                {lesson.description && (
-                  <CardContent className="pt-0">
-                    <p className="text-[var(--text-secondary)]">{lesson.description}</p>
-                  </CardContent>
-                )}
-              </Card>
-            </motion.div>
-
-            {/* Navigation */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-            >
-              <div className="flex items-center justify-between">
-                {prevLesson ? (
-                  <Link href={`/learn/${courseSlug}/${moduleSlug}/${prevLesson.slug}`}>
-                    <Button variant="ghost">
-                      <ChevronLeft className="w-4 h-4 mr-1" />
-                      {prevLesson.title}
-                    </Button>
-                  </Link>
-                ) : (
-                  <Link href={`/learn/${courseSlug}/${moduleSlug}`}>
-                    <Button variant="ghost">
-                      <ChevronLeft className="w-4 h-4 mr-1" />
-                      Back to Module
-                    </Button>
-                  </Link>
-                )}
-
-                {nextLesson ? (
-                  <Link href={`/learn/${courseSlug}/${moduleSlug}/${nextLesson.slug}`}>
-                    <Button variant={isCompleted ? 'primary' : 'ghost'}>
-                      {nextLesson.title}
-                      <ChevronRight className="w-4 h-4 ml-1" />
-                    </Button>
-                  </Link>
-                ) : (
-                  <Link href={`/learn/${courseSlug}/${moduleSlug}`}>
-                    <Button variant="primary">
-                      Complete Module
-                      <CheckCircle2 className="w-4 h-4 ml-1" />
-                    </Button>
-                  </Link>
-                )}
-              </div>
-            </motion.div>
-          </div>
-
-          {/* Transcript Sidebar */}
-          {showTranscript && lesson.transcriptText && (
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="lg:w-96 flex-shrink-0"
-            >
-              <TranscriptPanel
-                transcript={lesson.transcriptText}
-                segments={transcriptSegments.length > 0 ? transcriptSegments : undefined}
-                downloadUrl={lesson.transcriptUrl || undefined}
-                currentTime={videoProgress.currentTime}
-                onSeek={(time) => {
-                  // Seek the video to the specified time
-                  // This triggers videoProgress.handleSeek which updates state
-                  videoProgress.handleSeek(videoProgress.currentTime, time);
-                }}
-              />
-            </motion.div>
-          )}
-        </div>
-      </PageShell>
-    </>
+    <LessonClient
+      lesson={data.lesson!}
+      module={data.module!}
+      progress={data.progress!}
+      allLessons={data.allLessons!}
+      prevLesson={data.prevLesson!}
+      nextLesson={data.nextLesson!}
+      courseTitle={data.courseTitle!}
+      courseSlug={courseSlug}
+      moduleSlug={moduleSlug}
+    />
   );
 }

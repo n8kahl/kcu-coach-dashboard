@@ -254,6 +254,21 @@ export interface UserCourseAccess {
   complianceStatus: 'not_started' | 'in_progress' | 'completed' | 'overdue';
 }
 
+// ============================================
+// TRANSCRIPT TYPES
+// ============================================
+
+/**
+ * Response from the /transcript endpoint.
+ * Separated from lesson response to reduce initial payload size.
+ */
+export interface TranscriptResponse {
+  transcriptText: string | null;
+  transcriptUrl: string | null;
+  // Future: segments for synchronized highlighting
+  // segments?: TranscriptSegment[];
+}
+
 // API Response types
 export interface ProgressOverviewResponse {
   courseProgress: CourseProgress;
