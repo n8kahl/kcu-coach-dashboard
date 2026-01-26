@@ -690,7 +690,19 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
   // Update Level Lines - Using createPriceLine for persistence during pan/drag
   // ==========================================================================
   useEffect(() => {
-    if (!mountedRef.current || !isInitialized || !candleSeriesRef.current) return;
+    // Debug: Log levels received
+    console.log('[ProfessionalChart] Levels useEffect triggered:', {
+      levelsCount: levels.length,
+      gammaLevelsCount: gammaLevels.length,
+      isInitialized,
+      hasCandleSeries: !!candleSeriesRef.current,
+      mounted: mountedRef.current,
+    });
+
+    if (!mountedRef.current || !isInitialized || !candleSeriesRef.current) {
+      console.log('[ProfessionalChart] Early return - conditions not met');
+      return;
+    }
 
     const candleSeries = candleSeriesRef.current;
 
@@ -753,6 +765,9 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
       });
     });
 
+    // Debug: Log all levels to be created
+    console.log('[ProfessionalChart] Creating price lines for levels:', allLevels.map(l => ({ label: l.label, price: l.price, color: l.color })));
+
     // Create price lines for each level
     allLevels.forEach((level) => {
       try {
@@ -765,10 +780,13 @@ export const ProfessionalChart = memo(forwardRef<ProfessionalChartHandle, Profes
           title: level.label,
         });
         priceLinesRef.current.push(priceLine);
-      } catch {
-        // Silently handle errors creating price lines
+        console.log('[ProfessionalChart] Created price line:', level.label, 'at', level.price);
+      } catch (err) {
+        console.error('[ProfessionalChart] Error creating price line:', level.label, err);
       }
     });
+
+    console.log('[ProfessionalChart] Total price lines created:', priceLinesRef.current.length);
   }, [levels, gammaLevels, isInitialized]);
 
   // ==========================================================================

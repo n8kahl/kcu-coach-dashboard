@@ -28,6 +28,7 @@ import {
   CompanionWatchlist,
   CompanionHUD,
   CompanionCoachBox,
+  ConfluencePanel,
 } from '@/components/companion';
 import { ProfessionalChart, type ChartCandle, type ChartLevel, type ProfessionalGammaLevel, type ProfessionalChartHandle } from '@/components/charts';
 import { toEpochSeconds, getBucketStart, TIMEFRAME_SECONDS } from '@/lib/charts/time';
@@ -611,6 +612,7 @@ export default function CompanionTerminal() {
           });
         }
 
+        console.log('[Companion] Setting chart levels:', levels.length, levels.map(l => ({ label: l.label, price: l.price })));
         setChartLevels(levels);
       } else {
         // LTP API failed - try to get basic levels from quote as fallback
@@ -1101,24 +1103,26 @@ export default function CompanionTerminal() {
         </div>
       </div>
 
-      {/* MAIN CONTENT - 75% Chart / 25% HUD */}
+      {/* MAIN CONTENT - Chart + Confluence Panel + HUD */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT: Chart (75%) */}
-        <div className="w-3/4 h-full relative bg-[#0b0e11]">
-          {selectedSymbol ? (
-            <>
-              {!chartLoading && chartData.length > 0 && (
-                <ProfessionalChart
-                  ref={chartRef}
-                  data={chartData}
-                  symbol={selectedSymbol}
-                  levels={chartLevels}
-                  gammaLevels={chartGammaLevels}
-                  showVolume={true}
-                  showIndicators={true}
-                  height="100%"
-                />
-              )}
+        {/* LEFT: Chart Area (flex-1) */}
+        <div className="flex-1 h-full flex bg-[#0b0e11]">
+          {/* Chart */}
+          <div className="flex-1 h-full relative">
+            {selectedSymbol ? (
+              <>
+                {!chartLoading && chartData.length > 0 && (
+                  <ProfessionalChart
+                    ref={chartRef}
+                    data={chartData}
+                    symbol={selectedSymbol}
+                    levels={chartLevels}
+                    gammaLevels={chartGammaLevels}
+                    showVolume={true}
+                    showIndicators={true}
+                    height="100%"
+                  />
+                )}
 
               {/* Debug overlay for validating tick bucketing (env-controlled) */}
               {showDebugOverlay && selectedSymbol && debugInfo.lastTickTs && (
@@ -1156,19 +1160,30 @@ export default function CompanionTerminal() {
                   </div>
                 </div>
               )}
-            </>
-          ) : (
-            <div className="w-full h-full flex items-center justify-center">
-              <div className="text-center">
-                <Crosshair className="w-12 h-12 mx-auto mb-4 text-[#787b86]" />
-                <p className="text-[#787b86]">Select a symbol from the watchlist</p>
+              </>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <div className="text-center">
+                  <Crosshair className="w-12 h-12 mx-auto mb-4 text-[#787b86]" />
+                  <p className="text-[#787b86]">Select a symbol from the watchlist</p>
+                </div>
               </div>
-            </div>
+            )}
+          </div>
+
+          {/* Confluence Panel - Between Chart and HUD */}
+          {selectedSymbol && (ltp2Score || ltpAnalysis) && (
+            <ConfluencePanel
+              ltp2Score={ltp2Score}
+              ltpAnalysis={ltpAnalysis}
+              currentPrice={effectivePrice}
+              vwap={effectiveVwap}
+            />
           )}
         </div>
 
-        {/* RIGHT: HUD Sidebar (25%) */}
-        <div className="w-1/4 h-full flex flex-col border-l border-[#2a2e39] bg-[#131722] overflow-hidden">
+        {/* RIGHT: HUD Sidebar (fixed width) */}
+        <div className="w-[280px] h-full flex flex-col border-l border-[#2a2e39] bg-[#131722] overflow-hidden shrink-0">
           {/* LTP Score Panel */}
           <div className="p-3 border-b border-[#2a2e39] shrink-0">
             {selectedSymbol && (ltp2Score || ltpAnalysis) ? (

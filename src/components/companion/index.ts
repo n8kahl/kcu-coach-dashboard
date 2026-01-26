@@ -10,3 +10,4 @@ export { CompanionCoachBox, type CompanionCoachBoxProps, type CoachingMode, type
 export { CompanionSessionReport } from './session-report';
 export { NotificationPermissionBanner } from './notification-banner';
 export { ScoreBreakdown, type ScoreBreakdownProps } from './ScoreBreakdown';
+export { ConfluencePanel, type ConfluencePanelProps } from './ConfluencePanel';
