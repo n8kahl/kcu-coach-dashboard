@@ -577,7 +577,8 @@ export type RichContent =
   | SetupVisualizationContent
   | QuizPromptContent
   | VideoTimestampContent
-  | LTPAnalysisChartContent;
+  | LTPAnalysisChartContent
+  | CourseVideoContent;
 
 export interface LessonLinkContent {
   type: 'lesson_link';
@@ -661,6 +662,22 @@ export interface LTPAnalysisChartContent {
     label: string;
     strength: number;
   }>;
+}
+
+/**
+ * Internal course video link with timestamp
+ * Format: [[COURSE:courseSlug/moduleSlug/lessonSlug|timestampSeconds|Title]]
+ * Example: [[COURSE:ltp-framework/core-concepts/patience-candles|120|Patience Candles Explained]]
+ */
+export interface CourseVideoContent {
+  type: 'course_video';
+  courseSlug: string;
+  moduleSlug: string;
+  lessonSlug: string;
+  timestampSeconds: number;
+  title: string;
+  /** Formatted timestamp e.g. "2:00" or "1:30:45" */
+  timestampFormatted?: string;
 }
 
 export interface CoachingSession {

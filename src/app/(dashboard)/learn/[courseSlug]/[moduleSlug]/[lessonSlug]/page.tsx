@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '@/components/layout/header';
 import { PageShell } from '@/components/layout/page-shell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -38,12 +38,24 @@ interface LessonPageData {
   courseTitle: string;
 }
 
+interface TranscriptSegment {
+  text: string;
+  startTime: number;
+  endTime?: number;
+  startFormatted?: string;
+}
+
 export default function LessonPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const courseSlug = params.courseSlug as string;
   const moduleSlug = params.moduleSlug as string;
   const lessonSlug = params.lessonSlug as string;
+
+  // Get timestamp from URL query param (e.g., ?t=120)
+  const urlTimestamp = searchParams.get('t');
+  const startTimeFromUrl = urlTimestamp ? parseInt(urlTimestamp, 10) : null;
 
   const [data, setData] = useState<LessonPageData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,12 +63,18 @@ export default function LessonPage() {
   const [showTranscript, setShowTranscript] = useState(true);
   const [showLessonList, setShowLessonList] = useState(false);
   const [justCompleted, setJustCompleted] = useState(false);
+  const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
+
+  // Determine initial time: prefer URL timestamp, fall back to saved progress
+  const effectiveInitialTime = startTimeFromUrl !== null && startTimeFromUrl > 0
+    ? startTimeFromUrl
+    : (data?.progress?.progressSeconds || 0);
 
   // Video progress hook
   const videoProgress = useVideoProgress({
     lessonId: data?.lesson.id || '',
     videoDuration: data?.lesson.videoDurationSeconds || 0,
-    initialProgress: data?.progress?.progressSeconds || 0,
+    initialProgress: effectiveInitialTime,
     minWatchPercent: data?.lesson.minWatchPercent || 90,
     onComplete: () => {
       setJustCompleted(true);
@@ -74,6 +92,8 @@ export default function LessonPage() {
     try {
       setLoading(true);
       setJustCompleted(false);
+      setTranscriptSegments([]);
+
       const response = await fetch(
         `/api/learn/courses/${courseSlug}/modules/${moduleSlug}/lessons/${lessonSlug}`
       );
@@ -89,11 +109,31 @@ export default function LessonPage() {
 
       const lessonData = await response.json();
       setData(lessonData);
+
+      // Fetch transcript segments (non-blocking)
+      fetchTranscriptSegments();
     } catch (err) {
       console.error('Error fetching lesson:', err);
       setError(err instanceof Error ? err.message : 'Failed to load lesson');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTranscriptSegments = async () => {
+    try {
+      const response = await fetch(
+        `/api/learn/courses/${courseSlug}/modules/${moduleSlug}/lessons/${lessonSlug}/transcript-segments`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (data.segments && data.segments.length > 0) {
+          setTranscriptSegments(data.segments);
+        }
+      }
+    } catch (err) {
+      // Silently fail - transcript will fall back to text-only mode
+      console.warn('Failed to fetch transcript segments:', err);
     }
   };
 
@@ -274,7 +314,7 @@ export default function LessonPage() {
                   src={lesson.videoUrl}
                   poster={lesson.thumbnailUrl || undefined}
                   title={lesson.title}
-                  initialTime={progress?.progressSeconds || 0}
+                  initialTime={effectiveInitialTime}
                   onTimeUpdate={handleVideoTimeUpdate}
                   onComplete={videoProgress.handleComplete}
                   onPlay={videoProgress.handlePlay}
@@ -382,11 +422,12 @@ export default function LessonPage() {
             >
               <TranscriptPanel
                 transcript={lesson.transcriptText}
+                segments={transcriptSegments.length > 0 ? transcriptSegments : undefined}
                 downloadUrl={lesson.transcriptUrl || undefined}
                 currentTime={videoProgress.currentTime}
                 onSeek={(time) => {
-                  // This would require a ref to the video player
-                  // For now, we'll just update progress state
+                  // Seek the video to the specified time
+                  // This triggers videoProgress.handleSeek which updates state
                   videoProgress.handleSeek(videoProgress.currentTime, time);
                 }}
               />

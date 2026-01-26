@@ -42,13 +42,23 @@ function getEncoder() {
 }
 
 export interface ChunkMetadata {
-  sourceType: 'transcript' | 'document' | 'lesson' | 'manual';
+  sourceType: 'transcript' | 'document' | 'lesson' | 'manual' | 'course_lesson' | 'youtube_video';
   sourceId: string;
   sourceTitle: string;
   topic?: string;
   subtopic?: string;
   difficulty?: 'beginner' | 'intermediate' | 'advanced';
   ltpRelevance?: number;
+}
+
+/**
+ * A chunk with timestamp information for video transcripts
+ */
+export interface TimestampedChunk {
+  content: string;
+  startMs: number;
+  endMs: number;
+  segmentIndices?: number[];
 }
 
 export interface KnowledgeChunk {
@@ -287,6 +297,118 @@ export async function embedAndStoreChunks(
     return { success: true, chunkCount: chunks.length };
   } catch (error) {
     logger.error('Error in embedAndStoreChunks', error instanceof Error ? error : { message: String(error) });
+
+    // Update source status to failed
+    await supabaseAdmin
+      .from('knowledge_sources')
+      .upsert({
+        source_type: metadata.sourceType,
+        source_id: metadata.sourceId,
+        title: metadata.sourceTitle,
+        status: 'failed',
+        error_message: error instanceof Error ? error.message : String(error),
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'source_type,source_id',
+      });
+
+    return {
+      success: false,
+      chunkCount: 0,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Embed and store timestamped chunks in a single operation
+ *
+ * This function inserts chunks WITH timestamp metadata directly,
+ * avoiding the need to update timestamps after the fact (no content-prefix hack).
+ *
+ * Use this for video transcripts where timestamps are known upfront.
+ */
+export async function embedAndStoreTimestampedChunks(
+  chunks: TimestampedChunk[],
+  metadata: ChunkMetadata
+): Promise<{ success: boolean; chunkCount: number; chunkIds?: string[]; error?: string }> {
+  try {
+    if (chunks.length === 0) {
+      return { success: true, chunkCount: 0, chunkIds: [] };
+    }
+
+    logger.info('Starting timestamped chunk embedding', {
+      chunkCount: chunks.length,
+      sourceType: metadata.sourceType,
+      sourceId: metadata.sourceId,
+    });
+
+    // Generate embeddings for all chunks
+    const texts = chunks.map(c => c.content.slice(0, 8000));
+    const embeddings = await generateEmbeddings(texts);
+
+    // Prepare records with timestamps included
+    const records = chunks.map((chunk, index) => ({
+      content: chunk.content,
+      embedding: JSON.stringify(embeddings[index]),
+      source_type: metadata.sourceType,
+      source_id: metadata.sourceId,
+      source_title: metadata.sourceTitle,
+      topic: metadata.topic || null,
+      subtopic: metadata.subtopic || null,
+      difficulty: metadata.difficulty || 'intermediate',
+      ltp_relevance: metadata.ltpRelevance || 0.5,
+      chunk_index: index,
+      // Timestamp columns - inserted directly, no update hack needed
+      start_timestamp_ms: chunk.startMs,
+      end_timestamp_ms: chunk.endMs,
+      segment_indices: chunk.segmentIndices || null,
+    }));
+
+    // Delete existing chunks for this source (if re-processing)
+    await supabaseAdmin
+      .from('knowledge_chunks')
+      .delete()
+      .eq('source_type', metadata.sourceType)
+      .eq('source_id', metadata.sourceId);
+
+    // Insert new chunks with timestamps in single operation
+    const { data, error } = await supabaseAdmin
+      .from('knowledge_chunks')
+      .insert(records)
+      .select('id');
+
+    if (error) {
+      logger.error('Error inserting timestamped chunks', { error: error.message });
+      return { success: false, chunkCount: 0, error: error.message };
+    }
+
+    const chunkIds = data?.map(r => r.id) || [];
+
+    // Update knowledge source status
+    await supabaseAdmin
+      .from('knowledge_sources')
+      .upsert({
+        source_type: metadata.sourceType,
+        source_id: metadata.sourceId,
+        title: metadata.sourceTitle,
+        status: 'complete',
+        chunk_count: chunks.length,
+        processed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'source_type,source_id',
+      });
+
+    logger.info('Successfully stored timestamped chunks', {
+      chunkCount: chunks.length,
+      sourceId: metadata.sourceId,
+      hasTimestamps: true,
+    });
+
+    return { success: true, chunkCount: chunks.length, chunkIds };
+  } catch (error) {
+    logger.error('Error in embedAndStoreTimestampedChunks', error instanceof Error ? error : { message: String(error) });
 
     // Update source status to failed
     await supabaseAdmin

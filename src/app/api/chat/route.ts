@@ -99,14 +99,14 @@ You can embed rich content in your responses using special markers. The frontend
    - Providing supplementary explanations from KayCapitals YouTube
    - Offering alternative explanations to structured course content
 
-6. THINKIFIC LINKS - Deep link to official Thinkific course content:
-   Format: [[THINKIFIC:courseSlug|lessonSlug|timestampSeconds|Title]]
-   Example: [[THINKIFIC:ltp-framework|patience-candles|120|Patience Candles Deep Dive]]
+6. COURSE VIDEO LINKS - Deep link to internal course content with timestamp:
+   Format: [[COURSE:courseSlug/moduleSlug/lessonSlug|timestampSeconds|Title]]
+   Example: [[COURSE:ltp-framework/core-concepts/patience-candles|120|Patience Candles Deep Dive]]
 
    Use these when:
-   - Directing users to structured course content
+   - Directing users to specific moments in course videos
+   - RAG context includes transcript segments with timestamps
    - The official lesson provides the best explanation
-   - User needs to complete a module for certification
 
 IMPORTANT RULES:
 - Always include 1-2 lesson links when explaining concepts
@@ -114,9 +114,9 @@ IMPORTANT RULES:
 - Place rich content markers on their own lines after your explanation
 - Don't overuse - 2-3 rich content items per response maximum
 - Make sure the lesson slug matches exactly from the curriculum below
-- Prefer THINKIFIC links for official course content that users should complete
-- Use VIDEO links for supplementary YouTube content and alternative explanations
-- When RAG context includes video timestamps, include VIDEO markers to jump to specific moments
+- Prefer COURSE links for internal course content with timestamps
+- Use VIDEO links for supplementary YouTube content
+- When RAG context includes transcript timestamps, include COURSE markers to jump to specific moments
 
 ${getCurriculumReference()}`;
 

@@ -90,7 +90,7 @@ Your feedback style:
 
 Rich content markers you can use:
 - [[LESSON:ltp-framework/level-identification|Level Identification|15 min]] - Link to lessons
-- [[THINKIFIC:ltp-course|patience-candles|0|Patience Candles]] - Thinkific lesson link
+- [[COURSE:ltp-framework/core-concepts/patience-candles|120|Patience Candles]] - Course video with timestamp
 
 Never be harsh or discouraging. Trading is hard, and every mistake is a learning opportunity.`;
 

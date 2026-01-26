@@ -12,6 +12,7 @@ import type {
   QuizPromptContent,
   VideoTimestampContent,
   LTPAnalysisChartContent,
+  CourseVideoContent,
 } from '@/types';
 import { VideoTimestampCard } from './video-timestamp-card';
 import { LTPAnalysisCard } from './ltp-analysis-chart';
@@ -55,6 +56,8 @@ export function RichContentRenderer({ content, className }: RichContentRendererP
             return <VideoTimestampCard key={`video-${index}`} content={item as VideoTimestampContent & { source: 'youtube' }} />;
           case 'ltp_analysis_chart':
             return <LTPAnalysisCard key={`ltp-${index}`} content={item as LTPAnalysisChartContent} />;
+          case 'course_video':
+            return <CourseVideoCard key={`course-${index}`} content={item as CourseVideoContent} />;
           default:
             return null;
         }
@@ -441,3 +444,70 @@ function QuizCardComponent({ quiz }: QuizCardProps) {
 }
 
 export const QuizCard = memo(QuizCardComponent);
+
+// ============================================
+// Course Video Card Component (Internal Course with Timestamp)
+// ============================================
+
+interface CourseVideoCardProps {
+  content: CourseVideoContent;
+}
+
+function CourseVideoCardComponent({ content }: CourseVideoCardProps) {
+  const { courseSlug, moduleSlug, lessonSlug, timestampSeconds, title, timestampFormatted } = content;
+
+  // Build URL with timestamp query param
+  const href = `/learn/${courseSlug}/${moduleSlug}/${lessonSlug}?t=${timestampSeconds}`;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+    >
+      <Link href={href} className="block group">
+        <div
+          className={cn(
+            'bg-[var(--bg-primary)] border border-[var(--border-primary)]',
+            'hover:border-[var(--accent-primary-muted)] hover:bg-[var(--bg-card-hover)]',
+            'transition-all duration-200'
+          )}
+        >
+          <div className="p-3 flex items-center gap-3">
+            {/* Icon */}
+            <div
+              className={cn(
+                'w-10 h-10 shrink-0 flex items-center justify-center',
+                'bg-[var(--accent-primary-glow)]'
+              )}
+            >
+              <Play className="w-5 h-5 text-[var(--accent-primary)]" />
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-[var(--text-primary)] truncate text-sm">
+                {title}
+              </p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-xs text-[var(--text-tertiary)]">
+                  Jump to {timestampFormatted || `${Math.floor(timestampSeconds / 60)}:${(timestampSeconds % 60).toString().padStart(2, '0')}`}
+                </span>
+              </div>
+            </div>
+
+            {/* Arrow */}
+            <div className="shrink-0 flex items-center gap-1 text-[var(--accent-primary)]">
+              <span className="text-xs font-medium group-hover:underline">
+                Watch
+              </span>
+              <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+            </div>
+          </div>
+        </div>
+      </Link>
+    </motion.div>
+  );
+}
+
+export const CourseVideoCard = memo(CourseVideoCardComponent);

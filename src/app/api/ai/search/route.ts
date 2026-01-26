@@ -318,8 +318,11 @@ async function searchLessons(
       return searchLessonsLegacy(query, interpretation, limit);
     }
 
+    // Also search transcript_segments for timestamp matches
+    const timestampMatches = await searchTranscriptSegments(query, limit);
+
     const lowerQuery = query.toLowerCase();
-    return (lessons as unknown as LessonQueryResult[])
+    const results = (lessons as unknown as LessonQueryResult[])
       .map((lesson): SearchResult => {
         let relevance = 50;
 
@@ -331,27 +334,132 @@ async function searchLessons(
         const moduleSlug = lesson.course_modules.slug;
         const durationMinutes = lesson.duration_seconds ? Math.round(lesson.duration_seconds / 60) : 10;
 
+        // Check if there's a timestamp match for this lesson
+        const timestampMatch = timestampMatches.find(t => t.contentId === lesson.id);
+        let url = getLessonUrl(courseSlug, moduleSlug, lesson.slug);
+
+        // Add timestamp to URL if we have a match
+        if (timestampMatch) {
+          const timestampSeconds = Math.floor(timestampMatch.startMs / 1000);
+          url = `${url}?t=${timestampSeconds}`;
+          relevance += 15; // Boost for timestamp match
+        }
+
         return {
           id: lesson.id,
           type: 'lesson',
           title: lesson.title,
-          description: `${lesson.course_modules.title} - ${durationMinutes} min`,
-          url: getLessonUrl(courseSlug, moduleSlug, lesson.slug),
+          description: timestampMatch
+            ? `${lesson.course_modules.title} - Found at ${formatTimestamp(timestampMatch.startMs)}`
+            : `${lesson.course_modules.title} - ${durationMinutes} min`,
+          url,
           relevance: Math.min(relevance, 100),
           metadata: {
             courseSlug,
             moduleSlug,
             lessonSlug: lesson.slug,
             duration: durationMinutes,
+            timestampMatch: timestampMatch?.text,
+            timestampSeconds: timestampMatch ? Math.floor(timestampMatch.startMs / 1000) : undefined,
           },
         };
       })
       .filter((r) => r.relevance > 40)
       .slice(0, limit);
+
+    // Also include transcript-only matches (lessons not in top results)
+    const resultIds = new Set(results.map(r => r.id));
+    const additionalMatches = await Promise.all(
+      timestampMatches
+        .filter(t => !resultIds.has(t.contentId))
+        .slice(0, 3)
+        .map(async (match): Promise<SearchResult | null> => {
+          const { data: lesson } = await supabaseAdmin
+            .from('course_lessons')
+            .select(`
+              id, slug, title,
+              course_modules!inner (slug, courses!inner (slug))
+            `)
+            .eq('id', match.contentId)
+            .single();
+
+          if (!lesson) return null;
+
+          const lessonData = lesson as unknown as {
+            id: string;
+            slug: string;
+            title: string;
+            course_modules: { slug: string; courses: { slug: string } };
+          };
+
+          const courseSlug = lessonData.course_modules.courses.slug;
+          const moduleSlug = lessonData.course_modules.slug;
+          const timestampSeconds = Math.floor(match.startMs / 1000);
+
+          return {
+            id: lessonData.id,
+            type: 'lesson',
+            title: lessonData.title,
+            description: `Transcript match at ${formatTimestamp(match.startMs)}`,
+            url: `${getLessonUrl(courseSlug, moduleSlug, lessonData.slug)}?t=${timestampSeconds}`,
+            relevance: 70,
+            metadata: {
+              courseSlug,
+              moduleSlug,
+              lessonSlug: lessonData.slug,
+              timestampMatch: match.text,
+              timestampSeconds,
+            },
+          };
+        })
+    );
+
+    // Merge and sort results
+    const allResults = [...results, ...additionalMatches.filter((r): r is SearchResult => r !== null)];
+    return allResults.sort((a, b) => b.relevance - a.relevance).slice(0, limit);
   } catch (error) {
     logger.error('Lesson search error', { error: error instanceof Error ? error.message : String(error) });
     return [];
   }
+}
+
+interface TranscriptSegmentMatch {
+  contentId: string;
+  text: string;
+  startMs: number;
+  endMs: number;
+  rank: number;
+}
+
+async function searchTranscriptSegments(query: string, limit: number = 10): Promise<TranscriptSegmentMatch[]> {
+  try {
+    const { data, error } = await supabaseAdmin.rpc('search_transcript_segments', {
+      p_content_type: 'course_lesson',
+      p_content_id: null, // Search all lessons
+      p_query: query,
+      p_limit: limit,
+    });
+
+    if (error || !data) return [];
+
+    return data.map((row: { content_id: string; text: string; start_ms: number; end_ms: number; rank: number }) => ({
+      contentId: row.content_id,
+      text: row.text,
+      startMs: row.start_ms,
+      endMs: row.end_ms,
+      rank: row.rank,
+    }));
+  } catch (error) {
+    logger.error('Transcript segment search error', { error: error instanceof Error ? error.message : String(error) });
+    return [];
+  }
+}
+
+function formatTimestamp(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 // Fallback for legacy lessons table

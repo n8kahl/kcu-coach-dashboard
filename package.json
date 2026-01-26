@@ -16,7 +16,9 @@
     "migrate:quizzes:dry": "tsx scripts/import-quizzes.ts --dry-run",
     "market-worker": "tsx scripts/market-worker.ts",
     "market-worker:debug": "DEBUG=1 tsx scripts/market-worker.ts",
-    "market-context-worker": "tsx scripts/market-context-worker.ts"
+    "market-context-worker": "tsx scripts/market-context-worker.ts",
+    "transcript-worker": "tsx scripts/transcript-worker.ts",
+    "transcript-worker:dry": "DRY_RUN=1 tsx scripts/transcript-worker.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",

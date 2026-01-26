@@ -12,6 +12,7 @@
  * - [[QUIZ:module-slug|title]]
  * - [[VIDEO:videoId|startMs|endMs|Title]] - YouTube video with timestamp
  * - [[LTP_ANALYSIS:SYMBOL|DATE|TIMEFRAME|{JSON}]] - Interactive LTP analysis chart
+ * - [[COURSE:courseSlug/moduleSlug/lessonSlug|timestampSeconds|Title]] - Internal course video with timestamp
  */
 
 import type {
@@ -22,6 +23,7 @@ import type {
   QuizPromptContent,
   VideoTimestampContent,
   LTPAnalysisChartContent,
+  CourseVideoContent,
 } from '@/types';
 
 // Lazy-loaded curriculum context for optional metadata enrichment
@@ -69,6 +71,8 @@ const QUIZ_PATTERN = /\[\[QUIZ:([^|]+)\|([^\]]+)\]\]/g;
 const VIDEO_PATTERN = /\[\[VIDEO:([^|]+)\|(\d+)\|(\d+)\|([^\]]+)\]\]/g;
 // LTP Analysis chart: [[LTP_ANALYSIS:SYMBOL|DATE|TIMEFRAME|{JSON}]]
 const LTP_ANALYSIS_PATTERN = /\[\[LTP_ANALYSIS:([^|]+)\|([^|]+)\|([^|]+)\|(\{.*?\})\]\]/g;
+// Course video with timestamp: [[COURSE:courseSlug/moduleSlug/lessonSlug|timestampSeconds|Title]]
+const COURSE_PATTERN = /\[\[COURSE:([^/]+)\/([^/]+)\/([^|]+)\|(\d+)\|([^\]]+)\]\]/g;
 
 /**
  * Calculate LTP grade from total score
@@ -293,6 +297,48 @@ function parseLTPAnalysisMarkers(text: string): LTPAnalysisChartContent[] {
 }
 
 /**
+ * Parse course video markers from text (internal course videos with timestamp)
+ * Format: [[COURSE:courseSlug/moduleSlug/lessonSlug|timestampSeconds|Title]]
+ */
+function parseCourseMarkers(text: string): CourseVideoContent[] {
+  const courseVideos: CourseVideoContent[] = [];
+  let match;
+
+  COURSE_PATTERN.lastIndex = 0;
+
+  while ((match = COURSE_PATTERN.exec(text)) !== null) {
+    const [, courseSlug, moduleSlug, lessonSlug, timestampStr, title] = match;
+    const timestampSeconds = parseInt(timestampStr, 10) || 0;
+
+    courseVideos.push({
+      type: 'course_video',
+      courseSlug: courseSlug.trim(),
+      moduleSlug: moduleSlug.trim(),
+      lessonSlug: lessonSlug.trim(),
+      timestampSeconds,
+      title: title.trim(),
+      timestampFormatted: formatTimestampSeconds(timestampSeconds),
+    });
+  }
+
+  return courseVideos;
+}
+
+/**
+ * Format seconds to display time string (MM:SS or HH:MM:SS)
+ */
+function formatTimestampSeconds(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+/**
  * Remove all rich content markers from text
  */
 export function stripRichContentMarkers(text: string): string {
@@ -303,6 +349,7 @@ export function stripRichContentMarkers(text: string): string {
     .replace(QUIZ_PATTERN, '')
     .replace(VIDEO_PATTERN, '')
     .replace(LTP_ANALYSIS_PATTERN, '')
+    .replace(COURSE_PATTERN, '')
     .replace(/\n{3,}/g, '\n\n') // Clean up extra newlines
     .trim();
 }
@@ -320,6 +367,7 @@ export function parseRichContent(text: string): RichContent[] {
   richContent.push(...parseQuizMarkers(text));
   richContent.push(...parseVideoMarkers(text));
   richContent.push(...parseLTPAnalysisMarkers(text));
+  richContent.push(...parseCourseMarkers(text));
 
   return richContent;
 }
@@ -348,6 +396,7 @@ export function hasRichContent(text: string): boolean {
   QUIZ_PATTERN.lastIndex = 0;
   VIDEO_PATTERN.lastIndex = 0;
   LTP_ANALYSIS_PATTERN.lastIndex = 0;
+  COURSE_PATTERN.lastIndex = 0;
 
   return (
     LESSON_PATTERN.test(text) ||
@@ -355,7 +404,8 @@ export function hasRichContent(text: string): boolean {
     SETUP_PATTERN.test(text) ||
     QUIZ_PATTERN.test(text) ||
     VIDEO_PATTERN.test(text) ||
-    LTP_ANALYSIS_PATTERN.test(text)
+    LTP_ANALYSIS_PATTERN.test(text) ||
+    COURSE_PATTERN.test(text)
   );
 }
 

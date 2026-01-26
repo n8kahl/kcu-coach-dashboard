@@ -226,9 +226,16 @@ export async function processTranscriptWithTimestamps(
   segments: TranscriptSegment[],
   metadata: Partial<ChunkMetadata>
 ): Promise<{ success: boolean; chunkCount: number; error?: string }> {
-  const { processAndEmbedText } = await import('./embeddings');
+  // Import the new timestamped embedding function
+  const { embedAndStoreTimestampedChunks } = await import('./embeddings');
 
-  const chunks: TimestampedChunk[] = [];
+  const chunks: Array<{
+    content: string;
+    startMs: number;
+    endMs: number;
+    segmentIndices: number[];
+  }> = [];
+
   let currentChunk = '';
   let currentStartMs = segments[0]?.startMs || 0;
   let currentSegmentIndices: number[] = [];
@@ -246,15 +253,6 @@ export async function processTranscriptWithTimestamps(
         startMs: currentStartMs,
         endMs,
         segmentIndices: [...currentSegmentIndices],
-        metadata: {
-          sourceType: 'transcript',
-          sourceId: videoId,
-          sourceTitle: metadata.sourceTitle || videoId,
-          topic: metadata.topic,
-          subtopic: metadata.subtopic,
-          difficulty: metadata.difficulty,
-          ltpRelevance: metadata.ltpRelevance,
-        },
       });
 
       // Start new chunk with overlap for context continuity
@@ -275,52 +273,26 @@ export async function processTranscriptWithTimestamps(
       startMs: currentStartMs,
       endMs: segments[segments.length - 1]?.endMs || currentStartMs,
       segmentIndices: currentSegmentIndices,
-      metadata: {
-        sourceType: 'transcript',
-        sourceId: videoId,
-        sourceTitle: metadata.sourceTitle || videoId,
-        topic: metadata.topic,
-        subtopic: metadata.subtopic,
-        difficulty: metadata.difficulty,
-        ltpRelevance: metadata.ltpRelevance,
-      },
     });
   }
 
-  // Process each chunk: generate embeddings and store
-  let totalChunks = 0;
-  let hasError = false;
-
-  for (const chunk of chunks) {
-    try {
-      // Generate embedding and store using existing function
-      const result = await processAndEmbedText(chunk.content, chunk.metadata);
-
-      if (result.success) {
-        totalChunks += result.chunkCount;
-
-        // Update the chunk records with timestamp info (query by source_id since we don't have chunk IDs)
-        await supabaseAdmin
-          .from('knowledge_chunks')
-          .update({
-            start_timestamp_ms: chunk.startMs,
-            end_timestamp_ms: chunk.endMs,
-            segment_indices: chunk.segmentIndices,
-          })
-          .eq('source_type', 'transcript')
-          .eq('source_id', videoId)
-          .contains('content', chunk.content.slice(0, 100)); // Match by content prefix
-      } else {
-        hasError = true;
-      }
-    } catch (err) {
-      console.error(`Error processing chunk for video ${videoId}:`, err);
-      hasError = true;
-    }
+  if (chunks.length === 0) {
+    return { success: false, chunkCount: 0, error: 'No chunks generated from segments' };
   }
 
-  console.log(`Created ${totalChunks} timestamped chunks for video ${videoId}`);
-  return { success: !hasError && totalChunks > 0, chunkCount: totalChunks };
+  // Use the new function that inserts timestamps directly (no content-prefix hack)
+  const result = await embedAndStoreTimestampedChunks(chunks, {
+    sourceType: 'transcript',
+    sourceId: videoId,
+    sourceTitle: metadata.sourceTitle || videoId,
+    topic: metadata.topic,
+    subtopic: metadata.subtopic,
+    difficulty: metadata.difficulty,
+    ltpRelevance: metadata.ltpRelevance,
+  });
+
+  console.log(`Created ${result.chunkCount} timestamped chunks for video ${videoId}`);
+  return result;
 }
 
 // ============================================

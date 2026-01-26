@@ -560,13 +560,13 @@ You can embed rich content in your responses using special markers:
    Format: [[QUIZ:module-slug|Quiz Title]]
    Example: [[QUIZ:ltp-framework|Test Your LTP Knowledge]]
 
-5. VIDEO TIMESTAMPS - Link to specific moments:
+5. VIDEO TIMESTAMPS - Link to YouTube video moments:
    Format: [[VIDEO:videoId|startMs|endMs|Title]]
    Example: [[VIDEO:dQw4w9WgXcQ|120000|180000|Understanding Support Levels]]
 
-6. THINKIFIC LINKS - Deep link to course content:
-   Format: [[THINKIFIC:courseSlug|lessonSlug|timestampSeconds|Title]]
-   Example: [[THINKIFIC:ltp-framework|patience-candles|120|Patience Candles Deep Dive]]
+6. COURSE VIDEO LINKS - Deep link to internal course content with timestamp:
+   Format: [[COURSE:courseSlug/moduleSlug/lessonSlug|timestampSeconds|Title]]
+   Example: [[COURSE:ltp-framework/core-concepts/patience-candles|120|Patience Candles Deep Dive]]
 
 RULES:
 - Always include 1-2 lesson links when explaining concepts
