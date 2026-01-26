@@ -10,6 +10,14 @@ import logger from './logger';
 
 const anthropic = new Anthropic();
 
+// Mapping from focus areas to actual lesson slugs in the database
+// Course: kcu-trading-mastery, Module: ltp-framework
+const FOCUS_AREA_TO_LESSON: Record<string, { slug: string; title: string; duration: string }> = {
+  level: { slug: 'trading-hourly-levels', title: 'How I Trade Using Hourly Levels', duration: '8 min' },
+  trend: { slug: 'introduction-to-ltp', title: 'Introduction to LTP Framework', duration: '10 min' },
+  patience: { slug: 'patience-candles', title: 'Patience Candles Explained', duration: '9 min' },
+};
+
 interface LTPAnalysis {
   level: { score: number; reason: string };
   trend: { score: number; reason: string };
@@ -89,8 +97,9 @@ Your feedback style:
 7. Adjust tone based on user's experience level and streak
 
 Rich content markers you can use:
-- [[LESSON:ltp-framework/level-identification|Level Identification|15 min]] - Link to lessons
-- [[COURSE:ltp-framework/core-concepts/patience-candles|120|Patience Candles]] - Course video with timestamp
+- [[LESSON:kcu-trading-mastery/ltp-framework/trading-hourly-levels|How I Trade Using Hourly Levels|8 min]] - Link to lessons about levels
+- [[LESSON:kcu-trading-mastery/ltp-framework/patience-candles|Patience Candles Explained|9 min]] - Link to lessons about patience
+- [[LESSON:kcu-trading-mastery/ltp-framework/introduction-to-ltp|Introduction to LTP Framework|10 min]] - Link to LTP overview
 
 Never be harsh or discouraging. Trading is hard, and every mistake is a learning opportunity.`;
 
@@ -358,9 +367,11 @@ function generateFallbackFeedback(
     focusArea = 'patience';
   }
 
+  // Get the actual lesson for this focus area
+  const lessonInfo = FOCUS_AREA_TO_LESSON[focusArea] || FOCUS_AREA_TO_LESSON.patience;
   const lessonSuggestion = scenario.relatedLessonSlug
     ? `[[LESSON:${scenario.relatedLessonSlug}|Review this concept|10 min]]`
-    : `[[LESSON:ltp-framework/${focusArea}|${focusArea.charAt(0).toUpperCase() + focusArea.slice(1)} Analysis|15 min]]`;
+    : `[[LESSON:kcu-trading-mastery/ltp-framework/${lessonInfo.slug}|${lessonInfo.title}|${lessonInfo.duration}]]`;
 
   return {
     isCorrect: false,
