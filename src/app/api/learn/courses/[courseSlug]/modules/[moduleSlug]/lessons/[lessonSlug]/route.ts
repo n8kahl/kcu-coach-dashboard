@@ -136,6 +136,16 @@ export async function GET(
     const prevLesson = currentIndex > 0 ? allLessonsWithProgress[currentIndex - 1] : null;
     const nextLesson = currentIndex < allLessonsWithProgress.length - 1 ? allLessonsWithProgress[currentIndex + 1] : null;
 
+    // Runtime assertion: if videoUid exists, playback URLs should also exist
+    if (lesson.video_uid && process.env.NODE_ENV === 'development') {
+      if (!lesson.video_playback_hls) {
+        console.warn(`[Lesson API] Lesson ${lesson.id} has videoUid but missing video_playback_hls`);
+      }
+      if (!lesson.video_playback_dash) {
+        console.warn(`[Lesson API] Lesson ${lesson.id} has videoUid but missing video_playback_dash`);
+      }
+    }
+
     return NextResponse.json({
       lesson: {
         id: lesson.id,
@@ -146,10 +156,12 @@ export async function GET(
         lessonNumber: lesson.lesson_number,
         videoUrl: lesson.video_url,
         videoUid: lesson.video_uid,
+        videoPlaybackHls: lesson.video_playback_hls,
+        videoPlaybackDash: lesson.video_playback_dash,
         videoDurationSeconds: lesson.video_duration_seconds,
         thumbnailUrl: lesson.thumbnail_url,
         transcriptUrl: lesson.transcript_url,
-        transcriptText: lesson.transcript_text,
+        // Note: transcriptText is now fetched separately via /transcript endpoint
         sortOrder: lesson.sort_order,
         isPreview: lesson.is_preview,
         isPublished: lesson.is_published,
